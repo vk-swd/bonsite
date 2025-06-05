@@ -1,0 +1,25 @@
+{
+    "name": "TestApp1",
+    "version": "1.0.0",
+    "main": "src/main.js",
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1",
+      "build": "tsc && cp src/main.js build/main.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "devDependencies": {
+      "typescript": "*",
+      "kafkajs": "*"
+    },
+    "dependencies": {
+      "prettier": "^3.4.2",
+      "kafkajs": "*"
+    },
+    "prettier": {
+      "printWidth": 80
+    }
+  }
+  
