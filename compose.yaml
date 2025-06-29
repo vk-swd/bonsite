@@ -1,0 +1,86 @@
+networks:
+  backend_net:
+    driver: bridge
+    name: backend_net
+
+# Environment variables are read from .env file automatically
+services:
+  generator:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      container_name: "${GENERATOR_NAME}"
+      hostname: "${GENERATOR_NAME}"
+      environment:
+         - SERVICE_FOLDER=${GENERATOR_NAME}
+  monitoring-analytics:
+    extends:
+      file: base_yamls/node_app.yaml
+      service: node_app
+    container_name: ${MONITORING_ANALYTICS}
+    hostname: ${MONITORING_ANALYTICS}
+    environment:
+        - SERVICE_FOLDER=${MONITORING_ANALYTICS}
+        - M_PORT=${PROM_PORT}
+  
+  # gql:
+  #     environment:
+  #        - SERVICE_FOLDER=${GRAPH_QL_APP_NAME}
+  #     extends: 
+  #       file: base_yamls/node_app.yaml
+  #       service: node_app
+  #     container_name: "${GRAPH_QL_APP_NAME}"
+  #     hostname: "${GRAPH_QL_APP_NAME}"
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./${MONITORING_NAME}:${SOURCEDIR}
+    container_name: "${MONITORING_NAME}"
+    hostname: "${MONITORING_NAME}"
+    entrypoint: ["sh", "-c"]
+    tty: true
+    command: ['sed "s/__TARGET_PLACEHOLDER__/${MONITORING_ANALYTICS}:${PROM_PORT}/" 
+              ${SOURCEDIR}/prometheus.template.yml > /etc/prometheus/prometheus.yml;
+              prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
+              sh']
+    networks: 
+      - backend_net
+
+  # sqldb:
+  #   image: mcr.microsoft.com/mssql/server:2022-latest
+  #   volumes:
+  #     - "${WORKDIR}"
+  #   working_dir: ${WORKDIR}
+  #   environment:
+  #     - ACCEPT_EULA=Y
+  #     - MSSQL_SA_PASSWORD=bad_password_makes_MSSQL_uhappy:1Aa@
+  #   # ports:
+  #   # # also mb https://docs.docker.com/reference/compose-file/services/#long-syntax-3
+  #   #   - "1433:1433"
+  #   hostname: "${MSSQL_HOST}"
+  #   container_name: "sql1"
+  #   networks: 
+  #       - backend_net
+
+  kafka1:
+    extends: 
+      file: base_yamls/node_app.yaml
+      service: kafka-app
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
+    container_name: "${KAFKA_HOST}"
+    hostname: "${KAFKA_HOST}"
+  kafka2:
+    extends: 
+      file: base_yamls/node_app.yaml
+      service: kafka-app
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}2:9092'
+    container_name: "${KAFKA_HOST}2"
+    hostname: "${KAFKA_HOST}2"
+

@@ -1,10 +1,9 @@
 {
     "name": "TestApp1",
     "version": "1.0.0",
-    "main": "src/main.js",
     "scripts": {
       "test": "echo \"Error: no test specified\" && exit 1",
-      "build": "tsc && cp src/main.js build/main.js"
+      "go": "tsc && node build/**/main.js"
     },
     "keywords": [],
     "author": "",
@@ -12,11 +11,13 @@
     "description": "",
     "devDependencies": {
       "typescript": "*",
-      "kafkajs": "*"
+      "kafkajs": "*",
+      "@types/node": "^20"
     },
     "dependencies": {
       "prettier": "^3.4.2",
-      "kafkajs": "*"
+      "kafkajs": "*",
+      "prom-client": "15.1.3"
     },
     "prettier": {
       "printWidth": 80
