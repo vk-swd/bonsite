@@ -3,8 +3,36 @@ networks:
     driver: bridge
     name: backend_net
 
+volumes:
+  vol1:
 # Environment variables are read from .env file automatically
 services:
+  frontend_builder:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      container_name: frontend_builder
+      environment:
+      - NGINX_SHARE_FOLDER=/${COMPILED_FRONTEND_VOUME_NAME}
+      volumes:
+      - ./${FRONTEND_NAME}:${SOURCEDIR}
+      - vol1:/${COMPILED_FRONTEND_VOUME_NAME}
+      profiles:
+        - build1
+      tty: false
+  
+  frontend_server:
+    image: nginx:mainline-alpine3.22
+    container_name: frontend_server
+    environment:
+      - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
+      - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
+      - NGINX_PORT=${NGINX_PORT}
+      - NGINX_FOLDER=${NGINX_FOLDER}
+    volumes:
+    - vol1:/${NGINX_FOLDER}
+    - ./${COMPILED_FRONTEND_VOUME_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
+  
   generator:
       extends: 
         file: base_yamls/node_app.yaml

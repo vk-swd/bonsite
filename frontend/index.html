@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bank Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+    }
+    .section {
+      margin-bottom: 3rem;
+    }
+    table, th, td {
+      border: 1px solid #aaa;
+      border-collapse: collapse;
+      padding: 0.5rem;
+    }
+    input[type="date"] {
+      margin-right: 1rem;
+    }
+    button {
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="section">
+    <h2>Prometheus Metrics</h2>
+    <canvas id="metricsChart" width="800" height="300"></canvas>
+  </div>
+
+  <div class="section">
+    <h2>Bank Statement</h2>
+
+    <label>From: <input type="date" id="startDate" /></label>
+    <label>To: <input type="date" id="endDate" /></label>
+    <button onclick="loadStatement()">Load Statement</button>
+
+    <table id="statementTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Amount</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <button onclick="downloadStatement()">Download as TXT</button>
+  </div>
+
+  <script>
+    async function loadMetrics() {
+      const res = await fetch("http://localhost:9090/api/v1/query?query=your_metric_here");
+      const data = await res.json();
+      const result = data.data.result[0];
+      const value = result?.value[1] || 0;
+
+      new Chart(document.getElementById("metricsChart"), {
+        type: "bar",
+        data: {
+          labels: ["your_metric_here"],
+          datasets: [{
+            label: "Current Value",
+            data: [value],
+            backgroundColor: "#3e95cd"
+          }]
+        }
+      });
+    }
+
+    async function loadStatement() {
+      const start = document.getElementById("startDate").value;
+      const end = document.getElementById("endDate").value;
+
+      const res = await fetch(`http://localhost:3001/api/statements?start=${start}&end=${end}`);
+      const data = await res.json();
+      const tbody = document.getElementById("statementTable").querySelector("tbody");
+      tbody.innerHTML = "";
+
+      data.forEach(tx => {
+        const row = `<tr>
+          <td>${tx.timestamp}</td>
+          <td>${tx.amount}</td>
+          <td>${tx.description}</td>
+        </tr>`;
+        tbody.innerHTML += row;
+      });
+    }
+
+    function downloadStatement() {
+      const rows = Array.from(document.querySelectorAll("#statementTable tbody tr"));
+      const lines = rows.map(row => {
+        const cols = row.querySelectorAll("td");
+        return `${cols[0].innerText} | ${cols[1].innerText} | ${cols[2].innerText}`;
+      });
+      const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "bank_statement.txt";
+      a.click();
+    }
+
+    loadMetrics();
+  </script>
+
+</body>
+</html>
+

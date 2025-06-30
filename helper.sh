@@ -27,5 +27,10 @@ ln -s "$1/tsconfig.json" "$2"/
 
 cd "$2" || exit
 npm install
+if [ -d "$NGINX_SHARE_FOLDER" ]; then
+  cp "./*/*.html" "$NGINX_SHARE_FOLDER"
+  tsc
+  cp -rfd build/* "$NGINX_SHARE_FOLDER"
+else
 npm run go
-
+fi
