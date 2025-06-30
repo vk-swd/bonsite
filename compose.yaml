@@ -8,18 +8,23 @@ volumes:
 # Environment variables are read from .env file automatically
 services:
   frontend_builder:
-      extends: 
-        file: base_yamls/node_app.yaml
-        service: node_app
-      container_name: frontend_builder
+      image: node:20-slim
       environment:
-      - NGINX_SHARE_FOLDER=/${COMPILED_FRONTEND_VOUME_NAME}
+        - NODE_PRESERVE_SYMLINKS=1
+        - FRONTEND_DEPLOY_FOLDER=${FRONTEND_DEPLOY_FOLDER}
       volumes:
-      - ./${FRONTEND_NAME}:${SOURCEDIR}
-      - vol1:/${COMPILED_FRONTEND_VOUME_NAME}
-      profiles:
-        - build1
-      tty: false
+        - ./${FRONTEND_NAME}:${SOURCEDIR}
+        - "${WORKDIR}"
+        - ./tsconfig.json:${WORKDIR}/tsconfig.json
+        - vol1:${FRONTEND_DEPLOY_FOLDER}
+      working_dir: ${WORKDIR}
+      entrypoint: ["/bin/bash", "-c"]
+      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; bash"]
+      container_name: frontend_builder
+      tty: true
+      network_mode: "host"
+      # profiles:
+      #   - build1
   
   frontend_server:
     image: nginx:mainline-alpine3.22
@@ -31,8 +36,10 @@ services:
       - NGINX_FOLDER=${NGINX_FOLDER}
     volumes:
     - vol1:/${NGINX_FOLDER}
-    - ./${COMPILED_FRONTEND_VOUME_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
-  
+    - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
+    ports:
+    - "127.0.0.1:81:81"
+
   generator:
       extends: 
         file: base_yamls/node_app.yaml

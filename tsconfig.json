@@ -110,6 +110,6 @@
     // "outDir": "./build" // Specify the output directory here
     "outDir": "./build",
   },
-  "include": ["./**/*"],
+  // "include": ["./**/*", "./*"],  // The default
   "exclude": ["node_modules", "build"]
 }

@@ -1,0 +1,28 @@
+{
+    "name": "Front",
+    "version": "1.0.0",
+    "scripts": {
+        "deploy": "tsc; webpack-cli"
+    },
+    "keywords": [],
+    "author": "",
+    "private": true,
+    "license": "UNLICENSED",
+    "description": "",
+    "devDependencies": {
+        "@types/node": "^20",
+        "typescript": "*"
+    },
+    "dependencies": {
+        "graphql-request": "7.2.0",
+        "html-loader": "^5.1.0",
+        "prettier": "^3.4.2",
+        "ts-loader": "9.5.2",
+        "webpack": "5.99.9",
+        "webpack-cli": "6.0.1",
+        "copy-webpack-plugin": "^13.0.0"
+    },
+    "prettier": {
+        "printWidth": 80
+    }
+}
