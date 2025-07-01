@@ -22,7 +22,9 @@ services:
       command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; bash"]
       container_name: frontend_builder
       tty: true
-      network_mode: "host"
+      # network_mode: "host"
+      networks: 
+        - backend_net
       # profiles:
       #   - build1
   
@@ -39,6 +41,25 @@ services:
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:81:81"
+    networks: 
+      - backend_net
+
+  gql:
+      image: node:20-slim
+      volumes:
+        - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
+        - "${WORKDIR}"
+        - ./tsconfig.json:${WORKDIR}/tsconfig.json
+      working_dir: ${WORKDIR}
+      entrypoint: ["/bin/bash", "-c"]
+      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; bash"]
+      container_name: "${GRAPH_QL_APP_NAME}"
+      hostname: "${GRAPH_QL_APP_NAME}"
+      ports:
+      - "127.0.0.1:3030:4000"
+      tty: true
+      networks: 
+        - backend_net
 
   generator:
       extends: 
@@ -58,14 +79,7 @@ services:
         - SERVICE_FOLDER=${MONITORING_ANALYTICS}
         - M_PORT=${PROM_PORT}
   
-  # gql:
-  #     environment:
-  #        - SERVICE_FOLDER=${GRAPH_QL_APP_NAME}
-  #     extends: 
-  #       file: base_yamls/node_app.yaml
-  #       service: node_app
-  #     container_name: "${GRAPH_QL_APP_NAME}"
-  #     hostname: "${GRAPH_QL_APP_NAME}"
+
 
   prometheus:
     image: prom/prometheus

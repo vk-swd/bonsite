@@ -1,26 +1,26 @@
 {
-    "name": "Front",
+    "name": "graphql",
     "version": "1.0.0",
     "scripts": {
-        "deploy": "tsc; webpack-cli"
+        "deploy": "tsc; node build/main.js"
     },
     "keywords": [],
     "author": "",
     "private": true,
     "license": "UNLICENSED",
     "description": "",
+    "type": "module",
     "devDependencies": {
         "@types/node": "20",
+        "@types/express":"5.0.3",
         "typescript": "5.8.3"
     },
     "dependencies": {
-        "graphql-request": "7.2.0",
-        "html-loader": "5.1.0",
-        "prettier": "3.4.2",
-        "ts-loader": "9.5.2",
-        "webpack": "5.99.9",
-        "webpack-cli": "6.0.1",
-        "copy-webpack-plugin": "^13.0.0"
+        "graphql": "16.11.0",
+        "graphql-http":"1.22.4",
+        "express":"5.1.0",
+        "cors":"2.8.5",
+        "prettier": "3.4.2"
     },
     "prettier": {
         "printWidth": 80

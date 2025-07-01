@@ -82,22 +82,38 @@ async function loadStatement() {
 }
 
 function downloadStatement() {
-  request('https://api.spacex.land/graphql/', document1).then(res => console.log(`${new Date().toLocaleString} RECEIVED SHIT ${JSON.stringify(res)}`))
-  
+  fetch("/graphql", {
+    method: "POST",
+    headers: {
+    "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query: "{ hello }" }),
+  })
+    .then(response => response.json())
+    .then(data => {
+      console.log("Data returned:", data);
+    })
+    .catch(error => {
+      console.error("Request failed:", error);
+    });
 
-  const rows = Array.from(document.querySelectorAll("#statementTable tbody tr"));
-  const lines = rows.map(row => {
-    const cols = row.querySelectorAll("td");
-    return `${cols[0].innerText} | ${cols[1].innerText} | ${cols[2].innerText}`;
-  });
-  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "bank_statement.txt";
-  a.click();
+
+  // request('https://api.spacex.land/graphql/', document1).then(res => console.log(`${new Date().toLocaleString} RECEIVED SHIT ${JSON.stringify(res)}`))
+
+  // const rows = Array.from(document.querySelectorAll("#statementTable tbody tr"));
+  // const lines = rows.map(row => {
+  //   const cols = row.querySelectorAll("td");
+  //   return `${cols[0].innerText} | ${cols[1].innerText} | ${cols[2].innerText}`;
+  // });
+  // const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  // const a = document.createElement("a");
+  // a.href = URL.createObjectURL(blob);
+  // a.download = "bank_statement.txt";
+  // a.click();
 }
 
-document.getElementById("b_bank_statement")?.addEventListener('click', () => loadStatement())
-document.getElementById("b_download")?.addEventListener('click', () => downloadStatement())
+document.getElementById("b_bank_statement")!.addEventListener('click', () => loadStatement())
+document.getElementById("b_download")!.addEventListener('click', () => downloadStatement())
 
 loadMetrics();
