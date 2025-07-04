@@ -1,11 +1,8 @@
 import { unsubscribe } from 'diagnostics_channel';
 import * as kf from 'kafkajs'
-const KAFKA_HOSTNAME = process.env.KAFKA_HOSTNAME
 
-  
-export function last<T>(a: Array<T>): T | undefined {
-  return a[a.length - 1];
-}
+
+const KAFKA_HOSTNAME = process.env.KAFKA_HOSTNAME
 
 export class KClient {
   /*  Single consume/producer per client because

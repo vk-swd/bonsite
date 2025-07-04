@@ -1,14 +1,7 @@
 
-import { KClient, last } from '../common/kafka_client.js'
-import { PriorityQ, testQ } from '../common/utils.js'
+import { last, PriorityQ } from './common/utils.js'
+import { GenParameters } from './api.js';
 
-
-const newClient = new KClient("generator")
-
-export type GenParameters = {
-    userCount: number,
-    maxTransactionsPerDay: number,
-}
 
 
 
@@ -36,49 +29,6 @@ type TransactionResult = {
     state: TResult
 }
 
-const delayedEvents = new PriorityQ<TransactionResult>((a, b) => a.dateTime < b.dateTime);
-const eventArray = new Array<{qSize?: number, t: Transaction}>();
-
-
-let now = 0;
-const interval = 10;
-
-
-let transactionId = 0;
-
-const USER_COUNT = 100;
-const EVENT_RATE = [10, 1000]
-const EVENT_GEN_INTERVAL_MS = 100
-let tResolutionEventStartIdx = 0;
-let tRequestEventStartIdx = 0;
-function generate() {
-    /*  Not going for much realism (consumers rarely have transactions with other consumers)
-        Also transaction latency is not emulating any thread contention.    
-    */
-    const eventCount = EVENT_RATE[0] + Math.random() * (EVENT_RATE[1] - EVENT_RATE[0]);
-    const timeIncrement = EVENT_GEN_INTERVAL_MS / eventCount;
-    
-    for (let i = 0; i < eventCount; i++) {
-        now += timeIncrement;
-        const userIdFrom = Math.floor(Math.random() * USER_COUNT);
-        const userIdTo = (userIdFrom + Math.floor(Math.random() * USER_COUNT) - 1) % USER_COUNT;
-        const event: Transaction = {
-            id: transactionId++,
-            userIdFrom,
-            userIdTo,
-            dateTime: now,
-            amount: Math.random() * 1000
-        }
-        eventArray.push({t: event});
-        const resultEvent = {
-            dateTime: Math.random() * 100,
-            transactionID: event.id,
-            state: generateTransactionResult()
-        }
-        delayedEvents.push(resultEvent);
-    }
-}
-
 function generateTransactionResult() {
     const val = Math.random() * 100;
     if (val > 95) {
@@ -91,67 +41,105 @@ function generateTransactionResult() {
         return TResult.BLOCKED
     }
 }
+export type TransactionEvent = {type: "transaction", event: Transaction} | {type: "result", event: TransactionResult}
+class TransactionEventsQueue {
+    // Scheduled transactions will be ordered naturally, but their processing time is random
+    // PriorityQueue used to avoid sorting and perform a "merge-sort" like deque.
+    private results = new PriorityQ<TransactionResult>((a, b) => a.dateTime < b.dateTime);
+    private transactions = new Array<Transaction>();
+    lastTransaction(): Transaction | undefined {
+        return last(this.transactions);
+    }
+    size() {
+        return this.transactions.length;
+    }
 
-let lastEvent: Transaction | TransactionResult = {dateTime: 0, transactionID: 0, state: TResult.CONFIRMED};
-function writeToKafka(event: Transaction | TransactionResult, topic: string) {
-    if (lastEvent.dateTime > event.dateTime) {
-        throw new Error(`Bad order of generated events old ${JSON.stringify(lastEvent)} new ${JSON.stringify(event)}`)
+    deque(now: number): Array<TransactionEvent>{
+        // Take all transaction and results scheduled before "now"
+        let tPos = 0;
+        const res = new Array<TransactionEvent>();
+        /*  "About while"
+            If "transactions" has elements, then "results" will also have them, because:
+                1) For every planned event, there will always be a result in "results".
+                2) More events are planned then going to be consumed in any single interval
+        */
+        while (tPos < this.transactions.length && this.transactions[tPos].dateTime < now) {
+            if (this.transactions[tPos].dateTime <= this.results.peek()!.dateTime) {
+                res.push({ type: "transaction", event: this.transactions[tPos] });
+                tPos++;
+            } else {
+                // Read "About while" for unchecked "pop"
+                res.push({ type: "result", event: this.results.pop()! });
+            }
+        }
+        // Check trailing results.
+        while (this.results.peek() !== undefined && this.results.peek()!.dateTime < now) {
+            res.push({ type: "result", event: this.results.pop()! });
+        }
+        this.transactions.splice(0, tPos);
+        return res;
     }
-    newClient.write({ msg: JSON.stringify(event), topic })
-    lastEvent = event;
+    enque(transaction: Transaction, result: TransactionResult) {
+        this.transactions.push(transaction);
+        this.results.push(result)
+    }
 }
-const writeTimeout = setInterval(() => {
-    now += interval;
-    if (eventArray.length == 0 || last(eventArray)!.t.dateTime < now) {
-        generate();
+
+const msPerDay = 1000 * 60 * 60 * 24;
+export class Generator {
+    static transactionId = 0;
+    private queue = new TransactionEventsQueue();
+    private currentParams: GenParameters | undefined = undefined;
+    private now = 0;
+    private intervalMs = 0;
+    setParameters(params: GenParameters) {
+        // Generation is done under assumption that every second represents 1 day
+        // Convert the params.requestIntervalMs to dayTimeMs
+        this.intervalMs = params.generationIntervalMs * msPerDay / 1000;
+        this.currentParams = params;
     }
-    let tPos = tRequestEventStartIdx;
-    let tResultPos = tResolutionEventStartIdx;
-    /*
-        If eventArray has elements, then delayedEvents will also have them, because:
-            1) More events are planned then going to be consumed in any single interval
-            2) for every planned event, there will always be a result in delayedEvents.
-    */
-    while (tPos < eventArray.length && eventArray[tPos].t.dateTime < now) {
-        if (eventArray[tPos].t.dateTime <= delayedEvents.peek()!.dateTime) {
-            writeToKafka(eventArray[tPos].t, "Transactions")
-            tPos++;
-        } else {
-            writeToKafka(delayedEvents.pop()!, "TransactionsResults")
+    getEvents(): Array<TransactionEvent> {
+        const intervalEnd = this.now + this.intervalMs;
+
+        const lastT = this.queue.lastTransaction();
+
+        if (!lastT || lastT.dateTime < intervalEnd) {
+            this.generate(this.intervalMs * 2, this.now);
+        }
+        this.now += this.intervalMs;
+        return this.queue.deque(this.intervalMs);
+    }
+    generate(interval: number, timeMs: number) {
+        if (this.currentParams == undefined) {
+            throw new Error(`Inset generator parameters`)
+        }
+        /*  Not going for much realism, where consumers rarely have transactions with other consumers
+            Also transaction latency is not emulating any thread contention, so 
+                transaction result delay will be random.
+        */        
+        const maxTotalEventsPerDay = this.currentParams.maxTransactionsPerDay * this.currentParams.userCount;
+        const maxEventsPerInterval = maxTotalEventsPerDay * interval / msPerDay ;
+        const eventCount = Math.random() * maxEventsPerInterval;
+        const timeIncrement = interval / eventCount;
+        
+        for (let i = 0; i < eventCount; i++) {
+            timeMs += timeIncrement;
+            // Can make internal transfers too (same id to and from)
+            const userIdFrom = Math.floor(Math.random() * this.currentParams.userCount);
+            const userIdTo = Math.floor(Math.random() * this.currentParams.userCount);
+            const transaction: Transaction = {
+                id: Generator.transactionId++,
+                userIdFrom,
+                userIdTo,
+                dateTime: timeMs,
+                amount: Math.random() * 1000
+            }
+            const result = {
+                dateTime: timeMs + Math.random() * 100,
+                transactionID: transaction.id,
+                state: generateTransactionResult()
+            }
+            this.queue.enque(transaction, result);
         }
     }
-    while (delayedEvents.peek() !== undefined && delayedEvents.peek()!.dateTime < now) {
-        writeToKafka(delayedEvents.pop()!, "TransactionsResults")
-    }
-    tResolutionEventStartIdx = tResultPos;
-    tRequestEventStartIdx = tPos;
-    if (tRequestEventStartIdx > eventArray.length / 2) {
-        eventArray.splice(0, tRequestEventStartIdx);
-        tRequestEventStartIdx = 0;
-    }
-}, interval);
-
-// const BEST_Q_SIZE = 1000 // all Ts will have 0 latency
-// const STABLE_Q_SIZE = BEST_Q_SIZE * 3 // all Ts will have latency [20mms,150ms]
-// const UNSTABLE_Q_SIZE = STABLE_Q_SIZE * 2 // random 300ms freezes will be introduced
-// const TRANSACTION_TIMEOUT_MS = 3000; // transactions will be declined due to system error - monitor it.
-
-// let latency = 1;
-// if (eventArray.length == 0) {
-//     eventArray.push({t: event});
-//     delayedEvents.push({dateTime: now + latency, transactionID: event.id, state: TResult.CONFIRMED});
-//     continue;
-// }
-// const lastEvent = last(eventArray)!
-// const nextDelayed = delayedEvents[delayedEvents.length - lastEvent.qSize - 1]
-// while (delayedEvents[tResolutionEventStartIdx].dateTime < now) {
-//     tResolutionEventStartIdx++;
-// }
-// const queueSize = delayedEvents.length - tResolutionEventStartIdx;
-// if (queueSize > UNSTABLE_Q_SIZE) {
-//     latency = TRANSACTION_TIMEOUT_MS;
-// } else if (queueSize > STABLE_Q_SIZE) {
-//     latency = 300 + Math.random() * 1000
-// } else if (queueSize > BEST_Q_SIZE) {
-//     latency = 20 + Math.random() * 130
-// }
+}

@@ -6,7 +6,7 @@ services:
       - config_folder:${CONFIG_FOLDER}
     working_dir: ${WORKDIR}
     entrypoint: ["/bin/bash", "-c"]
-    command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; ln -s ${CONFIG_FOLDER}/tsconfig.json ${WORKDIR}; npm install; npm run deploy; exec bash"]
+    command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; mkdir common; ln -s /common/* common; ln -s ${CONFIG_FOLDER}/tsconfig.json ${WORKDIR}; npm install; npm run deploy; exec bash"]
     environment:
        - NODE_PRESERVE_SYMLINKS=1
        - MSSQL_HOSTNAME=${MSSQL_HOST}

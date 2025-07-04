@@ -10,13 +10,16 @@ volumes:
 # Environment variables are read from .env file automatically
 services:
   config_folder_mounter:
-      image: busybox
-      volumes:
-        - config_folder:${CONFIG_FOLDER}
-        - ./:${SOURCEDIR}
-      entrypoint: ["/bin/sh", "-c"]
-      command: ["cp ${SOURCEDIR}/tsconfig.json ${CONFIG_FOLDER}/; ls ${CONFIG_FOLDER}/"]
-      container_name: config_folder_mounter
+    # Copy tsconfig into a named volume "config_folder"
+    #   so it is mounted inside the "node_app" base service
+    #   to avoid the " - ../tsconfig.json:${CONFIG_FOLDER}"
+    image: busybox
+    volumes:
+      - config_folder:${CONFIG_FOLDER}
+      - ./:${SOURCEDIR}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ln -s ${SOURCEDIR}/tsconfig.json ${CONFIG_FOLDER}/; ls ${CONFIG_FOLDER}/"]
+    container_name: config_folder_mounter
 
   frontend_builder:
       extends: 
@@ -57,14 +60,17 @@ services:
       - backend_net
 
 
-  # generator:
-  #     extends: 
-  #       file: base_yamls/node_app.yaml
-  #       service: node_app
-  #     volumes:
-  #       - ./${GENERATOR_NAME}:${SOURCEDIR}
-  #     container_name: "${GENERATOR_NAME}"
-  #     hostname: "${GENERATOR_NAME}"
+  generator:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      volumes:
+        - ./${GENERATOR_NAME}:${SOURCEDIR}
+        - ./common:/common/
+      container_name: "${GENERATOR_NAME}"
+      hostname: "${GENERATOR_NAME}"
+      environment:
+        - GENERATOR_PORT=${GENERATOR_PORT}
 
   # monitoring-analytics:
   #   extends:
