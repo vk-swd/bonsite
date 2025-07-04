@@ -58,9 +58,6 @@ const Query = {
   go(i: number): number {
     return i;
   }
-  Piercing {
-    
-  }
 }
 // The root provides a resolver function for each API endpoint
 const root = {

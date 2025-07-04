@@ -9,15 +9,14 @@ volumes:
 
 # Environment variables are read from .env file automatically
 services:
-  # config_folder_mounter:
-  #     image: node:20-slim
-  #     volumes:
-  #       - config_folder:/config_folder
-  #       # - ./:${SOURCEDIR}
-  #     entrypoint: ["/bin/bash", "-c"]
-  #     command: ["ls /config_folder;"]
-  #     # command: ["ls /config_folder; cp ${SOURCEDIR}/tsconfig.json /config_folder/; cp ${SOURCEDIR}/linger.sh /config_folder/"]
-  #     container_name: config_folder_mounter
+  config_folder_mounter:
+      image: busybox
+      volumes:
+        - config_folder:${CONFIG_FOLDER}
+        - ./:${SOURCEDIR}
+      entrypoint: ["/bin/sh", "-c"]
+      command: ["cp ${SOURCEDIR}/tsconfig.json ${CONFIG_FOLDER}/; ls ${CONFIG_FOLDER}/"]
+      container_name: config_folder_mounter
 
   frontend_builder:
       extends: 
@@ -29,33 +28,34 @@ services:
         - ./${FRONTEND_NAME}:${SOURCEDIR}
         - vol1:${FRONTEND_DEPLOY_FOLDER}
       container_name: frontend_builder
-      hostname: "frontend_builder"
+      tty: false
+      stdin_open: false
 
-  
-  # frontend_server:
-  #   image: nginx:mainline-alpine3.22
-  #   container_name: frontend_server
-  #   environment:
-  #     - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
-  #     - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
-  #     - NGINX_PORT=${NGINX_PORT}
-  #     - NGINX_FOLDER=${NGINX_FOLDER}
-  #   volumes:
-  #   - vol1:/${NGINX_FOLDER}
-  #   - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
-  #   ports:
-  #   - "127.0.0.1:81:81"
-  #   networks: 
-  #     - backend_net
+  gql:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      volumes:
+        - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
+      container_name: "${GRAPH_QL_APP_NAME}"
+      hostname: "${GRAPH_QL_APP_NAME}"
 
-  # gql:
-  #     extends: 
-  #       file: base_yamls/node_app.yaml
-  #       service: node_app
-  #     volumes:
-  #       - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
-  #     container_name: "${GRAPH_QL_APP_NAME}"
-  #     hostname: "${GRAPH_QL_APP_NAME}"
+  frontend_server:
+    image: nginx:mainline-alpine3.22
+    container_name: frontend_server
+    environment:
+      - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
+      - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
+      - NGINX_PORT=${NGINX_PORT}
+      - NGINX_FOLDER=${NGINX_FOLDER}
+    volumes:
+    - vol1:/${NGINX_FOLDER}
+    - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
+    ports:
+    - "127.0.0.1:81:81"
+    networks: 
+      - backend_net
+
 
   # generator:
   #     extends: 
