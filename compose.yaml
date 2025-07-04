@@ -5,139 +5,129 @@ networks:
 
 volumes:
   vol1:
-  config_folder: "./"
+  config_folder:
 
 # Environment variables are read from .env file automatically
 services:
+  # config_folder_mounter:
+  #     image: node:20-slim
+  #     volumes:
+  #       - config_folder:/config_folder
+  #       # - ./:${SOURCEDIR}
+  #     entrypoint: ["/bin/bash", "-c"]
+  #     command: ["ls /config_folder;"]
+  #     # command: ["ls /config_folder; cp ${SOURCEDIR}/tsconfig.json /config_folder/; cp ${SOURCEDIR}/linger.sh /config_folder/"]
+  #     container_name: config_folder_mounter
+
   frontend_builder:
-      image: node:20-slim
-      environment:
-        - NODE_PRESERVE_SYMLINKS=1
-        - FRONTEND_DEPLOY_FOLDER=${FRONTEND_DEPLOY_FOLDER}
-      volumes:
-        - ./${FRONTEND_NAME}:${SOURCEDIR}
-        - "${WORKDIR}"
-        - ./tsconfig.json:${WORKDIR}/tsconfig.json
-        - vol1:${FRONTEND_DEPLOY_FOLDER}
-      working_dir: ${WORKDIR}
-      entrypoint: ["/bin/bash", "-c"]
-      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; bash"]
-      container_name: frontend_builder
-      tty: true
-      # network_mode: "host"
-      networks: 
-        - backend_net
-      # profiles:
-      #   - build1
-  
-  frontend_server:
-    image: nginx:mainline-alpine3.22
-    container_name: frontend_server
-    environment:
-      - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
-      - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
-      - NGINX_PORT=${NGINX_PORT}
-      - NGINX_FOLDER=${NGINX_FOLDER}
-    volumes:
-    - vol1:/${NGINX_FOLDER}
-    - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
-    ports:
-    - "127.0.0.1:81:81"
-    networks: 
-      - backend_net
-
-  gql:
-      image: node:20-slim
-      volumes:
-        - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
-        - "${WORKDIR}"
-        - ./tsconfig.json:${WORKDIR}/tsconfig.json
-      working_dir: ${WORKDIR}
-      entrypoint: ["/bin/bash", "-c"]
-      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; bash"]
-      container_name: "${GRAPH_QL_APP_NAME}"
-      hostname: "${GRAPH_QL_APP_NAME}"
-      ports:
-      - "127.0.0.1:3030:4000"
-      tty: true
-      networks: 
-        - backend_net
-
-  generator:
       extends: 
         file: base_yamls/node_app.yaml
         service: node_app
-      container_name: "${GENERATOR_NAME}"
-      hostname: "${GENERATOR_NAME}"
       environment:
-         - SERVICE_FOLDER=${GENERATOR_NAME}
+        - FRONTEND_DEPLOY_FOLDER=${FRONTEND_DEPLOY_FOLDER}
+      volumes:
+        - ./${FRONTEND_NAME}:${SOURCEDIR}
+        - vol1:${FRONTEND_DEPLOY_FOLDER}
+      container_name: frontend_builder
+      hostname: "frontend_builder"
 
-  # statement:
+  
+  # frontend_server:
+  #   image: nginx:mainline-alpine3.22
+  #   container_name: frontend_server
+  #   environment:
+  #     - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
+  #     - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
+  #     - NGINX_PORT=${NGINX_PORT}
+  #     - NGINX_FOLDER=${NGINX_FOLDER}
+  #   volumes:
+  #   - vol1:/${NGINX_FOLDER}
+  #   - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
+  #   ports:
+  #   - "127.0.0.1:81:81"
+  #   networks: 
+  #     - backend_net
 
+  # gql:
+  #     extends: 
+  #       file: base_yamls/node_app.yaml
+  #       service: node_app
+  #     volumes:
+  #       - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
+  #     container_name: "${GRAPH_QL_APP_NAME}"
+  #     hostname: "${GRAPH_QL_APP_NAME}"
 
-  monitoring-analytics:
-    extends:
-      file: base_yamls/node_app.yaml
-      service: node_app
-    container_name: ${MONITORING_ANALYTICS}
-    hostname: ${MONITORING_ANALYTICS}
-    environment:
-        - SERVICE_FOLDER=${MONITORING_ANALYTICS}
-        - M_PORT=${PROM_PORT}
+  # generator:
+  #     extends: 
+  #       file: base_yamls/node_app.yaml
+  #       service: node_app
+  #     volumes:
+  #       - ./${GENERATOR_NAME}:${SOURCEDIR}
+  #     container_name: "${GENERATOR_NAME}"
+  #     hostname: "${GENERATOR_NAME}"
+
+  # monitoring-analytics:
+  #   extends:
+  #     file: base_yamls/node_app.yaml
+  #     service: node_app
+  #   container_name: ${MONITORING_ANALYTICS}
+  #   hostname: ${MONITORING_ANALYTICS}
+  #   environment:
+  #       - M_PORT=${PROM_PORT}
   
 
 
-  prometheus:
-    image: prom/prometheus
-    ports:
-      - "127.0.0.1:9090:9090"
-    volumes:
-      - ./${MONITORING_NAME}:${SOURCEDIR}
-    container_name: "${MONITORING_NAME}"
-    hostname: "${MONITORING_NAME}"
-    entrypoint: ["sh", "-c"]
-    tty: true
-    command: ['sed "s/__TARGET_PLACEHOLDER__/${MONITORING_ANALYTICS}:${PROM_PORT}/" 
-              ${SOURCEDIR}/prometheus.template.yml > /etc/prometheus/prometheus.yml;
-              prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
-              sh']
-    networks: 
-      - backend_net
-
-
-  kafka1:
-    extends: 
-      file: base_yamls/node_app.yaml
-      service: kafka-app
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
-    container_name: "${KAFKA_HOST}"
-    hostname: "${KAFKA_HOST}"
-
-  kafka2:
-    extends: 
-      file: base_yamls/node_app.yaml
-      service: kafka-app
-    environment:
-      KAFKA_NODE_ID: 2
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}2:9092'
-    container_name: "${KAFKA_HOST}2"
-    hostname: "${KAFKA_HOST}2"
-
-
-  # sqldb:
-  #   image: mcr.microsoft.com/mssql/server:2022-latest
+  # prometheus:
+  #   image: prom/prometheus
+  #   ports:
+  #     - "127.0.0.1:9090:9090"
   #   volumes:
-  #     - "${WORKDIR}"
-  #   working_dir: ${WORKDIR}
-  #   environment:
-  #     - ACCEPT_EULA=Y
-  #     - MSSQL_SA_PASSWORD=bad_password_makes_MSSQL_uhappy:1Aa@
-  #   # ports:
-  #   # # also mb https://docs.docker.com/reference/compose-file/services/#long-syntax-3
-  #   #   - "1433:1433"
-  #   hostname: "${MSSQL_HOST}"
-  #   container_name: "sql1"
+  #     - ./${MONITORING_NAME}:${SOURCEDIR}
+  #   container_name: "${MONITORING_NAME}"
+  #   hostname: "${MONITORING_NAME}"
+  #   entrypoint: ["sh", "-c"]
+  #   tty: true
+  #   command: ['sed "s/__TARGET_PLACEHOLDER__/${MONITORING_ANALYTICS}:${PROM_PORT}/" 
+  #             ${SOURCEDIR}/prometheus.template.yml > /etc/prometheus/prometheus.yml;
+  #             prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
+  #             sh']
   #   networks: 
-  #       - backend_net
+  #     - backend_net
+
+
+  # kafka1:
+  #   extends: 
+  #     file: base_yamls/node_app.yaml
+  #     service: kafka-app
+  #   environment:
+  #     KAFKA_NODE_ID: 1
+  #     KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
+  #   container_name: "${KAFKA_HOST}"
+  #   hostname: "${KAFKA_HOST}"
+
+  # kafka2:
+  #   extends: 
+  #     file: base_yamls/node_app.yaml
+  #     service: kafka-app
+  #   environment:
+  #     KAFKA_NODE_ID: 2
+  #     KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}2:9092'
+  #   container_name: "${KAFKA_HOST}2"
+  #   hostname: "${KAFKA_HOST}2"
+
+
+  # # sqldb:
+  # #   image: mcr.microsoft.com/mssql/server:2022-latest
+  # #   volumes:
+  # #     - "${WORKDIR}"
+  # #   working_dir: ${WORKDIR}
+  # #   environment:
+  # #     - ACCEPT_EULA=Y
+  # #     - MSSQL_SA_PASSWORD=bad_password_makes_MSSQL_uhappy:1Aa@
+  # #   # ports:
+  # #   # # also mb https://docs.docker.com/reference/compose-file/services/#long-syntax-3
+  # #   #   - "1433:1433"
+  # #   hostname: "${MSSQL_HOST}"
+  # #   container_name: "sql1"
+  # #   networks: 
+  # #       - backend_net
