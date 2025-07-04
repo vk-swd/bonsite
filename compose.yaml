@@ -5,6 +5,8 @@ networks:
 
 volumes:
   vol1:
+  config_folder: "./"
+
 # Environment variables are read from .env file automatically
 services:
   frontend_builder:
@@ -69,6 +71,10 @@ services:
       hostname: "${GENERATOR_NAME}"
       environment:
          - SERVICE_FOLDER=${GENERATOR_NAME}
+
+  # statement:
+
+
   monitoring-analytics:
     extends:
       file: base_yamls/node_app.yaml
@@ -98,6 +104,28 @@ services:
     networks: 
       - backend_net
 
+
+  kafka1:
+    extends: 
+      file: base_yamls/node_app.yaml
+      service: kafka-app
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
+    container_name: "${KAFKA_HOST}"
+    hostname: "${KAFKA_HOST}"
+
+  kafka2:
+    extends: 
+      file: base_yamls/node_app.yaml
+      service: kafka-app
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}2:9092'
+    container_name: "${KAFKA_HOST}2"
+    hostname: "${KAFKA_HOST}2"
+
+
   # sqldb:
   #   image: mcr.microsoft.com/mssql/server:2022-latest
   #   volumes:
@@ -113,23 +141,3 @@ services:
   #   container_name: "sql1"
   #   networks: 
   #       - backend_net
-
-  kafka1:
-    extends: 
-      file: base_yamls/node_app.yaml
-      service: kafka-app
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
-    container_name: "${KAFKA_HOST}"
-    hostname: "${KAFKA_HOST}"
-  kafka2:
-    extends: 
-      file: base_yamls/node_app.yaml
-      service: kafka-app
-    environment:
-      KAFKA_NODE_ID: 2
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}2:9092'
-    container_name: "${KAFKA_HOST}2"
-    hostname: "${KAFKA_HOST}2"
-

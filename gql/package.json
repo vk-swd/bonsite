@@ -4,11 +4,8 @@
     "scripts": {
         "deploy": "tsc; node build/main.js"
     },
-    "keywords": [],
-    "author": "",
     "private": true,
     "license": "UNLICENSED",
-    "description": "",
     "type": "module",
     "devDependencies": {
         "@types/node": "20",

@@ -1,14 +1,4 @@
-import { gql, request } from 'graphql-request'
 import { json } from 'stream/consumers';
-
-const document1 = gql`
-  {
-    company {
-      ceo
-    }
-  }
-`
-
 
 // async function loadData() {
 //   const query = `
@@ -115,5 +105,55 @@ function downloadStatement() {
 
 document.getElementById("b_bank_statement")!.addEventListener('click', () => loadStatement())
 document.getElementById("b_download")!.addEventListener('click', () => downloadStatement())
+document.getElementById("input_button")!.addEventListener('click', () => {
+
+  const id = (document.getElementById("input1") as HTMLInputElement)!.value;
+  // const name = (document.getElementById("input2") as HTMLInputElement)!.value;
+  // const color = (document.getElementById("input3") as HTMLInputElement)!.value;
+  // const hairlen = (document.getElementById("input4") as HTMLInputElement)!.value;
+  // const piercing = (document.getElementById("input5") as HTMLInputElement)!.value;
+
+  fetch("/graphql", {
+    method: "POST",
+    headers: {
+    "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query: id}),
+
+
+    //`mutation { addFace({id: ${id},name: ${name},color: ${color}, hairLen: ${hairlen}}) }`
+  })
+    .then(response => response.json())
+    .then(data => {
+      console.log("Data returned 1:", data);
+    })
+    .catch(error => {
+      console.error("Request failed:", error);
+    });
+
+
+})
+document.getElementById("get_face")!.addEventListener('click', () => {
+
+
+  fetch("/graphql", {
+    method: "POST",
+    headers: {
+    "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query: "{ hello }" }),
+  })
+    .then(response => response.json())
+    .then(data => {
+      console.log("Data returned 1:", data);
+    })
+    .catch(error => {
+      console.error("Request failed:", error);
+    });
+
+
+})
 
 loadMetrics();

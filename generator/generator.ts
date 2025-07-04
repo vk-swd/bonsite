@@ -5,6 +5,13 @@ import { PriorityQ, testQ } from '../common/utils.js'
 
 const newClient = new KClient("generator")
 
+export type GenParameters = {
+    userCount: number,
+    maxTransactionsPerDay: number,
+}
+
+
+
 type Transaction = {
     id: number,
     userIdFrom: number,
