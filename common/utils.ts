@@ -1,12 +1,6 @@
-
-
-
-
-  
 export function last<T>(a: Array<T>): T | undefined {
     return a[a.length - 1];
 }
-  
 
 export class PriorityQ<T> {
     private heap: T[] = [];

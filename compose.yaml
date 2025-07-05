@@ -34,15 +34,6 @@ services:
       tty: false
       stdin_open: false
 
-  gql:
-      extends: 
-        file: base_yamls/node_app.yaml
-        service: node_app
-      volumes:
-        - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
-      container_name: "${GRAPH_QL_APP_NAME}"
-      hostname: "${GRAPH_QL_APP_NAME}"
-
   frontend_server:
     image: nginx:mainline-alpine3.22
     container_name: frontend_server
@@ -58,6 +49,20 @@ services:
     - "127.0.0.1:81:81"
     networks: 
       - backend_net
+  gql:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      volumes:
+        - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}/generator_parameters.ts:/${COMMON_DIR_NAME}/generator_parameters.ts
+      container_name: "${GRAPH_QL_APP_NAME}"
+      hostname: "${GRAPH_QL_APP_NAME}"
+      environment:
+        - GENERATOR_PORT=${GENERATOR_PORT}
+        - GENERATOR_HOST=${GENERATOR_NAME}
+
+
 
 
   generator:
@@ -66,7 +71,7 @@ services:
         service: node_app
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
-        - ./common:/common/
+        - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
       container_name: "${GENERATOR_NAME}"
       hostname: "${GENERATOR_NAME}"
       environment:

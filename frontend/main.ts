@@ -87,32 +87,16 @@ function downloadStatement() {
     .catch(error => {
       console.error("Request failed:", error);
     });
-
-
-  // request('https://api.spacex.land/graphql/', document1).then(res => console.log(`${new Date().toLocaleString} RECEIVED SHIT ${JSON.stringify(res)}`))
-
-  // const rows = Array.from(document.querySelectorAll("#statementTable tbody tr"));
-  // const lines = rows.map(row => {
-  //   const cols = row.querySelectorAll("td");
-  //   return `${cols[0].innerText} | ${cols[1].innerText} | ${cols[2].innerText}`;
-  // });
-  // const blob = new Blob([lines.join("\n")], { type: "text/plain" });
-  // const a = document.createElement("a");
-  // a.href = URL.createObjectURL(blob);
-  // a.download = "bank_statement.txt";
-  // a.click();
 }
 
 document.getElementById("b_bank_statement")!.addEventListener('click', () => loadStatement())
 document.getElementById("b_download")!.addEventListener('click', () => downloadStatement())
 document.getElementById("input_button")!.addEventListener('click', () => {
-
   const id = (document.getElementById("input1") as HTMLInputElement)!.value;
   // const name = (document.getElementById("input2") as HTMLInputElement)!.value;
   // const color = (document.getElementById("input3") as HTMLInputElement)!.value;
   // const hairlen = (document.getElementById("input4") as HTMLInputElement)!.value;
   // const piercing = (document.getElementById("input5") as HTMLInputElement)!.value;
-
   fetch("/graphql", {
     method: "POST",
     headers: {
@@ -120,8 +104,6 @@ document.getElementById("input_button")!.addEventListener('click', () => {
       Accept: "application/json",
     },
     body: JSON.stringify({ query: id}),
-
-
     //`mutation { addFace({id: ${id},name: ${name},color: ${color}, hairLen: ${hairlen}}) }`
   })
     .then(response => response.json())
@@ -131,12 +113,8 @@ document.getElementById("input_button")!.addEventListener('click', () => {
     .catch(error => {
       console.error("Request failed:", error);
     });
-
-
 })
 document.getElementById("get_face")!.addEventListener('click', () => {
-
-
   fetch("/graphql", {
     method: "POST",
     headers: {
@@ -152,8 +130,33 @@ document.getElementById("get_face")!.addEventListener('click', () => {
     .catch(error => {
       console.error("Request failed:", error);
     });
-
-
 })
+
+const genButton = document.getElementById("gen_button")!
+genButton.addEventListener('click', () => {
+  let query = "";
+  if (genButton.dataset.isStarted == "true") {
+    genButton.dataset.isStarted = "false";
+    genButton.textContent = "Start Gen"
+    query = `{ stopGen }`
+  } else {
+    genButton.textContent = "Started Gen"
+    genButton.dataset.isStarted = "true";
+    query = `{ startGen(params: {userCount: ${1}, 
+      maxTransactionsPerDay: ${1}, 
+      generationIntervalMs: ${1}}) }`
+  }
+
+  fetch("/graphql", {
+    method: "POST",
+    headers: {
+    "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query }),
+  })  
+})
+
+
 
 loadMetrics();

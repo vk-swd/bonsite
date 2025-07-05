@@ -1,13 +1,6 @@
 import { createServer, Server } from 'http';
 import { EventEmitter } from 'events';
-import { z } from "zod";
-
-const GenParametersValidator = z.object({
-    userCount: z.number(),
-    maxTransactionsPerDay: z.number(),
-    generationIntervalMs: z.number()
-});
-export type GenParameters = z.infer<typeof GenParametersValidator>;
+import { GenParameters, GenParametersValidator, startUrl, stoptUrl as stopUrl } from './common/generator_parameters.js';
 
 const GENERATOR_PORT = process.env.GENERATOR_PORT;
 export class GenApiServer extends EventEmitter {
@@ -15,23 +8,26 @@ export class GenApiServer extends EventEmitter {
     constructor() {
         super()
         this.server = createServer(async (req, res) => {
-            if (req.method === 'POST' && req.url === '/start') {
+            console.log(`RECEIVING SOME REQUEST ${req.url}`)
+            if (req.method === 'POST' && req.url === startUrl) {
                 let data = '';
                 req.on('data', chunk => data += chunk);
                 req.on('end', () => {
+                    console.log(`RECEIVING SOME REQUEST dtaata ${data}`)
                     try {
-                        const params: GenParameters = GenParametersValidator.parse(req);
-                        this.emit('start', params);
+                        const params: GenParameters = GenParametersValidator.parse(JSON.parse(data));
+                        // this.emit('start', params);
                         res.writeHead(200);
-                        res.end('Generation request accepted.');
+                        res.end();
                     } catch (error) {
                         res.writeHead(400);
                         res.end(`Malformed JSON: ${error}`);
                     }
                 });
-            } else if (req.method === 'POST' && req.url === '/stop') {
-                this.emit('stop');
+            } else if (req.method === 'POST' && req.url === stopUrl) {
+                // this.emit('stop');
             } else {
+                console.log(`RECEIVING SOME weird url ${req.url}`)
                 res.writeHead(404);
                 res.end('Not Found');
             }

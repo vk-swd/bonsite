@@ -1,4 +1,4 @@
-import { GenParameters } from "./api.js";
+import { GenParameters } from "./common/generator_parameters.js";
 import { KClient } from "./common/kafka_client.js";
 import { Generator, TransactionEvent } from "./generator.js";
 

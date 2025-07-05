@@ -2,6 +2,7 @@ import express from "express";
 import { createHandler } from "graphql-http/lib/use/express";
 import { GraphQLResolveInfo }from "graphql/type"
 import { buildSchema, GraphQLObjectType, GraphQLSchema, GraphQLSchemaConfig } from "graphql";
+import { GenParameters, startUrl, stoptUrl } from "./common/generator_parameters.js";
  
 // Construct a schema using GraphQL schema language
 // const schema: GraphQLSchema = buildSchema(`
@@ -13,12 +14,19 @@ const schema: GraphQLSchema = buildSchema(`
 type Query {
   hello: String
   face(id: ID): Face
+  startGen(params: GenParameters!): Int
+  stopGen: Int
 }
 type Face {
   name: String!,
   color: String,
   hairLength: Int!,
   piercing: Piercing,
+}
+input GenParameters {
+    userCount: Int!,
+    maxTransactionsPerDay: Int!,
+    generationIntervalMs: Int!
 }
 type Piercing {
   name: String!,
@@ -57,6 +65,36 @@ const Query = {
   },
   go(i: number): number {
     return i;
+  },
+  stopGen() {
+    const GENERATOR_PORT = process.env.GENERATOR_PORT;
+    const GENERATOR_HOST = process.env.GENERATOR_HOST;
+    console.log(`stop gen`)
+    fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}/${stoptUrl}`, {
+      method: "POST",
+      headers: {
+      "Content-Type": "application/json",
+        Accept: "application/json",
+      }
+    }).then(re=>re.status)
+    .catch(e => console.log(`stopGen WEIRD ERROR ${e}`))
+  },
+  startGen(arg: {params: GenParameters} ) {
+    const GENERATOR_PORT = process.env.GENERATOR_PORT;
+    const GENERATOR_HOST = process.env.GENERATOR_HOST;
+    console.log(`toggleGentoggleGentoggleGentoggleGen ${JSON.stringify(arg)}`)
+    fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}${startUrl}`, {
+      method: "POST",
+      headers: {
+      "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(arg.params),
+    })
+    .then(res => res.text())
+    .then(res => console.log(`gql recived response to the toggel ${res}`))
+    .catch(e => console.log(`WEIRD PARSE ERROR ${e}`))
+    .catch(e => console.log(`GOT SOME ERROR: "${e}" ON GEN PARAMS: ${JSON.stringify(arg)} for address ${`${GENERATOR_HOST}:${GENERATOR_PORT}`}`))
   }
 }
 // The root provides a resolver function for each API endpoint

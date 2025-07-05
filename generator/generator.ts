@@ -1,7 +1,6 @@
 
+import { GenParameters } from './common/generator_parameters.js';
 import { last, PriorityQ } from './common/utils.js'
-import { GenParameters } from './api.js';
-
 
 
 

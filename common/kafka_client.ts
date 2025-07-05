@@ -1,4 +1,3 @@
-import { unsubscribe } from 'diagnostics_channel';
 import * as kf from 'kafkajs'
 
 
