@@ -22,7 +22,7 @@ export class Sender {
             if (this.lastEvent.event.dateTime > e.event.dateTime) {
                 throw new Error(`Bad order of generated events old ${JSON.stringify(this.lastEvent)} new ${JSON.stringify(e)}`)
             }
-            newClient.write({ msg: JSON.stringify(e.event), topic: e.type });
+            newClient.send({ msg: JSON.stringify(e.event), topic: e.type });
             this.lastEvent = e;
         })
     }

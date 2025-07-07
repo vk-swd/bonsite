@@ -62,9 +62,6 @@ services:
         - GENERATOR_PORT=${GENERATOR_PORT}
         - GENERATOR_HOST=${GENERATOR_NAME}
 
-
-
-
   generator:
       extends: 
         file: base_yamls/node_app.yaml
@@ -77,6 +74,25 @@ services:
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
 
+  graphana:
+    image: grafana/grafana:11.6.3
+    container_name: "${GRAPHANA_NAME}"
+    hostname: "${GRAPHANA_NAME}"
+    volumes:
+      -  /${GRAPHANA_DASHBOARD_FOLDER}
+      - ./${GRAPHANA_NAME}/datasources.yaml:/etc/grafana/provisioning/datasources/datasource.yaml
+      - ./${GRAPHANA_NAME}/grafana.ini:/etc/grafana/grafana.ini
+      - ./${GRAPHANA_NAME}/dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./${GRAPHANA_NAME}/dash1.json:/${GRAPHANA_DASHBOARD_FOLDER}/dash1.json
+    environment:
+      - PROMETHEUS_HOST=${PROMETHEUS_NAME}
+      - PROMETHEUS_PORT=9090
+      - GRAPHANA_DASHBOARD_FOLDER=${GRAPHANA_DASHBOARD_FOLDER}
+    ports:
+      - "127.0.0.1:${GRAPHANA_PORT_HOST}:3000"
+    networks: 
+      - backend_net
+
   # monitoring-analytics:
   #   extends:
   #     file: base_yamls/node_app.yaml
@@ -88,22 +104,22 @@ services:
   
 
 
-  # prometheus:
-  #   image: prom/prometheus
-  #   ports:
-  #     - "127.0.0.1:9090:9090"
-  #   volumes:
-  #     - ./${MONITORING_NAME}:${SOURCEDIR}
-  #   container_name: "${MONITORING_NAME}"
-  #   hostname: "${MONITORING_NAME}"
-  #   entrypoint: ["sh", "-c"]
-  #   tty: true
-  #   command: ['sed "s/__TARGET_PLACEHOLDER__/${MONITORING_ANALYTICS}:${PROM_PORT}/" 
-  #             ${SOURCEDIR}/prometheus.template.yml > /etc/prometheus/prometheus.yml;
-  #             prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
-  #             sh']
-  #   networks: 
-  #     - backend_net
+  prometheus:
+    image: prom/prometheus
+    # ports:
+    #   - "127.0.0.1:9090:9090"
+    volumes:
+      - ./${PROMETHEUS_NAME}:${SOURCEDIR}
+    container_name: "${PROMETHEUS_NAME}"
+    hostname: "${PROMETHEUS_NAME}"
+    entrypoint: ["sh", "-c"]
+    tty: true
+    command: ['sed "s/__TARGET_PLACEHOLDER__/${PROMETHEUS_TARGETS}/" 
+              ${SOURCEDIR}/prometheus.template.yml > /etc/prometheus/prometheus.yml;
+              prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
+              exec sh']
+    networks: 
+      - backend_net
 
 
   # kafka1:

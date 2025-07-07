@@ -97,18 +97,9 @@ const Query = {
     .catch(e => console.log(`GOT SOME ERROR: "${e}" ON GEN PARAMS: ${JSON.stringify(arg)} for address ${`${GENERATOR_HOST}:${GENERATOR_PORT}`}`))
   }
 }
-// The root provides a resolver function for each API endpoint
-const root = {
-  // hello() {
-  //   return "Hello world!";
-  // },
-  Query
-};
- 
 
 const app = express();
  
-// Create and use the GraphQL handler
 app.all(
   "/graphql",
   createHandler({
