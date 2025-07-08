@@ -1,8 +1,9 @@
 import { createServer, Server } from 'http';
 import { EventEmitter } from 'events';
 import { GenParameters, GenParametersValidator, startUrl, stoptUrl as stopUrl } from './common/generator_parameters.js';
+import { getEnv } from './common/utils.js';
 
-const GENERATOR_PORT = process.env.GENERATOR_PORT;
+const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 export class GenApiServer extends EventEmitter {
     private server: Server;
     constructor() {

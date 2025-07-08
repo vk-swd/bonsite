@@ -3,6 +3,7 @@ import { createHandler } from "graphql-http/lib/use/express";
 import { GraphQLResolveInfo }from "graphql/type"
 import { buildSchema, GraphQLObjectType, GraphQLSchema, GraphQLSchemaConfig } from "graphql";
 import { GenParameters, startUrl, stoptUrl } from "./common/generator_parameters.js";
+import { getEnv } from "./common/utils.js";
  
 // Construct a schema using GraphQL schema language
 // const schema: GraphQLSchema = buildSchema(`
@@ -43,6 +44,8 @@ type Face = {
   piercing?: { name: string },
 }
 const faces = new Map<string, Face>();
+const GENERATOR_PORT = getEnv("GENERATOR_PORT");
+const GENERATOR_HOST = getEnv("GENERATOR_HOST");
 const Query = {
   hello() {
     return "Hello world!";
@@ -67,8 +70,7 @@ const Query = {
     return i;
   },
   stopGen() {
-    const GENERATOR_PORT = process.env.GENERATOR_PORT;
-    const GENERATOR_HOST = process.env.GENERATOR_HOST;
+   
     console.log(`stop gen`)
     fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}/${stoptUrl}`, {
       method: "POST",
@@ -80,8 +82,6 @@ const Query = {
     .catch(e => console.log(`stopGen WEIRD ERROR ${e}`))
   },
   startGen(arg: {params: GenParameters} ) {
-    const GENERATOR_PORT = process.env.GENERATOR_PORT;
-    const GENERATOR_HOST = process.env.GENERATOR_HOST;
     console.log(`toggleGentoggleGentoggleGentoggleGen ${JSON.stringify(arg)}`)
     fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}${startUrl}`, {
       method: "POST",

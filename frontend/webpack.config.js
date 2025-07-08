@@ -1,6 +1,9 @@
 
 const CopyPlugin = require("copy-webpack-plugin");
 
+if (process.env.FRONTEND_DEPLOY_FOLDER === undefined) {
+  throw new Error("FRONTEND_DEPLOY_FOLDER environment variable is not set");
+}
 
 module.exports = {
     entry: './main.ts',

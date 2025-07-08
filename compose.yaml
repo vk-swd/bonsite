@@ -56,6 +56,7 @@ services:
       volumes:
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:
@@ -69,10 +70,25 @@ services:
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
+        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
       container_name: "${GENERATOR_NAME}"
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
+        - KAFKA_BROKERS=${KAFKA_BROKERS}
+  db_consumer:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      volumes:
+        - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
+        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
+      container_name: "${DB_CONSUMER_NAME}"
+      hostname: "${DB_CONSUMER_NAME}"
+      environment:
+        - KAFKA_BROKERS=${KAFKA_BROKERS}
+
 
   graphana:
     image: grafana/grafana:11.6.3
@@ -103,7 +119,6 @@ services:
   #       - M_PORT=${PROM_PORT}
   
 
-
   prometheus:
     image: prom/prometheus
     # ports:
@@ -122,15 +137,15 @@ services:
       - backend_net
 
 
-  # kafka1:
-  #   extends: 
-  #     file: base_yamls/node_app.yaml
-  #     service: kafka-app
-  #   environment:
-  #     KAFKA_NODE_ID: 1
-  #     KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
-  #   container_name: "${KAFKA_HOST}"
-  #   hostname: "${KAFKA_HOST}"
+  kafka1:
+    extends: 
+      file: base_yamls/node_app.yaml
+      service: kafka-app
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
+    container_name: "${KAFKA_HOST}"
+    hostname: "${KAFKA_HOST}"
 
   # kafka2:
   #   extends: 

@@ -1,13 +1,13 @@
 
 import * as kf from 'kafkajs'
 import { KClient } from '../common/kafka_client.js'
-import { testQ } from '../common/utils.js';
+import { getEnv, testQ } from './common/utils.js';
 import { exit } from 'process';
 
 import * as prom from 'prom-client'
 
 
-const PORT = process.env.M_PORT
+const PORT = getEnv("M_PORT");
 
 const cnt1 = new prom.Counter({name: "testCounter", help: "beresh i countish"});
 setInterval(() => {

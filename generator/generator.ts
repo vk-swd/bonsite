@@ -1,4 +1,5 @@
 
+import { getEnv } from './common/utils.js';
 import { GenParameters } from './common/generator_parameters.js';
 import { last, PriorityQ } from './common/utils.js'
 
@@ -41,6 +42,9 @@ function generateTransactionResult() {
     }
 }
 export type TransactionEvent = {type: "transaction", event: Transaction} | {type: "result", event: TransactionResult}
+
+const KAFKA_TOPICS_TRANSACTIONS = getEnv("KAFKA_TOPICS_TRANSACTIONS");
+const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
 class TransactionEventsQueue {
     // Scheduled transactions will be ordered naturally, but their processing time is random
     // PriorityQueue used to avoid sorting and perform a "merge-sort" like deque.
@@ -84,31 +88,28 @@ class TransactionEventsQueue {
     }
 }
 
-const msPerDay = 1000 * 60 * 60 * 24;
 export class Generator {
     static transactionId = 0;
     private queue = new TransactionEventsQueue();
     private currentParams: GenParameters | undefined = undefined;
     private now = 0;
-    private intervalMs = 0;
     setParameters(params: GenParameters) {
         // Generation is done under assumption that every second represents 1 day
         // Convert the params.requestIntervalMs to dayTimeMs
-        this.intervalMs = params.generationIntervalMs * msPerDay / 1000;
         this.currentParams = params;
     }
-    getEvents(): Array<TransactionEvent> {
-        const intervalEnd = this.now + this.intervalMs;
+    getEvents(intervalMs: number): Array<TransactionEvent> {
+        const intervalEnd = this.now + intervalMs;
 
         const lastT = this.queue.lastTransaction();
 
         if (!lastT || lastT.dateTime < intervalEnd) {
-            this.generate(this.intervalMs * 2, this.now);
+            this.generate(intervalMs * 2, this.now);
         }
-        this.now += this.intervalMs;
-        return this.queue.deque(this.intervalMs);
+        this.now += intervalMs;
+        return this.queue.deque(intervalMs);
     }
-    generate(interval: number, timeMs: number) {
+    generate(interval: number, now: number) {
         if (this.currentParams == undefined) {
             throw new Error(`Inset generator parameters`)
         }
@@ -116,13 +117,13 @@ export class Generator {
             Also transaction latency is not emulating any thread contention, so 
                 transaction result delay will be random.
         */        
-        const maxTotalEventsPerDay = this.currentParams.maxTransactionsPerDay * this.currentParams.userCount;
-        const maxEventsPerInterval = maxTotalEventsPerDay * interval / msPerDay ;
+        const maxTotalEventsPerSec = this.currentParams.maxTransactionsPerSec * this.currentParams.userCount;
+        const maxEventsPerInterval = maxTotalEventsPerSec * interval / 1000 ;
         const eventCount = Math.random() * maxEventsPerInterval;
         const timeIncrement = interval / eventCount;
         
         for (let i = 0; i < eventCount; i++) {
-            timeMs += timeIncrement;
+            now += timeIncrement;
             // Can make internal transfers too (same id to and from)
             const userIdFrom = Math.floor(Math.random() * this.currentParams.userCount);
             const userIdTo = Math.floor(Math.random() * this.currentParams.userCount);
@@ -130,11 +131,11 @@ export class Generator {
                 id: Generator.transactionId++,
                 userIdFrom,
                 userIdTo,
-                dateTime: timeMs,
+                dateTime: now,
                 amount: Math.random() * 1000
             }
             const result = {
-                dateTime: timeMs + Math.random() * 100,
+                dateTime: now + Math.random() * 100,
                 transactionID: transaction.id,
                 state: generateTransactionResult()
             }

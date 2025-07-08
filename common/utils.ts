@@ -2,6 +2,14 @@ export function last<T>(a: Array<T>): T | undefined {
     return a[a.length - 1];
 }
 
+export function getEnv(name: string): string {
+    const value = process.env[name];
+    if (value === undefined) {
+        throw new Error(`Environment variable ${name} is not set`);
+    }
+    return value;
+}
+
 export class PriorityQ<T> {
     private heap: T[] = [];
     constructor(private isPrioritized: (item:T, overItem:T) => boolean) {}

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const GenParametersValidator = z.object({
     userCount: z.number(),
-    maxTransactionsPerDay: z.number(),
+    maxTransactionsPerSec: z.number(),
     generationIntervalMs: z.number()
 });
 

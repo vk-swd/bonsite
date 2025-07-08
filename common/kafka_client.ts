@@ -1,7 +1,8 @@
 import * as kf from 'kafkajs'
+import { getEnv } from './utils.js';
+import { logger } from './logger.js';
 
-
-const KAFKA_HOSTNAME = process.env.KAFKA_HOSTNAME
+const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
 
 export type KMessage = {
   producerId: number,
@@ -24,13 +25,14 @@ class ProducerStats {
   public retryCount: number = 0
 }
 
-class KProducer {
+export class KProducer {
+  public stats = new ProducerStats();
+  
   id = 0;
   retryTimer: NodeJS.Timeout | undefined = undefined;
   outbox = new Array<{ msg: KMessage, state: string, topic: string, partition?: number }>();
   isConnected = false;
   isStopped = false;
-  stats = new ProducerStats();
   msgIds = new Map<string,number>();
   /*  "outbox" is a simplified version of reliability guarantee 
         during the delivery.
@@ -139,11 +141,50 @@ class ConsumeStats {
   expectedPackets = 0
   consumedPackets = 0
 }
+
+export type KfConsumerSubscription = {
+  topic: string,
+  partition?: number,
+  fromBeginning?: boolean
+}
+
+
 class KConsumer {
   msgIds = new Map<string,ConsumeStats>();
-  constructor(private consumer: kf.Consumer) {
-    this.consumer.on('consumer.connect', () => {
+  subscribtions = new Map<string, KfConsumerSubscription>();
 
+  isOn = true;
+  isConnected = false;
+  retryTimeout: NodeJS.Timeout | undefined = undefined;
+  constructor(private consumer: kf.Consumer) {
+
+    this.consumer.on('consumer.connect', () => {
+      this.isConnected = true;
+      if (this.retryTimeout !== undefined) {
+        clearTimeout(this.retryTimeout);
+        this.retryTimeout = undefined;
+      }
+      if (!this.isOn) {
+        return;
+      }
+      this.consumer.run({
+        eachMessage: this.handleMessage.bind(this),
+        autoCommit: false,
+      }).then(() => {
+      
+      }).catch(e => {
+        console.error(`Failed to run the consumption: ${e}`);
+      });
+
+
+      
+    })
+
+
+
+    this.consumer.on('consumer.disconnect', () => {
+      this.isConnected = false;
+      this.retryConnection();
     })
     this.consumer.on('consumer.crash', () => {
       
@@ -169,6 +210,51 @@ class KConsumer {
     this.consumer.on('consumer.commit_offsets', () => {
       
     })
+
+
+    this.consumer.connect().catch(e => {
+      console.error(`Failed to connect consumer: ${e}`);
+    });
+    // this.consumer.seek(pos);
+    this.consumer.subscribe({ topic, fromBeginning: false })
+    // this.consumer.seek({topic, partition: 1, offset:"0"})
+  }
+  handleMessage(pl: kf.EachMessagePayload) {
+    
+    //   logger.info(JSON.stringify({
+    //     userName: this.config.name,
+    //     topic,
+    //     partition,
+    //     offset: message?.offset ?? 0,
+    //     value: message?.value?.toString() ?? "",
+    //   }))
+    // }
+    console.log(`Received message on topic ${topic} partition ${partition}: ${message.value?.toString()}`);
+  }
+
+  retryConnection() {
+    if (!this.isOn || this.retryTimeout !== undefined) {
+      return;
+    }
+    // Do i have to resubscribe manually to everything?
+    this.retryTimeout = setTimeout(() => {
+      this.consumer.connect()
+      .catch(e => {
+        console.error(`Failed to connect consumer: ${e}`);
+        this.retryConnection();
+      });
+      this.retryTimeout = undefined;
+    }, 1000);
+  }
+
+  subscribe(topic: string, pos?: number) {
+    // if (this.consumer === undefined) {
+    //   this.consumer = new KConsumer(new kf.Cli({ groupId: "1" }));
+    // }
+    // if (!this.subscribedTopics.has(topic)) {
+    //   this.consumer.subscribe({ topic, fromBeginning: true })
+    //   this.subscribedTopics.add(topic);
+    // }
   }
 }
 export class KClient {
@@ -178,13 +264,13 @@ export class KClient {
       And hardware parallelism is best addressed with extra process in the consumer group.
   */
   private static clientIdCounter = 0;
-  private producer: KProducer | undefined = undefined;
-  private consumer: kf.Consumer | undefined = undefined;
+  public producer: KProducer | undefined = undefined;
+  public consumer: KConsumer | undefined = undefined;
   private kf: kf.Kafka;
   constructor(public config: KClientConfig) {
     this.kf = new kf.Kafka({
       // No quotas and authentication/acl => no clientid and ssl/sasl
-      clientId: `C${KClient.clientIdCounter}_${this.config.name}`,
+        clientId: `C${KClient.clientIdCounter}_${this.config.name}`,
         brokers: this.config.brokers,
     })
 
@@ -195,28 +281,12 @@ export class KClient {
       this.producer = new KProducer(this.kf.producer());
     }
     this.producer.write(msg, topic, partition);
-    this.consumer?.commitOffsets();
+    // this.consumer?.commitOffsets();
   }
-
 
   async subscribe(topic: string, pos?: number) {
     if (this.consumer === undefined) {
-      this.consumer = this.kf.consumer({ groupId: "1" });
-      await this.consumer.connect();
-      // this.consumer.seek(pos);
-      await this.consumer.subscribe({ topic, fromBeginning: false })
-      // this.consumer.seek({topic, partition: 1, offset:"0"})
-      await this.consumer.run({
-        eachMessage: async ({ topic, partition, message }) => {
-          this.kf.logger().info(JSON.stringify({
-            userName: this.config.name,
-            topic,
-            partition,
-            offset: message?.offset ?? 0,
-            value: message?.value?.toString() ?? "",
-          }))
-        },
-      })
+      this.consumer = new KConsumer(this.kf.consumer({ groupId: "1" }));
     }
     // if (!this.subscribedTopics.has(topic)) {
     //   await this.consumer.subscribe({ topic, fromBeginning: true })

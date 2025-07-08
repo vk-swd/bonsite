@@ -3,6 +3,7 @@ services:
     image: node:20-slim
     volumes:
       - "${WORKDIR}"
+      - /${COMMON_DIR_NAME}
       - config_folder:${CONFIG_FOLDER}
     working_dir: ${WORKDIR}
     entrypoint: ["/bin/bash", "-c"]

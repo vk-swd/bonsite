@@ -1,5 +1,5 @@
 {
-    "name": "Generator",
+    "name": "DB Consumer",
     "version": "1.0.0",
     "scripts": {
       "deploy": "tsc && node build/main.js"
