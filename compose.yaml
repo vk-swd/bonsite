@@ -18,7 +18,7 @@ services:
       - config_folder:${CONFIG_FOLDER}
       - ./:${SOURCEDIR}
     entrypoint: ["/bin/sh", "-c"]
-    command: ["ln -s ${SOURCEDIR}/tsconfig.json ${CONFIG_FOLDER}/; ls ${CONFIG_FOLDER}/"]
+    command: ["cp ${SOURCEDIR}/tsconfig.json ${CONFIG_FOLDER}/; ls ${CONFIG_FOLDER}/"]
     container_name: config_folder_mounter
 
   frontend_builder:
@@ -88,6 +88,10 @@ services:
       hostname: "${DB_CONSUMER_NAME}"
       environment:
         - KAFKA_BROKERS=${KAFKA_BROKERS}
+        - MSSQL_PASSWORD=${MSSQL_PASSWORD}
+        - MSSQL_USER=${MSSQL_USER}
+        - MSSQL_DB_NAME=${MSSQL_DB_NAME}
+        - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
 
 
   graphana:
@@ -158,18 +162,41 @@ services:
   #   hostname: "${KAFKA_HOST}2"
 
 
-  # # sqldb:
-  # #   image: mcr.microsoft.com/mssql/server:2022-latest
-  # #   volumes:
-  # #     - "${WORKDIR}"
-  # #   working_dir: ${WORKDIR}
-  # #   environment:
-  # #     - ACCEPT_EULA=Y
-  # #     - MSSQL_SA_PASSWORD=bad_password_makes_MSSQL_uhappy:1Aa@
-  # #   # ports:
-  # #   # # also mb https://docs.docker.com/reference/compose-file/services/#long-syntax-3
-  # #   #   - "1433:1433"
-  # #   hostname: "${MSSQL_HOST}"
-  # #   container_name: "sql1"
-  # #   networks: 
-  # #       - backend_net
+  sqldb:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    volumes:
+      - "${WORKDIR}"
+    working_dir: ${WORKDIR}
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
+    ports:
+      - name: mdb
+        target: 1433
+        published: 1433
+        host_ip: "127.0.0.1"
+    
+    #   - "1433:1433"
+    hostname: "${MSSQL_HOSTNAME}"
+    container_name: "${MSSQL_HOSTNAME}"
+    networks: 
+        - backend_net
+
+  sqlcmd:
+    image: mcr.microsoft.com/mssql-tools
+    container_name: "sqlcmd"
+    depends_on:
+      - sqldb
+    volumes:
+      - ${WORKDIR}
+      - ./${MSSQL_CMD_NAME}:${SOURCEDIR}
+    working_dir: ${WORKDIR}
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["${SOURCEDIR}/init.sh"]
+    environment:
+      - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
+      - MSSQL_CONSUMER_PASSWORD=${MSSQL_CONSUMER_PASSWORD}
+      - MSSQL_CONSUMER_USERNAME=${MSSQL_CONSUMER_USERNAME}
+    networks: 
+        - backend_net
+

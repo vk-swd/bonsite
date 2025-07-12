@@ -27,13 +27,13 @@ class ProducerStats {
 
 export class KProducer {
   public stats = new ProducerStats();
-  
+
   id = 0;
   retryTimer: NodeJS.Timeout | undefined = undefined;
   outbox = new Array<{ msg: KMessage, state: string, topic: string, partition?: number }>();
   isConnected = false;
   isStopped = false;
-  msgIds = new Map<string,number>();
+  msgIds = new Map<string, number>();
   /*  "outbox" is a simplified version of reliability guarantee 
         during the delivery.
       For delivery of critical information some redundant storage 
@@ -70,7 +70,7 @@ export class KProducer {
   }
   connect() {
     if (this.isConnected) {
-      return;  
+      return;
     }
     this.isStopped = false;
     this.producer.connect();
@@ -99,17 +99,17 @@ export class KProducer {
           { value: JSON.stringify(mssg.msg) },
         ]
       })
-      .then(res => {
-        if (res.length != 1) {
-          console.warn(`Sent 1 msg and received more reports or none!: ${JSON.stringify(res)}`)
-        }
-      })
-      .catch(e => {
-        console.error(`Failed to send the record because: ${e}`)
-        this.outbox.push(mssg)
-        this.retryDelivery()
-        this.stats.msgFailed++;
-      })
+        .then(res => {
+          if (res.length != 1) {
+            console.warn(`Sent 1 msg and received more reports or none!: ${JSON.stringify(res)}`)
+          }
+        })
+        .catch(e => {
+          console.error(`Failed to send the record because: ${e}`)
+          this.outbox.push(mssg)
+          this.retryDelivery()
+          this.stats.msgFailed++;
+        })
     })
     this.retryTimer = undefined;
     this.outbox.length = 0;
@@ -123,14 +123,15 @@ export class KProducer {
   async write(msg: string, topic: string, partition?: number) {
     const msgId = this.msgIds.get(topic) ?? 0;
     this.msgIds.set(topic, msgId + 1);
-    const mssg = {msg: {message: msg, seqNumber: msgId, producerId: this.id }, state: "idle", topic, partition};
+    const mssg = { msg: { message: msg, seqNumber: msgId, producerId: this.id }, state: "idle", topic, partition };
     this.outbox.push(mssg)
     this.attemptDelivery();
   }
 }
 
 class ConsumeStats {
-  /* Lazy implementation of packet loss calculation
+  /* =====================================================
+    Lazy implementation of packet loss calculation
     https://www.ietf.org/rfc/rfc3550.txt
     see A.3 Determining Number of Packets Expected and Lost
     Ideally those would need to be measured per user/transaction type,
@@ -140,6 +141,16 @@ class ConsumeStats {
   */
   expectedPackets = 0
   consumedPackets = 0
+  // =====================================================
+  connects = 0
+  disconnects = 0
+  networkRequestTimeouts = 0
+  networkRequests = 0
+  fetches = 0
+  rebalances = 0
+  commits = 0
+  endBatchProcesses = 0
+  crashes = 0
 }
 
 export type KfConsumerSubscription = {
@@ -150,12 +161,13 @@ export type KfConsumerSubscription = {
 
 
 class KConsumer {
-  msgIds = new Map<string,ConsumeStats>();
+  msgIds = new Map<string, ConsumeStats>();
   subscribtions = new Map<string, KfConsumerSubscription>();
 
   isOn = true;
   isConnected = false;
   retryTimeout: NodeJS.Timeout | undefined = undefined;
+  stats = new ConsumeStats();
   constructor(private consumer: kf.Consumer) {
 
     this.consumer.on('consumer.connect', () => {
@@ -167,94 +179,137 @@ class KConsumer {
       if (!this.isOn) {
         return;
       }
-      this.consumer.run({
-        eachMessage: this.handleMessage.bind(this),
-        autoCommit: false,
-      }).then(() => {
-      
-      }).catch(e => {
-        console.error(`Failed to run the consumption: ${e}`);
-      });
+      // this.consumer.run({
+      //   eachMessage: this.handleMessage.bind(this),
+      //   autoCommit: false,
+      // }).then(() => {
 
-
-      
+      // }).catch(e => {
+      //   console.error(`Failed to run the consumption: ${e}`);
+      // });
     })
 
 
 
     this.consumer.on('consumer.disconnect', () => {
+      this.stats.disconnects++;
       this.isConnected = false;
       this.retryConnection();
     })
     this.consumer.on('consumer.crash', () => {
-      
+      this.stats.crashes++;
     })
     this.consumer.on('consumer.end_batch_process', () => {
-      
+      this.stats.endBatchProcesses++;
     })
     this.consumer.on('consumer.network.request', () => {
-      
+      this.stats.networkRequests++;
     })
     this.consumer.on('consumer.network.request_timeout', () => {
-      
+      this.stats.networkRequestTimeouts++;
     })
     this.consumer.on('consumer.rebalancing', () => {
-      
+      this.stats.rebalances++;
     })
     this.consumer.on('consumer.fetch', () => {
-      
+      this.stats.fetches++;
     })
     this.consumer.on('consumer.stop', () => {
-      
+
     })
     this.consumer.on('consumer.commit_offsets', () => {
-      
+
     })
-
-
-    this.consumer.connect().catch(e => {
-      console.error(`Failed to connect consumer: ${e}`);
-    });
+    this.tryConnect()
+    this.consumer.run({
+        eachMessage: this.handleMessage,
+        autoCommit: false,
+    })
     // this.consumer.seek(pos);
-    this.consumer.subscribe({ topic, fromBeginning: false })
     // this.consumer.seek({topic, partition: 1, offset:"0"})
   }
-  handleMessage(pl: kf.EachMessagePayload) {
-    
-    //   logger.info(JSON.stringify({
-    //     userName: this.config.name,
-    //     topic,
-    //     partition,
-    //     offset: message?.offset ?? 0,
-    //     value: message?.value?.toString() ?? "",
-    //   }))
-    // }
-    console.log(`Received message on topic ${topic} partition ${partition}: ${message.value?.toString()}`);
-  }
+  handleBatch(pl: kf.EachBatchPayload) {
+    const { topic, partition, messages } = pl.batch;
+    // console.log(`Received batch on topic ${topic} partition ${partition}: ${messages.length} messages`);
+    // messages.forEach(message => {
+    //   this.handleMessage({ topic, partition, message });
+    // });
 
-  retryConnection() {
-    if (!this.isOn || this.retryTimeout !== undefined) {
+    /* 
+    https://kafka.js.org/docs/1.11.0/consuming#a-name-manual-commits-a-manual-committing
+    consumer.commitOffsets([
+        { topic: 'topic-A', partition: 0, offset: '1' },
+        { topic: 'topic-A', partition: 1, offset: '3' },
+        { topic: 'topic-B', partition: 0, offset: '2' }
+      ])
+    */
+    /* if the consumer crashed and recovered, it could try and process duplicate data.
+      It is database's job to identify such data (it is simple - it woluld have same data
+      already written). Consumer will just confirm with database that write is complete and 
+      initiate the data commit.
+      commits can be chunked if the data is large, but it is not needed in this demo, because
+      high load is not tested here
+    */
+    console.warn(`Lost commection with uncommitted offsets: 
+      ${JSON.stringify(pl.uncommittedOffsets())}`);
+
+    // this.consumer.commitOffsets(pl.uncommittedOffsets())
+    // pl.resolveOffset()
+  }
+  handleMessage(pl: kf.EachMessagePayload): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        
+      const { topic, partition, message } = pl;
+      logger.info(JSON.stringify({
+        topic,
+        partition,
+        offset: message?.offset ?? 0,
+        value: message?.value?.toString() ?? "",
+      }))
+    } catch (e) {
+        console.error(`Failed to handle message: ${e}`);
+        reject(e);
+        return;
+      }
+      resolve();
+    });
+    // console.log(`Received message on topic ${topic} partition ${partition}: ${message.value?.toString()}`);
+  }
+  tryConnect() {
+    if (this.isConnected || !this.isOn) {
       return;
     }
-    // Do i have to resubscribe manually to everything?
-    this.retryTimeout = setTimeout(() => {
-      this.consumer.connect()
+    this.consumer.connect()
       .catch(e => {
         console.error(`Failed to connect consumer: ${e}`);
         this.retryConnection();
       });
+  }
+  retryConnection() {
+    if (this.retryTimeout !== undefined) {
+      return;
+    }
+    // Do i have to resubscribe manually to everything?
+    this.retryTimeout = setTimeout(() => {
+      this.tryConnect();
       this.retryTimeout = undefined;
     }, 1000);
   }
 
   subscribe(topic: string, pos?: number) {
-    // if (this.consumer === undefined) {
-    //   this.consumer = new KConsumer(new kf.Cli({ groupId: "1" }));
-    // }
     // if (!this.subscribedTopics.has(topic)) {
     //   this.consumer.subscribe({ topic, fromBeginning: true })
     //   this.subscribedTopics.add(topic);
     // }
+    // // Using "fromBeginning" to start from the last message commited by the group
+    // if (this.isConnected) {
+      
+    // }
+    // this.consumer.describeGroup()
+    this.consumer.subscribe({ topic, fromBeginning: true })
+
+   
   }
 }
 export class KClient {
@@ -270,8 +325,8 @@ export class KClient {
   constructor(public config: KClientConfig) {
     this.kf = new kf.Kafka({
       // No quotas and authentication/acl => no clientid and ssl/sasl
-        clientId: `C${KClient.clientIdCounter}_${this.config.name}`,
-        brokers: this.config.brokers,
+      clientId: `C${KClient.clientIdCounter}_${this.config.name}`,
+      brokers: this.config.brokers,
     })
 
     console.log(`creating blokers at ${KAFKA_HOSTNAME}`)
@@ -292,14 +347,14 @@ export class KClient {
     //   await this.consumer.subscribe({ topic, fromBeginning: true })
     // }
   }
-  async unsubscribe() {
-    if (this.consumer !== undefined) {
-      await this.consumer.disconnect();
-      this.consumer = undefined;
-    }
-    if (this.producer !== undefined) {
-      await this.producer.disconnect();
-      this.producer = undefined;
-    }
-  }
+  // async unsubscribe() {
+  //   if (this.consumer !== undefined) {
+  //     await this.consumer.disconnect();
+  //     this.consumer = undefined;
+  //   }
+  //   if (this.producer !== undefined) {
+  //     await this.producer.disconnect();
+  //     this.producer = undefined;
+  //   }
+  // }
 };
