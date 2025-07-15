@@ -166,26 +166,24 @@ services:
     networks: 
         - backend_net
 
-  sqlcmd:
-    image: mcr.microsoft.com/mssql-tools
-    container_name: "sqlcmd"
-    depends_on:
-      - sqldb
-    volumes:
-      - ${WORKDIR}
-      - ./${MSSQL_CMD_NAME}:${SOURCEDIR}
-    working_dir: ${WORKDIR}
-    entrypoint: ["/bin/bash", "-c"]
-    command: ["${SOURCEDIR}/init.sh; exec bash"]
-    tty: true
-    stdin_open: true
-    environment:
-      - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
-      - MSSQL_CONSUMER_PASSWORD=${MSSQL_CONSUMER_PASSWORD}
-      - MSSQL_CONSUMER_USERNAME=${MSSQL_CONSUMER_USERNAME}
-      - MSSQL_DB_NAME=${MSSQL_DB_NAME}
-    networks: 
-        - backend_net
+
+  db_initializer:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      volumes:
+        - ./${DB_INITIALIZER_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}/utils.ts:/${COMMON_DIR_NAME}/utils.ts
+        - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/db_defines.ts:/${COMMON_DIR_NAME}/db_defines.ts
+      container_name: "${DB_INITIALIZER_NAME}"
+      environment:
+        - MSSQL_DB_NAME=${MSSQL_DB_NAME}
+        - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
+        - MSSQL_SA_USERNAME=${MSSQL_SA_USERNAME}
+        - MSSQL_CONSUMER_USERNAME=${MSSQL_CONSUMER_USERNAME}
+        - MSSQL_STATEMENT_CREATOR_USERNAME=${MSSQL_STATEMENT_CREATOR_USERNAME}
+        - MSSQL_PASSWORD=${MSSQL_PASSWORD}
 
   db_consumer:
       extends: 
@@ -204,7 +202,7 @@ services:
       environment:
         - KAFKA_BROKERS=${KAFKA_BROKERS}
         - MSSQL_PASSWORD=${MSSQL_PASSWORD}
-        - MSSQL_USER=${MSSQL_USER}
+        - MSSQL_SA_USERNAME=${MSSQL_SA_USERNAME}
         - MSSQL_DB_NAME=${MSSQL_DB_NAME}
         - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
 
