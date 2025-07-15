@@ -2,32 +2,9 @@
 import { getEnv } from './common/utils.js';
 import { GenParameters } from './common/generator_parameters.js';
 import { last, PriorityQ } from './common/utils.js'
+import { Transaction, TransactionResult, TResult } from './common/event_types.js';
 
 
-
-type Transaction = {
-    id: number,
-    userIdFrom: number,
-    userIdTo: number,
-    dateTime: number,
-    amount: number,
-    description?: string,
-    merchantInfo?: string,
-    location?: string,
-}
-
-enum TResult {
-    CONFIRMED = 0,
-    TIMEOUT = 1,
-    FRAUD = 2,
-    BLOCKED = 3
-}
-
-type TransactionResult = {
-    transactionID: number,
-    dateTime: number,
-    state: TResult
-}
 
 function generateTransactionResult() {
     const val = Math.random() * 100;

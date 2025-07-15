@@ -71,28 +71,12 @@ services:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
         - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
+        - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
       container_name: "${GENERATOR_NAME}"
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
         - KAFKA_BROKERS=${KAFKA_BROKERS}
-  db_consumer:
-      extends: 
-        file: base_yamls/node_app.yaml
-        service: node_app
-      volumes:
-        - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
-        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
-      container_name: "${DB_CONSUMER_NAME}"
-      hostname: "${DB_CONSUMER_NAME}"
-      environment:
-        - KAFKA_BROKERS=${KAFKA_BROKERS}
-        - MSSQL_PASSWORD=${MSSQL_PASSWORD}
-        - MSSQL_USER=${MSSQL_USER}
-        - MSSQL_DB_NAME=${MSSQL_DB_NAME}
-        - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
-
 
   graphana:
     image: grafana/grafana:11.6.3
@@ -192,11 +176,36 @@ services:
       - ./${MSSQL_CMD_NAME}:${SOURCEDIR}
     working_dir: ${WORKDIR}
     entrypoint: ["/bin/bash", "-c"]
-    command: ["${SOURCEDIR}/init.sh"]
+    command: ["${SOURCEDIR}/init.sh; exec bash"]
+    tty: true
+    stdin_open: true
     environment:
       - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
       - MSSQL_CONSUMER_PASSWORD=${MSSQL_CONSUMER_PASSWORD}
       - MSSQL_CONSUMER_USERNAME=${MSSQL_CONSUMER_USERNAME}
+      - MSSQL_DB_NAME=${MSSQL_DB_NAME}
     networks: 
         - backend_net
+
+  db_consumer:
+      extends: 
+        file: base_yamls/node_app.yaml
+        service: node_app
+      volumes:
+        - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
+        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
+        - ./${MSSQL_CMD_NAME}/initDB.sql:${WORKDIR}/initDB.sql
+        - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/db_defines.ts:/${COMMON_DIR_NAME}/db_defines.ts
+        
+      container_name: "${DB_CONSUMER_NAME}"
+      hostname: "${DB_CONSUMER_NAME}"
+      environment:
+        - KAFKA_BROKERS=${KAFKA_BROKERS}
+        - MSSQL_PASSWORD=${MSSQL_PASSWORD}
+        - MSSQL_USER=${MSSQL_USER}
+        - MSSQL_DB_NAME=${MSSQL_DB_NAME}
+        - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
+
 

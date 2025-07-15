@@ -1,8 +1,9 @@
-CREATE DATABASE BankStatements;
+CREATE DATABASE $(MSSQL_DB_NAME);
 GO
 
-USE BankStatements;
+USE $(MSSQL_DB_NAME);
 GO
+
 CREATE SCHEMA scm;
 GO
 CREATE TABLE scm.Users (
