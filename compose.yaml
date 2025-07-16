@@ -69,14 +69,20 @@ services:
         service: node_app
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
-        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
-        - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/kafka_client.ts:${WORKDIR}/${COMMON_DIR_NAME}/kafka_client.ts
+        - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
+        - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
+        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
       container_name: "${GENERATOR_NAME}"
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
         - KAFKA_BROKERS=${KAFKA_BROKERS}
+        - MONITORING_PORT=${PROM_PORT}
+        - KAFKA_TOPICS_TRANSACTIONS=${KAFKA_TOPICS_TRANSACTIONS}
+        - KAFKA_TOPICS_TRANSACTIONS_RESULTS=${KAFKA_TOPICS_TRANSACTIONS_RESULTS}
 
   graphana:
     image: grafana/grafana:11.6.3
@@ -165,7 +171,6 @@ services:
     container_name: "${MSSQL_HOSTNAME}"
     networks: 
         - backend_net
-
 
   db_initializer:
       extends: 

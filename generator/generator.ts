@@ -18,10 +18,11 @@ function generateTransactionResult() {
         return TResult.BLOCKED
     }
 }
-export type TransactionEvent = {type: "transaction", event: Transaction} | {type: "result", event: TransactionResult}
 
-const KAFKA_TOPICS_TRANSACTIONS = getEnv("KAFKA_TOPICS_TRANSACTIONS");
-const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
+const KAFKA_TOPICS_TRANSACTIONS: string = getEnv("KAFKA_TOPICS_TRANSACTIONS");
+const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTIONS_RESULTS");
+export type TransactionEvent = {topic: string, event: Transaction | TransactionResult}
+
 class TransactionEventsQueue {
     // Scheduled transactions will be ordered naturally, but their processing time is random
     // PriorityQueue used to avoid sorting and perform a "merge-sort" like deque.
@@ -45,16 +46,16 @@ class TransactionEventsQueue {
         */
         while (tPos < this.transactions.length && this.transactions[tPos].dateTime < now) {
             if (this.transactions[tPos].dateTime <= this.results.peek()!.dateTime) {
-                res.push({ type: "transaction", event: this.transactions[tPos] });
+                res.push({ topic: KAFKA_TOPICS_TRANSACTIONS, event: this.transactions[tPos] });
                 tPos++;
             } else {
                 // Read "About while" for unchecked "pop"
-                res.push({ type: "result", event: this.results.pop()! });
+                res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()! });
             }
         }
         // Check trailing results.
         while (this.results.peek() !== undefined && this.results.peek()!.dateTime < now) {
-            res.push({ type: "result", event: this.results.pop()! });
+            res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()! });
         }
         this.transactions.splice(0, tPos);
         return res;

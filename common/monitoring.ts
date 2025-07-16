@@ -1,10 +1,12 @@
 
 import * as prom from 'prom-client'
 import { Server, createServer } from 'http';
-import { logger } from './logger';
-import { getEnv } from './utils';
+import { logger } from './logger.js';
+import { getEnv } from './utils.js';
 
 const PORT = getEnv("MONITORING_PORT");
+
+
 
 export class MonitoringServer {
     private server: Server;
