@@ -18,7 +18,7 @@ export class Sender {
     public stats = new SenderStats()
 
     private stream;
-    private lastEvent: TransactionEvent = {topic: "result", event: {dateTime: 0, transactionID: -1, state: 0}};
+    private lastEvent: {time: number, event?: TransactionEvent} = {time: 0, event: undefined};
     constructor() {
         // console.log(`initial stats ${JSON.stringify(this.stats)}`);
         this.stream = fs.createWriteStream('output.txt', { flags: 'a' }); // 'a' = append
@@ -50,13 +50,14 @@ export class Sender {
         this.timeout = undefined;
     }
     send(event: TransactionEvent) {
-        if (this.lastEvent.event.dateTime > event.event.dateTime) {
-            throw new Error(`Bad order of generated events old ${JSON.stringify(this.lastEvent)} new ${JSON.stringify(event)}`)
+        if (this.lastEvent.time > event.event.dateTime) {
+            throw new Error(`Bad order of generated events old ${JSON.stringify(this.lastEvent.event)} new ${JSON.stringify(event)}`)
         }
         const msg = JSON.stringify(event.event);
         this.client.send(msg, event.topic);
         // this.writeOnDisk(`${msg}\n`);
-        this.lastEvent = event;
+        this.lastEvent.time = event.event.dateTime;
+        this.lastEvent.event = event;
     }
     buffer: string[] = [];
     writeOnDisk(line:string) {

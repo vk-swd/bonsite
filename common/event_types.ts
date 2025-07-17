@@ -18,6 +18,7 @@ export enum TResult {
 
 export type TransactionResult = {
     transactionID: number,
+    resultTransactionId?: number, // confirmed transaction by ledger
     dateTime: number,
     state: TResult
 }

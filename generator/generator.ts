@@ -18,6 +18,11 @@ function generateTransactionResult() {
         return TResult.BLOCKED
     }
 }
+export type TransactionResultScheduled = {
+    dateTime: number,
+    event: () => TransactionResult
+}
+
 
 const KAFKA_TOPICS_TRANSACTIONS: string = getEnv("KAFKA_TOPICS_TRANSACTIONS");
 const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTIONS_RESULTS");
@@ -26,7 +31,7 @@ export type TransactionEvent = {topic: string, event: Transaction | TransactionR
 class TransactionEventsQueue {
     // Scheduled transactions will be ordered naturally, but their processing time is random
     // PriorityQueue used to avoid sorting and perform a "merge-sort" like deque.
-    private results = new PriorityQ<TransactionResult>((a, b) => a.dateTime < b.dateTime);
+    private results = new PriorityQ<TransactionResultScheduled>((a, b) => a.dateTime < b.dateTime);
     private transactions = new Array<Transaction>();
     lastTransaction(): Transaction | undefined {
         return last(this.transactions);
@@ -50,17 +55,17 @@ class TransactionEventsQueue {
                 tPos++;
             } else {
                 // Read "About while" for unchecked "pop"
-                res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()! });
+                res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()!.event() });
             }
         }
         // Check trailing results.
         while (this.results.peek() !== undefined && this.results.peek()!.dateTime < now) {
-            res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()! });
+            res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()!.event() });
         }
         this.transactions.splice(0, tPos);
         return res;
     }
-    enque(transaction: Transaction, result: TransactionResult) {
+    enque(transaction: Transaction, result: TransactionResultScheduled) {
         this.transactions.push(transaction);
         this.results.push(result)
     }
@@ -68,6 +73,7 @@ class TransactionEventsQueue {
 
 export class Generator {
     static transactionId = 0;
+    static resultTransactionId = 0;
     private queue = new TransactionEventsQueue();
     private currentParams: GenParameters | undefined = undefined;
     private now = 0;
@@ -112,12 +118,23 @@ export class Generator {
                 dateTime: now,
                 amount: Math.random() * 1000
             }
-            const result = {
-                dateTime: now + Math.random() * 100,
-                transactionID: transaction.id,
-                state: generateTransactionResult()
+            const scheduledResultTime = now + Math.random() * 100
+            const scheduledResult: TransactionResultScheduled = {
+                dateTime: scheduledResultTime,
+                event: () => { 
+                    const state = generateTransactionResult();
+                    const res = {
+                        dateTime: scheduledResultTime,
+                        transactionID: transaction.id,
+                        state
+                    } as TransactionResult;
+                    if (state === TResult.CONFIRMED) {
+                        res.resultTransactionId = Generator.resultTransactionId++;
+                    }
+                    return res;
+                }
             }
-            this.queue.enque(transaction, result);
+            this.queue.enque(transaction, scheduledResult);
         }
     }
 }

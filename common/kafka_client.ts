@@ -6,7 +6,6 @@ const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
 
 export type KMessage = {
   producerId: number,
-  seqNumber: number,
   message: string
 }
 
@@ -33,7 +32,6 @@ export class KProducer {
   outbox = new Array<{ msg: KMessage, state: string, topic: string, partition?: number }>();
   isConnected = false;
   isStopped = false;
-  msgIds = new Map<string, number>();
   /*  "outbox" is a simplified version of reliability guarantee 
         during the delivery.
       For delivery of critical information some redundant storage 
@@ -121,27 +119,13 @@ export class KProducer {
     }
   }
   async write(msg: string, topic: string, partition?: number) {
-    const msgId = this.msgIds.get(topic) ?? 0;
-    this.msgIds.set(topic, msgId + 1);
-    const mssg = { msg: { message: msg, seqNumber: msgId, producerId: this.id }, state: "idle", topic, partition };
+    const mssg = { msg: { message: msg, producerId: this.id }, state: "idle", topic, partition };
     this.outbox.push(mssg)
     this.attemptDelivery();
   }
 }
 
 class ConsumeStats {
-  /* =====================================================
-    Lazy implementation of packet loss calculation
-    https://www.ietf.org/rfc/rfc3550.txt
-    see A.3 Determining Number of Packets Expected and Lost
-    Ideally those would need to be measured per user/transaction type,
-      but it would add complexity and is out of scope of this demo.
-    Here I just made a rough indicator showing if something broke
-      even with such simple setup.
-  */
-  expectedPackets = 0
-  consumedPackets = 0
-  // =====================================================
   connects = 0
   disconnects = 0
   networkRequestTimeouts = 0
@@ -161,7 +145,6 @@ export type KfConsumerSubscription = {
 
 
 class KConsumer {
-  msgIds = new Map<string, ConsumeStats>();
   subscribtions = new Map<string, KfConsumerSubscription>();
 
   isOn = true;
