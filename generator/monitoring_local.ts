@@ -1,8 +1,9 @@
 import * as prom from 'prom-client'
 import { KProducer } from './common/kafka_client.js';
 import { Sender } from './sender.js';
+import { Generator } from './generator.js';
 
-const localReg = new prom.Registry();
+export const localReg = new prom.Registry();
 const disconnectCount = new prom.Counter({
     name: 'kafka_producer_disconnect_count',
     help: 'Number of times the producer disconnected',
@@ -48,8 +49,15 @@ const maxSendIntervalMs = new prom.Gauge({
     help: 'Maximum interval in milliseconds between sending messages',
     registers: [localReg],
 });
+const generatedTransactionId = new prom.Gauge({
+    name: 'generatedTransactionId',
+    help: 'id of last message produced by generator',
+    registers: [localReg],
+});
 
-
+export function mt() {
+    generatedTransactionId.set(Generator.transactionId);
+}
 export function readMetrics(producer: KProducer, sender: Sender) {
     disconnectCount.inc(producer.stats.disconnectCount);
     networkRequestTOCount.inc(producer.stats.networkRequestTOCount);
@@ -59,7 +67,7 @@ export function readMetrics(producer: KProducer, sender: Sender) {
     msgFailed.inc(producer.stats.msgFailed);
     reconnectAttempts.inc(producer.stats.reconnectAttempts);
     retryCount.inc(producer.stats.retryCount);
-    maxSendIntervalMs.set(sender.stats.maxSendIntervalMs);
+    // maxSendIntervalMs.set(sender.stats.maxSendIntervalMs);
     // Reset stats after reading
     producer.stats.disconnectCount = 0;
     producer.stats.networkRequestTOCount = 0;
@@ -69,7 +77,7 @@ export function readMetrics(producer: KProducer, sender: Sender) {
     producer.stats.msgFailed = 0;
     producer.stats.reconnectAttempts = 0;
     producer.stats.retryCount = 0;
-    sender.stats.maxSendIntervalMs = 0;
+    // sender.stats.maxSendIntervalMs = 0;
 }
 
 export { MonitoringServer } from "./common/monitoring.js";

@@ -143,8 +143,8 @@ genButton.addEventListener('click', () => {
     genButton.textContent = "Started Gen"
     genButton.dataset.isStarted = "true";
     query = `{ startGen(params: {userCount: ${1}, 
-      maxTransactionsPerDay: ${1}, 
-      generationIntervalMs: ${1}}) }`
+      maxTransactionsPerSec: ${10}, 
+      generationIntervalMs: ${1000}}) }`
   }
 
   fetch("/graphql", {
@@ -154,7 +154,13 @@ genButton.addEventListener('click', () => {
       Accept: "application/json",
     },
     body: JSON.stringify({ query }),
-  })  
+  }).then(response => response.text())
+    .then(data => {
+      console.log("Data returned 2:", data);
+    })
+    .catch(error => {
+      console.error("Request failed:", error);
+    });
 })
 
 

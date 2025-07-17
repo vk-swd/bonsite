@@ -10,13 +10,13 @@ const PORT = getEnv("MONITORING_PORT");
 
 export class MonitoringServer {
     private server: Server;
-    constructor(scrape: () => void = () => {}) {
+    constructor(scrape: () => void = () => {}, private register: prom.Registry = this.register) {
         this.server = createServer(async (req, res) => {
             if (req.url === '/metrics') {
                 res.setHeader('Content-Type', prom.register.contentType);
                 scrape();
                 res.writeHead(200);
-                res.end(await prom.register.metrics());     
+                res.end(await this.register.metrics());     
             }
         });
         this.server.listen(PORT, () => {

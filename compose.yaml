@@ -55,8 +55,9 @@ services:
         service: node_app
       volumes:
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/generator_parameters.ts:/${COMMON_DIR_NAME}/generator_parameters.ts
-        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
+        - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
+        - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:
@@ -115,8 +116,8 @@ services:
 
   prometheus:
     image: prom/prometheus
-    # ports:
-    #   - "127.0.0.1:9090:9090"
+    ports:
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./${PROMETHEUS_NAME}:${SOURCEDIR}
     container_name: "${PROMETHEUS_NAME}"

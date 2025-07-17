@@ -8,5 +8,5 @@ export const GenParametersValidator = z.object({
 
 export type GenParameters = z.infer<typeof GenParametersValidator>;
 
-export const startUrl = "/start"
-export const stoptUrl = "/stop"
+export const startUrl = "start"
+export const stoptUrl = "stop"

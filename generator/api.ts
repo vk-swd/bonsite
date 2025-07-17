@@ -10,27 +10,34 @@ export class GenApiServer extends EventEmitter {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.url}`)
-            if (req.method === 'POST' && req.url === startUrl) {
-                let data = '';
-                req.on('data', chunk => data += chunk);
-                req.on('end', () => {
-                    console.log(`RECEIVING SOME REQUEST dtaata ${data}`)
-                    try {
-                        const params: GenParameters = GenParametersValidator.parse(JSON.parse(data));
-                        // this.emit('start', params);
-                        res.writeHead(200);
-                        res.end();
-                    } catch (error) {
-                        res.writeHead(400);
-                        res.end(`Malformed JSON: ${error}`);
-                    }
-                });
-            } else if (req.method === 'POST' && req.url === stopUrl) {
-                // this.emit('stop');
+            if (req.method === 'POST') { 
+                if (req.url === '/' + startUrl) {
+                    let data = '';
+                    req.on('data', chunk => data += chunk);
+                    req.on('end', () => {
+                        console.log(`RECEIVING SOME REQUEST dtaata ${data}`)
+                        try {
+                            const ddd: GenParameters = JSON.parse(data)
+                            console.log(`parsing data ${ddd.maxTransactionsPerSec}`);
+                            const params: GenParameters = GenParametersValidator.parse(JSON.parse(data) as GenParameters);
+                            console.log(`Received parameters: ${JSON.stringify(params)}`);
+                            this.emit('start', params);
+                            res.writeHead(200);
+                            res.end();
+                        } catch (error) {
+                            res.writeHead(400);
+                            res.end(`Malformed JSON: ${error}`);
+                        }
+                    });
+                } else if (req.url === '/' + stopUrl) {
+                    this.emit('stop');
+                    res.writeHead(200);
+                    res.end();
+                }
             } else {
-                console.log(`RECEIVING SOME weird url ${req.url}`)
+                console.log(`RECEIVING SOME weird request ${req.url}`)
                 res.writeHead(404);
-                res.end('Not Found');
+                res.end('Unsupported request');
             }
         });
         this.server.listen(GENERATOR_PORT, () => {
