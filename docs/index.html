@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simple Docs with SVG Viewer</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2em;
+      background: #f5f5f5;
+    }
+    section {
+      margin-bottom: 2em;
+      background: white;
+      padding: 1em;
+      border-radius: 8px;
+      box-shadow: 0 0 4px #ccc;
+    }
+    svg {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #ccc;
+    }
+    #svgContainer {
+      margin-top: 1em;
+    }
+    details summary {
+        cursor: pointer;
+        color: blue;          /* optional: link color */
+        text-decoration: underline; /* optional: link underline */
+    }
+
+    details summary:hover {
+        color: darkblue;      /* optional: darker on hover */
+    }
+    ol.no-gap li {
+        margin-bottom: 0; /* removes space between list items */
+    }
+
+    ol.no-gap {
+        padding-left: 1.5em; /* optional: keep indentation */
+        margin: 0; /* remove extra top/bottom spacing if needed */
+    }
+  </style>
+</head>
+<body>
+  <h1>📘 Documentation</h1>
+
+  <section>
+    <h2>Overview</h2>
+    <h2>What</h2>
+    <p> This project demonstrates a simple Node.js + GraphQL + Kafka + MS SQL backend service architecture.
+        It will also include a basic observability stack with Prometheus and Grafana.
+        I have chosen to build a simple bank statement generator service that would 
+        replicate a hypothetical operation flow of services involved in transaction data
+        collection and its presentation, while providing minimal observability metrics of
+        the system performance.
+    </p>
+    <h2>Why</h2>
+    <p>
+        The problem choice is driven by the tech stack — which I realize isn’t the ideal way 
+        to approach engineering — but the goal of this project is to support a job application. 
+        Despite being tailored around specific technologies, I hope it still demonstrates 
+        skills and patterns that are transferable to other domains.
+    </p>
+
+    <h2>How</h2>
+    <p> The diagram on <a href="#Fig1">Pic.1</a> demonstrates basics of what system does.<br>
+        It is very limited view of a front - backend system.<br>
+        Client 1 uses front end to submit data to the server.<br>
+        Server processes the submission through several stages and generates internal data as needed.<br>
+        Client 2 or 1 can then retrieve relevant information including the one submitted by Client 1.<br>
+    </p>
+
+    <figure id="Fig1">
+        <object type="image/svg+xml" data="/umls/ServiceFlow.svg"></object>
+        <figcaption>Pic.1 Basic design</figcaption>
+    </figure>
+
+    <p>
+        The server will be composed of a multitude of distributed sets of services <br>
+        that will ensure data persistence, reliability and availability while <br>
+        providing high throughput and low latency.<br>
+        This is usually achieved by careful infrastructure planning and strategic <br>
+        separation of concerns. <br>
+        For a simple isolated case of statement generation the hypothetical system <br>
+        will be composed of the components presented in the diagram on
+        <a href="#Fig2">Pic.2</a>.
+        The basic principle of concern separation is to plan services in such a way
+        that they block each other as little as possible and provide an execution pipeline
+        that would allow maximise the magnitude of concurrent task execution. <br>
+        The components I chose are:
+        <ul>
+            <li>GraphQL API - a server processing frontend requests. 
+                Many devices can connect the server side simultaneously with
+                different queries and mutations. Having a distributed entry point
+                will allow to route those requests to the appropriate services.
+                Using GraphQL provides many benefits to frontend development like
+                schema introspection, type safety, simpler versioning and more.
+                Could be replaced with REST API but for convenience and presentation
+                purposes GraphQL is used here.
+                
+            </li>
+            <li>Transaction handler - this is a representation of an infrastructure
+                responsible for taking the transaction request, accepting it and
+                coordinating the reliable storage of the transaction data.
+            </li>
+            <li>Source of truith - this is a storage system of all the data that 
+                is created from the user activity. It can be represented as a single 
+                database in a small application.
+                In production grade scalable and reliable systems it is common to
+                separate storage based on the type of data.
+                - Critical, high-frequency, low-latency data (e.g. account balances) 
+                may live in specialized stores optimized for performance.
+                - Less critical or large-volume data (e.g. support logs, analytics, transaction notes) 
+                can be stored in more general-purpose systems.
+                Dedicated services manage access to this data.
+            </li>
+            <li>Statement generator - this is one of the hypothetical services I decided 
+                to implement. It handles data that can be optimised for querying and benefit
+                from using a relational system with indexing like MS SQL server.
+                This kind of data can also be delivered using a distributed messaging broker
+                like Kafka and be made available to other services while providing a reliable
+                temporary storage with very fast insertions.
+            </li>
+            <li>Frontend - this is some device application used by hypothetical users,
+                which can post a transaction and request a bank statement.
+            </li>
+        </ul>
+    </p>
+
+    <figure id="Fig2">
+        <object type="image/svg+xml" data="/umls/GraphQLOverviewHigh.svg"></object>
+        <figcaption>Pic.2 High level components</figcaption>
+    </figure>
+    
+    <p>
+        So putting together the assumptions the components I made earlier,
+        The source of truth can be represented as a combination of:
+        <li>Core database to store critical information about transactions</li>
+        <li>Kafka - it would provide a reliable way to store high vollumes of data long enough to be 
+        consumed by other services processing them.</li>
+        <li>MS SQL Server - it would provide a way to store data in a structured way, optimised for 
+        querying and reporting.</li>
+        This extends the system flow representation to the diagram on <a href="#Fig3">Pic.3</a>.
+    </p>
+    <figure id="Fig3">
+        <object type="image/svg+xml" data="/umls/GraphQLOverviewMed.svg"></object>
+        <figcaption>Pic.3 Expanded source of truith </figcaption>
+    </figure>
+    <p> 
+        Now, building such system is a complex task, especially with a production
+        grade guarantees in mind. This demo is not meant for that.
+        My intention is to explore a technology in a simple way.
+        For this reason I have decided to cut some corners:
+        <li> Client behavior will be generated. <br>It means I am not going to make 
+            any device apps. Instead I will emulate two kinds of actions:
+            <ol class="no-gap">
+                <li>Posting a transaction - can be automated by producing
+                    transaction requests between random users at random times.</li>
+                <li>Requesting a bank statement - can also be automated 
+                    by posting statement requests for random users and random time intervals.
+                </li>
+            </ol>
+        </li>
+        <li> There would be no transaction processor. <br> But it's operation will be emulated
+            by special kind of generated events in response to transaction requests.
+            Those events will emulate transaction processing latency and will also 
+            output transaction results. Both of which would be useful in system monitoring.
+        </li>
+        <li> Since there would be no transaction processor, neither will there be a 
+            dedicated database for latency critical data.
+        </li>
+        <li> There will be only one instance of Kafka and SQL Server.<br> This project is
+            meant to be run on a single machine. Although one could use Docker, tc, and/or other
+            tools to emulate a distributed environment and configure the storage systems
+            to demonstrate their robustness, those activities are beyond the scope of this project.            
+        </li>
+
+    </p>
+    <details>
+        <summary>Click to expand/collapse</summary>
+        <p>This content is hidden until you click the summary.</p>
+    </details>
+  </section>
+  <section>
+    <h2>Load SVG</h2>
+    <p>Upload an <code>.svg</code> file to view it below:</p>
+    <input type="file" id="svgFile" accept=".svg" />
+    <div id="svgContainer"></div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <ul>
+      <li>Links in SVGs work if they use <code>xlink:href</code> or <code>&lt;a&gt;</code> tags.</li>
+      <li>Inline styles and interactivity (like JS in SVG) may be blocked for security reasons depending on the browser.</li>
+    </ul>
+  </section>
+  <object type="image/svg+xml" data="/umls/overviewHigh.svg"></object>
+  <section>
+    <h2>Notes</h2>
+    <p>Links in SVGs work if they use <code>xlink:href</code> or <code>&lt;a&gt;</code> tags.</p>
+    <li>Inline styles and interactivity (like JS in SVG) may be blocked for security reasons depending on the browser.</li>
+  </section>
+  <!-- <script>
+    document.getElementById('svgFile').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (event) {
+        const svgText = event.target.result;
+
+        // Sanitize or trust as needed. Here we inject as-is:
+        document.getElementById('svgContainer').innerHTML = svgText;
+      };
+      reader.readAsText(file);
+    });
+  </script> -->
+</body>
+</html>

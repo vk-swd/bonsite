@@ -1,0 +1,18 @@
+@startuml
+
+participant "Client1" as C
+participant "GraphQL\nCoordinator #1" as Gq
+participant "Transaction\nHandler" as Th
+participant "Source Of Truth" as S
+participant "Statment\nGenerator" as Sg
+participant "GraphQL\nCoordinator #2" as Gq2
+participant "Client2" as C2
+
+C -> Gq: Request\nTransaction T1
+Gq -> Th: Send T1 for\nProcessing
+Th -> S: Save\nProcessed\nT1
+S -> Sg: Get data\nto generate\nstatement\nwith T1
+Sg -> Gq2: Generate\nstatement\nwith T1
+Gq2 -> C2: Deliver\nstatement\nwith T1
+
+@enduml

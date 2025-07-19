@@ -1,0 +1,26 @@
+@startuml
+
+participant "Client1" as C
+participant "GraphQL\nCoordinator #1" as Gq
+participant "Transaction\nHandler" as Th
+
+box "Source Of Truth" #b1bcb1
+participant "Core\nDatabase" as CDB
+participant Kafka as K
+participant "MS SQL Server" as MS
+end box
+
+participant "Statment\nGenerator" as Sg
+participant "GraphQL\nCoordinator #2" as Gq2
+participant "Client2" as C2
+
+C -> Gq: Request\nTransaction T1
+Gq -> Th: Send T1 for\nProcessing
+Th -> CDB: Update balances\nstore T1 ID
+Th -> K: Save T1 details
+K -> MS: Consume T1.\nStore it for\nquerying
+MS -> Sg: Query\ntransactions
+Sg -> Gq2: Generate\nstatement\nwith T1
+Gq2 -> C2: Deliver\nstatement\nwith T1
+
+@enduml

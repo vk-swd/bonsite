@@ -171,9 +171,6 @@ class KConsumer {
       //   console.error(`Failed to run the consumption: ${e}`);
       // });
     })
-
-
-
     this.consumer.on('consumer.disconnect', () => {
       this.stats.disconnects++;
       this.isConnected = false;

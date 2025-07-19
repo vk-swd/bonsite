@@ -1,0 +1,51 @@
+
+@startuml
+
+participant "Web\ntesting\nboard" as W
+participant "<u><font color=blue>Client\n<u><font color=blue>Event\n<u><font color=blue>Generator" as C [[/components/generator.html]]
+participant "GraphQL API \n gateway" as F
+participant Kafka as K
+
+box "Statement" #b1bcb1
+participant Scraper as SS
+participant DB
+participant Builder as SB
+participant CDN
+end box
+
+box "Monitoring" #afbcf1
+participant Adapter as MA
+participant Prometheus as MP
+participant Graphana as MG
+end box
+
+W -> C: start(generation parameters)
+C -> K: Transaction
+C -> K: Transaction result (delayed)
+
+group "Scrape data" 
+SS -> K: scrape at intervals
+K -> SS: transactions \nresults
+SS -> DB: write
+DB -> SS: done
+SS -> K: commit
+end
+
+W -> DB: get user names and ids
+DB -> W: user naames adn ids
+
+W -> F: statement request
+F -> SB: statement request
+SB -> DB: get data
+DB -> SB: data
+SB -> CDN: save composed statement
+CDN -> SB: save complete (link)
+SB -> F: statement link
+F -> W: statement
+
+MA -> K: get data at intervals
+K -> MA: data
+MA -> MP: sent snapshot
+MP -> MG: dash board
+MG -> W: snippet
+@enduml

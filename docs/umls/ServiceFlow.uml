@@ -1,0 +1,10 @@
+@startuml
+
+participant "Client1" as C1
+participant  Server as S
+participant "Client2" as C2
+
+C1 -> S: Transaction (T1) with C2
+S -> C2: Statement with T1
+
+@enduml
