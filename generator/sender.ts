@@ -25,24 +25,29 @@ export class Sender {
     }
     start(params: GenParameters) {
         // console.log(`starting generator with params ${JSON.stringify(params)} stats ${JSON.stringify(this.stats)}`);
-        this.generator.setParameters(params);
+        this.generator.start(params, Date.now());
         if (this.timeout != undefined) {
             return;
         }
-        const genInterval = params.generationIntervalMs;
+        if (params.generationIntervalMs <= 0 || params.generationIntervalMs > 10000) {
+            throw new Error(`Invalid generation interval ${params.generationIntervalMs} ms`);
+        }
+        if (params.maxTransactionsPerSec <= 0 || params.maxTransactionsPerSec > 10000) {
+            throw new Error(`Invalid max transactions per second ${params.maxTransactionsPerSec}`);
+        }
         // this.stats.lastSendTimeMs = Date.now();
-        this.timeout = setTimeout(() => { this.sendEvents(genInterval)} , genInterval);
+        this.timeout = setTimeout(() => { this.sendEvents()} , params.generationIntervalMs);
     }
-    sendEvents(interval: number) {
+    sendEvents() {
         const now = Date.now();
         this.stats.maxSendIntervalMs = Math.max(now - this.stats.lastSendTimeMs, this.stats.maxSendIntervalMs); 
         this.stats.lastSendTimeMs = now;
         /* convert time increment into proper time of day as 1 second will equal one day */
-        const events = this.generator.getEvents(interval)
-        console.log(`Sending events ${JSON.stringify(events)} every ${interval} ms stats ${JSON.stringify(this.stats)} and this ${JSON.stringify(this.lastEvent)} and ${this}`);
+        const events = this.generator.getEvents(now)
+        console.log(`Sending events ${JSON.stringify(events)} at ${now} ms stats ${JSON.stringify(this.stats)} and this ${JSON.stringify(this.lastEvent)} and ${this}`);
         
         events.forEach(e => this.send(e))
-        this.timeout = setTimeout(() => { this.sendEvents(interval) }, interval);
+        this.timeout?.refresh()
     }
     stop() {
         if (this.timeout == undefined) {

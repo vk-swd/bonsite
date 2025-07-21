@@ -71,6 +71,9 @@ export class PriorityQ<T> {
     isEmpty() {
         return this.heap.length === 0;
     }
+    size(): number {
+        return this.heap.length;
+    }
 }
 
 
@@ -83,16 +86,14 @@ export function testQ() {
         arr.sort((a,b) => a - b);
         const resArr = Array.from({ length: arr.length}, () => q.pop());
 
-        const dff = new Array<string>();
-        for (let i = 0; i < arr.length; i++) {
-            if (arr[i] != resArr[i]) {
-                dff.push(`${i}:(${arr[i]} vs ${resArr[i]})`)
+        let lastVal = -1;
+        for (let i1 = 0; i1 < resArr.length; i1++) {
+            const v = resArr[i1];
+            if (v == undefined || v < lastVal) {
+                console.log(`TEST FAILURE. ${v} < ${lastVal} at ${i1} of ${i} sample of size ${arr.length}`);
+                throw new Error(`Test failed at ${i}`);
             }
-        }
-        if (dff.length > 0) {
-            console.log(`TEST FAILURE. source: ${arr}`)
-            console.log(`TEST FAILURE. dst: ${resArr}`)
-            throw new Error(`Failed at ${dff}`)
+            lastVal = v;
         }
     }
     console.log(`${new Date().toLocaleString()} ending test`)

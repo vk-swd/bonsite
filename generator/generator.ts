@@ -26,72 +26,63 @@ export type TransactionResultScheduled = {
 
 const KAFKA_TOPICS_TRANSACTIONS: string = getEnv("KAFKA_TOPICS_TRANSACTIONS");
 const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
+const MS_PER_SECOND = 1000;
 export type TransactionEvent = {topic: string, event: Transaction | TransactionResult}
 
 class TransactionEventsQueue {
-    // Scheduled transactions will be ordered naturally, but their processing time is random
-    // PriorityQueue used to avoid sorting and perform a "merge-sort" like deque.
-    private results = new PriorityQ<TransactionResultScheduled>((a, b) => a.dateTime < b.dateTime);
-    private transactions = new Array<Transaction>();
-    lastTransaction(): Transaction | undefined {
-        return last(this.transactions);
+    private events = new PriorityQ<TransactionEvent>((a,b) => a.event.dateTime < b.event.dateTime);
+    private lastTransactionTime: number | undefined = undefined;
+    getLastTransactionTime(): number | undefined {
+        return this.lastTransactionTime;
     }
-    size() {
-        return this.transactions.length;
+    enqueEvent(event: TransactionEvent) {
+        if (event.topic === KAFKA_TOPICS_TRANSACTIONS) {
+            this.lastTransactionTime = event.event.dateTime;
+        }
+        this.events.push(event);
     }
-
-    deque(now: number): Array<TransactionEvent>{
-        // Take all transaction and results scheduled before "now"
-        let tPos = 0;
+    size(): number {
+        return this.events.size();
+    }
+    dequeEvents(now: number): Array<TransactionEvent> {
         const res = new Array<TransactionEvent>();
-        /*  "About while"
-            If "transactions" has elements, then "results" will also have them, because:
-                1) For every planned event, there will always be a result in "results".
-                2) More events are planned then going to be consumed in any single interval
-        */
-        while (tPos < this.transactions.length && this.transactions[tPos].dateTime < now) {
-            if (this.transactions[tPos].dateTime <= this.results.peek()!.dateTime) {
-                res.push({ topic: KAFKA_TOPICS_TRANSACTIONS, event: this.transactions[tPos] });
-                tPos++;
-            } else {
-                // Read "About while" for unchecked "pop"
-                res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()!.event() });
-            }
+        while (!this.events.isEmpty() && this.events.peek()!.event.dateTime < now) {
+            res.push(this.events.pop()!);
         }
-        // Check trailing results.
-        while (this.results.peek() !== undefined && this.results.peek()!.dateTime < now) {
-            res.push({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: this.results.pop()!.event() });
-        }
-        this.transactions.splice(0, tPos);
-        return res;
-    }
-    enque(transaction: Transaction, result: TransactionResultScheduled) {
-        this.transactions.push(transaction);
-        this.results.push(result)
+        return res;        
     }
 }
 
+class DelayGenerator {
+    /* Though of having a more interesting distribution, but for now
+       just a random number between 0 and maxDelayMs */
+    constructor(private maxDelayMs: number = 100) {}
+    delay(now: number): number {
+        return now + Math.random() * this.maxDelayMs;
+    }
+}
 export class Generator {
     static transactionId = 0;
     static resultTransactionId = 0;
     private queue = new TransactionEventsQueue();
     private currentParams: GenParameters | undefined = undefined;
     private now = 0;
-    setParameters(params: GenParameters) {
+    private delayGenerator = new DelayGenerator(100);
+    start(params: GenParameters, now: number) {
+        this.now = now;
         // Generation is done under assumption that every second represents 1 day
         // Convert the params.requestIntervalMs to dayTimeMs
         this.currentParams = params;
+        this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
     }
-    getEvents(intervalMs: number): Array<TransactionEvent> {
-        const intervalEnd = this.now + intervalMs;
-
-        const lastT = this.queue.lastTransaction();
-
-        if (!lastT || lastT.dateTime < intervalEnd) {
-            this.generate(intervalMs * 2, this.now);
+    getEvents(now: number): Array<TransactionEvent> {
+        const intervalMs = now - this.now;
+        if (this.queue.getLastTransactionTime() ?? -1 < now) {
+            // Generate in seconds to better preserve the "transactionPerSecond" ratio
+            this.generate(Math.ceil(intervalMs / MS_PER_SECOND) * MS_PER_SECOND, this.now);
         }
-        this.now += intervalMs;
-        return this.queue.deque(this.now);
+        this.now = now;
+        return this.queue.dequeEvents(this.now);
     }
     generate(interval: number, now: number) {
         if (this.currentParams == undefined) {
@@ -102,10 +93,10 @@ export class Generator {
                 transaction result delay will be random.
         */        
         const maxTotalEventsPerSec = this.currentParams.maxTransactionsPerSec * this.currentParams.userCount;
-        const maxEventsPerInterval = maxTotalEventsPerSec * interval / 1000 ;
+        const maxEventsPerInterval = maxTotalEventsPerSec * interval / MS_PER_SECOND ;
         const eventCount = Math.round(Math.random() * maxEventsPerInterval);
         const timeIncrement = interval / Math.max(1, eventCount);
-        console.log(`Generating ${eventCount} events with time increment ${timeIncrement} ms`);
+        // console.log(`Generating ${eventCount} events with time increment ${timeIncrement} ms`);
         for (let i = 0; i < eventCount; i++) {
             now += timeIncrement;
             // Can make internal transfers too (same id to and from)
@@ -115,26 +106,63 @@ export class Generator {
                 id: Generator.transactionId++,
                 userIdFrom,
                 userIdTo,
-                dateTime: now,
+                dateTime: Math.floor(now),
                 amount: Math.random() * 1000
             }
-            const scheduledResultTime = now + Math.random() * 100
-            const scheduledResult: TransactionResultScheduled = {
-                dateTime: scheduledResultTime,
-                event: () => { 
-                    const state = generateTransactionResult();
-                    const res = {
-                        dateTime: scheduledResultTime,
-                        transactionID: transaction.id,
-                        state
-                    } as TransactionResult;
-                    if (state === TResult.CONFIRMED) {
-                        res.resultTransactionId = Generator.resultTransactionId++;
-                    }
-                    return res;
-                }
+            const result: TransactionResult = {
+                dateTime: this.delayGenerator.delay(now),
+                transactionID: transaction.id,
+                state: generateTransactionResult()
             }
-            this.queue.enque(transaction, scheduledResult);
+            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: transaction });
+            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: result });
         }
     }
+    queueSize(): number {
+        return this.queue.size();
+    }
+}
+
+export function testGeneratorContinuous() {
+    const gen = new Generator();
+    const generationIntervalMs = 100;
+    let now = Date.now();
+    const params: GenParameters = { userCount: 1000, maxTransactionsPerSec: 5, generationIntervalMs, maxDelayMs: 300 };
+    gen.start(params, now);
+    const maxEventsPerSec = params.userCount * params.maxTransactionsPerSec * params.generationIntervalMs
+    let maxQS = 0;
+    let maxConsumed = 0;
+    const maxEventsToReserve = Math.ceil(MS_PER_SECOND / generationIntervalMs) * maxEventsPerSec;
+    const inter = setInterval(() => {
+        const newNow = Date.now();
+        console.log(`current pending events ${gen.queueSize()} at ${newNow} ms maxConsumed ${maxConsumed} maxQueueSize ${maxQS}`);
+    }, 1000);
+    const to1: NodeJS.Timeout = setTimeout(() => {
+        const newNow = Date.now();
+        if (newNow - now > generationIntervalMs + 200) {
+            throw new Error(`Something hangs: ${newNow - now} ms`);
+        }
+        const maxLeftoverTransactions = generationIntervalMs * maxEventsPerSec / MS_PER_SECOND;
+        const maxTransactionResultCountOfOccurredTransactions = Math.ceil(maxEventsPerSec * params.maxDelayMs! / MS_PER_SECOND);
+        const maxLeftoverTransacionResults = maxLeftoverTransactions + maxTransactionResultCountOfOccurredTransactions
+        const maxLeftoverEventsBeforeMaybeGeneration = maxLeftoverTransacionResults + maxLeftoverTransactions;
+        const maxEventsToConsume = Math.ceil((newNow - now) * maxEventsPerSec * 2 / generationIntervalMs);
+        const maxQueueSize = maxEventsToConsume + maxLeftoverEventsBeforeMaybeGeneration;
+        if (gen.queueSize() >  maxQueueSize) {
+            throw new Error(`Queue leaked: ${gen.queueSize()} > ${maxQueueSize}`);
+        }
+        maxQS = Math.max(maxQS, gen.queueSize());
+
+        const events = gen.getEvents(newNow);
+        maxConsumed = Math.max(maxConsumed, events.length);
+        let lastEventTime = 0;
+        for (const e of events) {
+            if (e.event.dateTime < lastEventTime) {
+                throw new Error(`Events are not ordered: ${e.event.dateTime} < ${lastEventTime}`);
+            }
+            lastEventTime = e.event.dateTime;
+        }
+        now = newNow;
+        to1.refresh()
+    }, generationIntervalMs);
 }

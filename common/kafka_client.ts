@@ -200,16 +200,20 @@ class KConsumer {
 
     })
     this.tryConnect()
-    this.consumer.run({
-        // eachMessage: this.handleMessage,
-        eachBatch: (batch) => this.handleBatch(batch),
-        autoCommit: false,
-    })
+    // this.consumer.run({
+    //     // eachMessage: this.handleMessage,
+    //     eachBatch: (batch) => this.handleBatch(batch),
+    //     autoCommit: false,
+    // })
     // this.consumer.seek(pos);
     // this.consumer.seek({topic, partition: 1, offset:"0"})
   }
   handleBatch(pl: kf.EachBatchPayload): Promise<void> {
     const { topic, partition, messages } = pl.batch;
+    if (pl.isStale()) {
+      console.warn(`Batch is stale, skipping processing for topic ${topic} partition ${partition}`);
+      return Promise.resolve();
+    }
     const res = this.subscribedTopics.get(topic)
     if (res !== undefined) {
       return res(pl);
@@ -290,16 +294,12 @@ class KConsumer {
       console.warn(`Already subscribed to topic ${topic}, skipping subscription`);
       return;
     }
-    if (pos !== undefined) {
-      this.consumer.seek({ topic, partition: 0, offset: pos.toString() });
-    } else {
-      this.consumer.seek({ topic, partition: 0, offset: "0" });
-    }
     await this.consumer.stop();
     await this.consumer.subscribe({ topic });
     await this.consumer.run({
       eachBatch: (batch) => this.handleBatch(batch),
       autoCommit: false,})
+    this.consumer.seek({ topic, partition: 0, offset: (pos??0).toString() });
   }
 }
 export class KClient {
@@ -313,13 +313,13 @@ export class KClient {
   public consumer: KConsumer | undefined = undefined;
   private kf: kf.Kafka;
   constructor(public config: KClientConfig) {
+    const clientId = `C${KClient.clientIdCounter}_${this.config.name}`
     this.kf = new kf.Kafka({
       // No quotas and authentication/acl => no clientid and ssl/sasl
-      clientId: `C${KClient.clientIdCounter}_${this.config.name}`,
+      clientId,
       brokers: this.config.brokers,
     })
-
-    console.log(`creating blokers at ${KAFKA_HOSTNAME}`)
+    console.log(`Making client ${clientId} at ${KAFKA_HOSTNAME}`)
   }
   async send(msg: string, topic: string, partition?: number) {
     if (this.producer === undefined) {
@@ -334,7 +334,11 @@ export class KClient {
 
   async subscribe(topic: string, handler: (pl: kf.EachBatchPayload) => Promise<void>, pos?: number) {
     if (this.consumer === undefined) {
-      this.consumer = new KConsumer(this.kf.consumer({ groupId: "1", allowAutoTopicCreation: true }));
+      this.consumer = new KConsumer(this.kf.consumer({ 
+        groupId: "1",
+         allowAutoTopicCreation: true, 
+         sessionTimeout: 7000, 
+        heartbeatInterval: 2000}));
     }
     this.consumer.subscribe(topic, handler, pos);
     // if (!this.subscribedTopics.has(topic)) {
