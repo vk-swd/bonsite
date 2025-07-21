@@ -107,6 +107,10 @@ const app = express();
  
 app.all(
   "/graphql",
+  // (req, res) => {
+  //   console.log(`request received ${req.method} ${req.url}`);
+  //   return 1
+  // }
   createHandler({
     schema,
     rootValue: Query,

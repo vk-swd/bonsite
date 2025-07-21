@@ -143,7 +143,7 @@ genButton.addEventListener('click', () => {
     genButton.textContent = "Started Gen"
     genButton.dataset.isStarted = "true";
     query = `{ startGen(params: {userCount: ${1}, 
-      maxTransactionsPerSec: ${10}, 
+      maxTransactionsPerSec: ${1}, 
       generationIntervalMs: ${1000}}) }`
   }
 

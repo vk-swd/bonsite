@@ -1,0 +1,58 @@
+
+services:
+  node_app:
+      image: node:20-slim
+      volumes:
+        - "${WORKDIR}"
+        - ./tsconfig.json:${WORKDIR}/tsconfig.json
+        - ${WORKDIR}/${COMMON_DIR_NAME}
+        - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
+        - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
+      working_dir: ${WORKDIR}
+      entrypoint: ["/bin/bash", "-c"]
+      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; exec bash"]
+      environment:
+        - NODE_PRESERVE_SYMLINKS=1
+      networks: 
+        - backend_net
+      tty: true
+      stdin_open: true
+
+  node_kafka_app:
+    extends:
+      service: node_app
+    volumes:
+      - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+      - ./${COMMON_DIR_NAME}/kafka_client.ts:${WORKDIR}/${COMMON_DIR_NAME}/kafka_client.ts
+      - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+      - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
+    environment:
+      - KAFKA_HOSTNAME=${KAFKA_HOST}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - KAFKA_TOPICS_TRANSACTIONS=${KAFKA_TOPICS_TRANSACTIONS}
+      - KAFKA_TOPICS_TRANSACTION_RESULTS=${KAFKA_TOPICS_TRANSACTION_RESULTS}
+      - MONITORING_PORT=${PROM_PORT}
+
+  kafka-app:
+    image: apache/kafka:3.9.1
+    volumes:
+      - "${WORKDIR}"
+    working_dir: ${WORKDIR}
+    tty: true
+    environment:
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@${KAFKA_HOST}:9093'
+      KAFKA_LISTENERS: 'CONTROLLER://:9093,PLAINTEXT://:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+    networks: 
+        - backend_net

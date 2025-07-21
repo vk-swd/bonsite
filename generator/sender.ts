@@ -34,12 +34,14 @@ export class Sender {
         this.timeout = setTimeout(() => { this.sendEvents(genInterval)} , genInterval);
     }
     sendEvents(interval: number) {
-        console.log(`Sending events every ${interval} ms stats ${JSON.stringify(this.stats)} and this ${JSON.stringify(this.lastEvent)} and ${this}`);
         const now = Date.now();
         this.stats.maxSendIntervalMs = Math.max(now - this.stats.lastSendTimeMs, this.stats.maxSendIntervalMs); 
         this.stats.lastSendTimeMs = now;
         /* convert time increment into proper time of day as 1 second will equal one day */
-        this.generator.getEvents(interval).forEach(e => this.send(e))
+        const events = this.generator.getEvents(interval)
+        console.log(`Sending events ${JSON.stringify(events)} every ${interval} ms stats ${JSON.stringify(this.stats)} and this ${JSON.stringify(this.lastEvent)} and ${this}`);
+        
+        events.forEach(e => this.send(e))
         this.timeout = setTimeout(() => { this.sendEvents(interval) }, interval);
     }
     stop() {

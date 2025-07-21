@@ -25,7 +25,7 @@ export type TransactionResultScheduled = {
 
 
 const KAFKA_TOPICS_TRANSACTIONS: string = getEnv("KAFKA_TOPICS_TRANSACTIONS");
-const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTIONS_RESULTS");
+const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
 export type TransactionEvent = {topic: string, event: Transaction | TransactionResult}
 
 class TransactionEventsQueue {
@@ -91,7 +91,7 @@ export class Generator {
             this.generate(intervalMs * 2, this.now);
         }
         this.now += intervalMs;
-        return this.queue.deque(intervalMs);
+        return this.queue.deque(this.now);
     }
     generate(interval: number, now: number) {
         if (this.currentParams == undefined) {
@@ -103,9 +103,9 @@ export class Generator {
         */        
         const maxTotalEventsPerSec = this.currentParams.maxTransactionsPerSec * this.currentParams.userCount;
         const maxEventsPerInterval = maxTotalEventsPerSec * interval / 1000 ;
-        const eventCount = Math.random() * maxEventsPerInterval;
-        const timeIncrement = interval / eventCount;
-        
+        const eventCount = Math.round(Math.random() * maxEventsPerInterval);
+        const timeIncrement = interval / Math.max(1, eventCount);
+        console.log(`Generating ${eventCount} events with time increment ${timeIncrement} ms`);
         for (let i = 0; i < eventCount; i++) {
             now += timeIncrement;
             // Can make internal transfers too (same id to and from)

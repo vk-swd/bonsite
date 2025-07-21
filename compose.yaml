@@ -4,32 +4,28 @@ networks:
     name: backend_net
 
 volumes:
-  vol1:
+  frontend_deploy_folder:
   config_folder:
+
+x-environment: &mssql_env
+  MSSQL_HOSTNAME: ${MSSQL_HOSTNAME}
+  MSSQL_PASSWORD: ${MSSQL_PASSWORD}
+  MSSQL_DB_NAME: ${MSSQL_DB_NAME}
+  MSSQL_CONSUMER_USERNAME: ${MSSQL_CONSUMER_USERNAME}
+  MSSQL_STATEMENT_CREATOR_USERNAME: ${MSSQL_STATEMENT_CREATOR_USERNAME}
+
 
 # Environment variables are read from .env file automatically
 services:
-  config_folder_mounter:
-    # Copy tsconfig into a named volume "config_folder"
-    #   so it is mounted inside the "node_app" base service
-    #   to avoid the " - ../tsconfig.json:${CONFIG_FOLDER}"
-    image: busybox
-    volumes:
-      - config_folder:${CONFIG_FOLDER}
-      - ./:${SOURCEDIR}
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["cp ${SOURCEDIR}/tsconfig.json ${CONFIG_FOLDER}/; ls ${CONFIG_FOLDER}/"]
-    container_name: config_folder_mounter
-
   frontend_builder:
       extends: 
-        file: base_yamls/node_app.yaml
+        file: base_services.yaml
         service: node_app
       environment:
         - FRONTEND_DEPLOY_FOLDER=${FRONTEND_DEPLOY_FOLDER}
       volumes:
         - ./${FRONTEND_NAME}:${SOURCEDIR}
-        - vol1:${FRONTEND_DEPLOY_FOLDER}
+        - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
       container_name: frontend_builder
       tty: false
       stdin_open: false
@@ -43,7 +39,7 @@ services:
       - NGINX_PORT=${NGINX_PORT}
       - NGINX_FOLDER=${NGINX_FOLDER}
     volumes:
-    - vol1:/${NGINX_FOLDER}
+    - frontend_deploy_folder:/${NGINX_FOLDER}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:81:81"
@@ -51,13 +47,11 @@ services:
       - backend_net
   gql:
       extends: 
-        file: base_yamls/node_app.yaml
+        file: base_services.yaml
         service: node_app
-      volumes:
+      volumes: 
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
-        - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
-        - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:
@@ -66,43 +60,15 @@ services:
 
   generator:
       extends: 
-        file: base_yamls/node_app.yaml
-        service: node_app
+        file: base_services.yaml
+        service: node_kafka_app
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/kafka_client.ts:${WORKDIR}/${COMMON_DIR_NAME}/kafka_client.ts
-        - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
-        - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
-        - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
-        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
-        - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
-      container_name: "${GENERATOR_NAME}"
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
-        - KAFKA_BROKERS=${KAFKA_BROKERS}
-        - MONITORING_PORT=${PROM_PORT}
-        - KAFKA_TOPICS_TRANSACTIONS=${KAFKA_TOPICS_TRANSACTIONS}
-        - KAFKA_TOPICS_TRANSACTIONS_RESULTS=${KAFKA_TOPICS_TRANSACTIONS_RESULTS}
 
-  graphana:
-    image: grafana/grafana:11.6.3
-    container_name: "${GRAPHANA_NAME}"
-    hostname: "${GRAPHANA_NAME}"
-    volumes:
-      -  /${GRAPHANA_DASHBOARD_FOLDER}
-      - ./${GRAPHANA_NAME}/datasources.yaml:/etc/grafana/provisioning/datasources/datasource.yaml
-      - ./${GRAPHANA_NAME}/grafana.ini:/etc/grafana/grafana.ini
-      - ./${GRAPHANA_NAME}/dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
-      - ./${GRAPHANA_NAME}/dash1.json:/${GRAPHANA_DASHBOARD_FOLDER}/dash1.json
-    environment:
-      - PROMETHEUS_HOST=${PROMETHEUS_NAME}
-      - PROMETHEUS_PORT=9090
-      - GRAPHANA_DASHBOARD_FOLDER=${GRAPHANA_DASHBOARD_FOLDER}
-    ports:
-      - "127.0.0.1:${GRAPHANA_PORT_HOST}:3000"
-    networks: 
-      - backend_net
+ 
 
   # monitoring-analytics:
   #   extends:
@@ -120,7 +86,6 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./${PROMETHEUS_NAME}:${SOURCEDIR}
-    container_name: "${PROMETHEUS_NAME}"
     hostname: "${PROMETHEUS_NAME}"
     entrypoint: ["sh", "-c"]
     tty: true
@@ -131,27 +96,32 @@ services:
     networks: 
       - backend_net
 
-
+  graphana:
+    image: grafana/grafana:11.6.3
+    hostname: "${GRAPHANA_NAME}"
+    volumes:
+      -  /${GRAPHANA_DASHBOARD_FOLDER}
+      - ./${GRAPHANA_NAME}/datasources.yaml:/etc/grafana/provisioning/datasources/datasource.yaml
+      - ./${GRAPHANA_NAME}/grafana.ini:/etc/grafana/grafana.ini
+      - ./${GRAPHANA_NAME}/dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./${GRAPHANA_NAME}/dash1.json:/${GRAPHANA_DASHBOARD_FOLDER}/dash1.json
+    environment:
+      - PROMETHEUS_HOST=${PROMETHEUS_NAME}
+      - PROMETHEUS_PORT=9090
+      - GRAPHANA_DASHBOARD_FOLDER=${GRAPHANA_DASHBOARD_FOLDER}
+    ports:
+      - "127.0.0.1:${GRAPHANA_PORT_HOST}:3000"
+    networks: 
+      - backend_net
+  
   kafka1:
     extends: 
-      file: base_yamls/node_app.yaml
+      file: base_services.yaml
       service: kafka-app
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
-    container_name: "${KAFKA_HOST}"
     hostname: "${KAFKA_HOST}"
-
-  # kafka2:
-  #   extends: 
-  #     file: base_yamls/node_app.yaml
-  #     service: kafka-app
-  #   environment:
-  #     KAFKA_NODE_ID: 2
-  #     KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}2:9092'
-  #   container_name: "${KAFKA_HOST}2"
-  #   hostname: "${KAFKA_HOST}2"
-
 
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -161,55 +131,31 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
-    ports:
-      - name: mdb
-        target: 1433
-        published: 1433
-        host_ip: "127.0.0.1"
-    
-    #   - "1433:1433"
     hostname: "${MSSQL_HOSTNAME}"
-    container_name: "${MSSQL_HOSTNAME}"
     networks: 
         - backend_net
 
   db_initializer:
       extends: 
-        file: base_yamls/node_app.yaml
+        file: base_services.yaml
         service: node_app
       volumes:
         - ./${DB_INITIALIZER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/utils.ts:/${COMMON_DIR_NAME}/utils.ts
         - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/db_defines.ts:/${COMMON_DIR_NAME}/db_defines.ts
-      container_name: "${DB_INITIALIZER_NAME}"
       environment:
-        - MSSQL_DB_NAME=${MSSQL_DB_NAME}
-        - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
-        - MSSQL_SA_USERNAME=${MSSQL_SA_USERNAME}
-        - MSSQL_CONSUMER_USERNAME=${MSSQL_CONSUMER_USERNAME}
-        - MSSQL_STATEMENT_CREATOR_USERNAME=${MSSQL_STATEMENT_CREATOR_USERNAME}
-        - MSSQL_PASSWORD=${MSSQL_PASSWORD}
+        << : [*mssql_env]
+        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
 
   db_consumer:
       extends: 
-        file: base_yamls/node_app.yaml
-        service: node_app
+        file: base_services.yaml
+        service: node_kafka_app
       volumes:
         - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}:/${COMMON_DIR_NAME}/
-        - ./${COMMON_DIR_NAME}/monitoring.ts:/${COMMON_DIR_NAME}/monitoring.ts
-        - ./${MSSQL_CMD_NAME}/initDB.sql:${WORKDIR}/initDB.sql
         - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
-        - ./${COMMON_DIR_NAME}/db_defines.ts:/${COMMON_DIR_NAME}/db_defines.ts
-        
-      container_name: "${DB_CONSUMER_NAME}"
-      hostname: "${DB_CONSUMER_NAME}"
+        - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
       environment:
-        - KAFKA_BROKERS=${KAFKA_BROKERS}
-        - MSSQL_PASSWORD=${MSSQL_PASSWORD}
-        - MSSQL_SA_USERNAME=${MSSQL_SA_USERNAME}
-        - MSSQL_DB_NAME=${MSSQL_DB_NAME}
-        - MSSQL_HOSTNAME=${MSSQL_HOSTNAME}
+        << : [*mssql_env]
 
 

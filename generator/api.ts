@@ -15,7 +15,7 @@ export class GenApiServer extends EventEmitter {
                     let data = '';
                     req.on('data', chunk => data += chunk);
                     req.on('end', () => {
-                        console.log(`RECEIVING SOME REQUEST dtaata ${data}`)
+                        console.log(`RECEIVING SOME REQUEST data ${data}`)
                         try {
                             const ddd: GenParameters = JSON.parse(data)
                             console.log(`parsing data ${ddd.maxTransactionsPerSec}`);

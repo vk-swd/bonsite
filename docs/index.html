@@ -171,16 +171,37 @@
         <li> Since there would be no transaction processor, neither will there be a 
             dedicated database for latency critical data.
         </li>
+        <li> For more convenience (although it is a matter of preference), it was chosen to set up a
+            minimalistiv web UI displaying some basic controls for processes implemented in this project.
+        </li>
+        <li> TODO:actually rewrite this...make this gql server also send data into kafka.
+            explain that i decided to cut cornere here and make one server for ui and generation.
+
+            
+            The generation will be done directly into Kafka. <br> To closer emulate real life
+            all generated transaction requests would have to go through a graph ql service,
+            but to simplify architecture a generator will write events directly into Kafka. </li>
+
+
+
+
+
+
+    </p>
+    <details>
+        <summary>For later</summary>
+        <p>This content is hidden until you click the summary.</p>
         <li> There will be only one instance of Kafka and SQL Server.<br> This project is
             meant to be run on a single machine. Although one could use Docker, tc, and/or other
             tools to emulate a distributed environment and configure the storage systems
             to demonstrate their robustness, those activities are beyond the scope of this project.            
         </li>
-
-    </p>
-    <details>
-        <summary>Click to expand/collapse</summary>
-        <p>This content is hidden until you click the summary.</p>
+        <li>
+            There will also be a single kafka consumer per service accessing the messages
+            as it is not practical to run multiple consumers sharing same io resources.
+            For the same reason single partition will be used for data storage as no
+            parallel consumption will take place.
+        </li>
     </details>
   </section>
   <section>

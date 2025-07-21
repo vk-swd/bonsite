@@ -152,7 +152,6 @@ class KConsumer {
   retryTimeout: NodeJS.Timeout | undefined = undefined;
   stats = new ConsumeStats();
   constructor(private consumer: kf.Consumer) {
-
     this.consumer.on('consumer.connect', () => {
       this.isConnected = true;
       if (this.retryTimeout !== undefined) {
@@ -202,14 +201,20 @@ class KConsumer {
     })
     this.tryConnect()
     this.consumer.run({
-        eachMessage: this.handleMessage,
+        // eachMessage: this.handleMessage,
+        eachBatch: (batch) => this.handleBatch(batch),
         autoCommit: false,
     })
     // this.consumer.seek(pos);
     // this.consumer.seek({topic, partition: 1, offset:"0"})
   }
-  handleBatch(pl: kf.EachBatchPayload) {
+  handleBatch(pl: kf.EachBatchPayload): Promise<void> {
     const { topic, partition, messages } = pl.batch;
+    const res = this.subscribedTopics.get(topic)
+    if (res !== undefined) {
+      return res(pl);
+    }
+    return Promise.resolve();
     // console.log(`Received batch on topic ${topic} partition ${partition}: ${messages.length} messages`);
     // messages.forEach(message => {
     //   this.handleMessage({ topic, partition, message });
@@ -230,8 +235,6 @@ class KConsumer {
       commits can be chunked if the data is large, but it is not needed in this demo, because
       high load is not tested here
     */
-    console.warn(`Lost commection with uncommitted offsets: 
-      ${JSON.stringify(pl.uncommittedOffsets())}`);
 
     // this.consumer.commitOffsets(pl.uncommittedOffsets())
     // pl.resolveOffset()
@@ -276,20 +279,27 @@ class KConsumer {
       this.retryTimeout = undefined;
     }, 1000);
   }
-
-  subscribe(topic: string, pos?: number) {
-    // if (!this.subscribedTopics.has(topic)) {
-    //   this.consumer.subscribe({ topic, fromBeginning: true })
-    //   this.subscribedTopics.add(topic);
-    // }
-    // // Using "fromBeginning" to start from the last message commited by the group
-    // if (this.isConnected) {
-      
-    // }
-    // this.consumer.describeGroup()
-    this.consumer.subscribe({ topic, fromBeginning: true })
-
-   
+  subscribedTopics = new Map<string, (pl: kf.EachBatchPayload) => Promise<void>>(); 
+  async subscribe(topic: string, handler: (pl: kf.EachBatchPayload) => Promise<void>, pos?: number) {
+    // TODO: do i do reconnection? What to do with subscrivers if if connection is lost
+    // who should handle it?
+    // should i support manual offset change?
+    if (!this.subscribedTopics.has(topic)) {
+      this.subscribedTopics.set(topic, handler);
+    } else {
+      console.warn(`Already subscribed to topic ${topic}, skipping subscription`);
+      return;
+    }
+    if (pos !== undefined) {
+      this.consumer.seek({ topic, partition: 0, offset: pos.toString() });
+    } else {
+      this.consumer.seek({ topic, partition: 0, offset: "0" });
+    }
+    await this.consumer.stop();
+    await this.consumer.subscribe({ topic });
+    await this.consumer.run({
+      eachBatch: (batch) => this.handleBatch(batch),
+      autoCommit: false,})
   }
 }
 export class KClient {
@@ -315,14 +325,18 @@ export class KClient {
     if (this.producer === undefined) {
       this.producer = new KProducer(this.kf.producer());
     }
+    if (this.producer === undefined) {
+      console.error(`Producer is not defined, cannot send message to topic ${topic}`);
+    }
     this.producer.write(msg, topic, partition);
     // this.consumer?.commitOffsets();
   }
 
-  async subscribe(topic: string, pos?: number) {
+  async subscribe(topic: string, handler: (pl: kf.EachBatchPayload) => Promise<void>, pos?: number) {
     if (this.consumer === undefined) {
-      this.consumer = new KConsumer(this.kf.consumer({ groupId: "1" }));
+      this.consumer = new KConsumer(this.kf.consumer({ groupId: "1", allowAutoTopicCreation: true }));
     }
+    this.consumer.subscribe(topic, handler, pos);
     // if (!this.subscribedTopics.has(topic)) {
     //   await this.consumer.subscribe({ topic, fromBeginning: true })
     // }
