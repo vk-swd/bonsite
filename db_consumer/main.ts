@@ -20,26 +20,19 @@ const kafka_client = new KClient({
     UNLIKELY WITH TCP CONNECTIONS + order guarantee per partition.
 */
 import * as kf from "kafkajs";
-kafka_client.subscribe(getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"),
+import { time } from "console";
+kafka_client.subscribe(
+    [[getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"),0], [getEnv("KAFKA_TOPICS_TRANSACTIONS"),0]],
     async (pl: kf.EachBatchPayload) => {
         const { topic, partition, messages } = pl.batch;
-        console.log(`Received messages: ${messages.join(';')} with uncommitted offsets: 
-            ${JSON.stringify(pl.uncommittedOffsets())} at topic ${topic} partition ${partition}`);
-    });
-kafka_client.subscribe(getEnv("KAFKA_TOPICS_TRANSACTIONS"),
-    async (pl) => {
-        const { topic, partition, messages } = pl.batch;
-        console.log(`Received messages: ${messages.join(';')} with uncommitted offsets: 
-            ${JSON.stringify(pl.uncommittedOffsets())} at topic ${topic} partition ${partition}`);
-        // console.log(`Received message: ${pl.message.value.toString()}`);
-        // Here you would handle the message, e.g., write to MSSQL
-        // For example:
-        // await writeToMSSQL(pl.message.value.toString());
-        // console.log(`Message processed: ${pl.message.value.toString()}`);
-        // console.log(`Message: ${pl.message.value.toString()}`);  
-    });
+        // pl.resolveOffset(pl.batch.lastOffset())
+        
+        console.log(`Received messages: ${messages.map(m => m.value?.toString()).join(';')} with last offset: 
+            ${pl.batch.lastOffset()} at topic ${topic} partition ${partition} 
+            uncommited: ${JSON.stringify(pl.uncommittedOffsets())}`);
+    }
+);
 
-    
 
 /*
 kafka client consumes

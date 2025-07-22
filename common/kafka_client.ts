@@ -43,7 +43,6 @@ export class KProducer {
   */
   constructor(private producer: kf.Producer) {
     this.producer.on('producer.connect', () => {
-      this.isConnected = true;
       // TODO: test that this will be triggered every time connection was established
       // TODO: also check that the connection will be restored after a break and this will be emit
     })
@@ -143,37 +142,63 @@ export type KfConsumerSubscription = {
   fromBeginning?: boolean
 }
 
+class StateConnected {
+  connect() {
+    return this; // Already connected, no need to do anything
+  }
+}
+class StateConnecting {
+  constructor(private promise: Promise<void>) {
 
+  }
+  async connect(): Promise<StateDisconnected| StateConnected> {
+    try {
+      await this.promise;
+    }
+    catch (e) {
+      console.error(`Failed to connect: ${e}`);
+      return new StateDisconnected();
+    }
+    return new StateConnected();
+  }
+}
+class StateDisconnected {
+  async connect(consumer: kf.Consumer): Promise<StateConnecting> {
+    return new StateConnecting(consumer.connect());
+  }
+}
+
+type ConnectionState = StateConnected | StateDisconnected;
+
+enum State {
+  Subscribed,
+  Unsubscribed,
+  Subscribing
+}
 class KConsumer {
   subscribtions = new Map<string, KfConsumerSubscription>();
 
-  isOn = true;
+  isOn = true; //maybe for later, if we want to turn off consumption
+  isConnecting = false;
   isConnected = false;
   retryTimeout: NodeJS.Timeout | undefined = undefined;
   stats = new ConsumeStats();
+  subscribedTopics = new Map<string, {pos: number, state: State}>();
   constructor(private consumer: kf.Consumer) {
     this.consumer.on('consumer.connect', () => {
+      console.log(`Consumer connected`);
+      if (!this.isConnected) {
+        this.stats.connects++;
+      }
       this.isConnected = true;
-      if (this.retryTimeout !== undefined) {
-        clearTimeout(this.retryTimeout);
-        this.retryTimeout = undefined;
-      }
-      if (!this.isOn) {
-        return;
-      }
-      // this.consumer.run({
-      //   eachMessage: this.handleMessage.bind(this),
-      //   autoCommit: false,
-      // }).then(() => {
-
-      // }).catch(e => {
-      //   console.error(`Failed to run the consumption: ${e}`);
-      // });
+      this.isConnecting = false;
+      this.subscribeToScheduledTopics();
     })
     this.consumer.on('consumer.disconnect', () => {
+      console.warn(`Consumer disconnected`);
       this.stats.disconnects++;
       this.isConnected = false;
-      this.retryConnection();
+      this.isConnecting = false;
     })
     this.consumer.on('consumer.crash', () => {
       this.stats.crashes++;
@@ -185,12 +210,14 @@ class KConsumer {
       this.stats.networkRequests++;
     })
     this.consumer.on('consumer.network.request_timeout', () => {
+      console.warn(`Consumer network.request_timeout`);
       this.stats.networkRequestTimeouts++;
     })
     this.consumer.on('consumer.rebalancing', () => {
       this.stats.rebalances++;
     })
     this.consumer.on('consumer.fetch', () => {
+      console.warn(`Consumer fetching data`);
       this.stats.fetches++;
     })
     this.consumer.on('consumer.stop', () => {
@@ -199,107 +226,81 @@ class KConsumer {
     this.consumer.on('consumer.commit_offsets', () => {
 
     })
-    this.tryConnect()
-    // this.consumer.run({
-    //     // eachMessage: this.handleMessage,
-    //     eachBatch: (batch) => this.handleBatch(batch),
-    //     autoCommit: false,
-    // })
-    // this.consumer.seek(pos);
-    // this.consumer.seek({topic, partition: 1, offset:"0"})
   }
+  batchHandler : ((pl: kf.EachBatchPayload) => Promise<void>) | undefined = undefined
   handleBatch(pl: kf.EachBatchPayload): Promise<void> {
-    const { topic, partition, messages } = pl.batch;
-    if (pl.isStale()) {
-      console.warn(`Batch is stale, skipping processing for topic ${topic} partition ${partition}`);
+    // console.log(`Received batch on topic ${topic} partition ${partition}: ${messages.length} messages`);
+    if (this.batchHandler === undefined) {
+      console.warn(`No batch handler defined, cannot process batch`);
       return Promise.resolve();
     }
-    const res = this.subscribedTopics.get(topic)
-    if (res !== undefined) {
-      return res(pl);
+    if (pl.isStale()) {
+      console.warn(`Batch is stale, skipping processing for topic ${pl.batch.lastOffset()} at topic ${pl.batch.topic}
+          partition ${pl.batch.partition}`);
+      return Promise.resolve();
     }
-    return Promise.resolve();
-    // console.log(`Received batch on topic ${topic} partition ${partition}: ${messages.length} messages`);
-    // messages.forEach(message => {
-    //   this.handleMessage({ topic, partition, message });
-    // });
-
-    /* 
-    https://kafka.js.org/docs/1.11.0/consuming#a-name-manual-commits-a-manual-committing
-    consumer.commitOffsets([
-        { topic: 'topic-A', partition: 0, offset: '1' },
-        { topic: 'topic-A', partition: 1, offset: '3' },
-        { topic: 'topic-B', partition: 0, offset: '2' }
-      ])
-    */
-    /* if the consumer crashed and recovered, it could try and process duplicate data.
-      It is database's job to identify such data (it is simple - it woluld have same data
-      already written). Consumer will just confirm with database that write is complete and 
-      initiate the data commit.
-      commits can be chunked if the data is large, but it is not needed in this demo, because
-      high load is not tested here
-    */
-
-    // this.consumer.commitOffsets(pl.uncommittedOffsets())
-    // pl.resolveOffset()
-  }
-  handleMessage(pl: kf.EachMessagePayload): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        
-      const { topic, partition, message } = pl;
-      logger.info(JSON.stringify({
-        topic,
-        partition,
-        offset: message?.offset ?? 0,
-        value: message?.value?.toString() ?? "",
-      }))
-    } catch (e) {
-        console.error(`Failed to handle message: ${e}`);
-        reject(e);
-        return;
-      }
-      resolve();
-    });
-    // console.log(`Received message on topic ${topic} partition ${partition}: ${message.value?.toString()}`);
+    return this.batchHandler(pl);
   }
   tryConnect() {
-    if (this.isConnected || !this.isOn) {
+    // TODO: make a state machine for clearer connection handling
+    if (this.isConnecting || this.isConnected) {
       return;
     }
-    this.consumer.connect()
-      .catch(e => {
-        console.error(`Failed to connect consumer: ${e}`);
-        this.retryConnection();
-      });
+    this.isConnecting = true;
+    return this.consumer.connect()
   }
-  retryConnection() {
-    if (this.retryTimeout !== undefined) {
-      return;
-    }
-    // Do i have to resubscribe manually to everything?
-    this.retryTimeout = setTimeout(() => {
-      this.tryConnect();
-      this.retryTimeout = undefined;
-    }, 1000);
-  }
-  subscribedTopics = new Map<string, (pl: kf.EachBatchPayload) => Promise<void>>(); 
-  async subscribe(topic: string, handler: (pl: kf.EachBatchPayload) => Promise<void>, pos?: number) {
+  async subscribe(topics: [string, number][], handler?: (pl: kf.EachBatchPayload) => Promise<void>) {
     // TODO: do i do reconnection? What to do with subscrivers if if connection is lost
     // who should handle it?
     // should i support manual offset change?
-    if (!this.subscribedTopics.has(topic)) {
-      this.subscribedTopics.set(topic, handler);
-    } else {
-      console.warn(`Already subscribed to topic ${topic}, skipping subscription`);
+    const newTopics = topics.filter(topic => topic !== undefined && !this.subscribedTopics.has(topic[0]));
+    if (newTopics.length != topics.length) {
+      console.warn(`Some topics were already subscribed. New: ${newTopics.join(',')} of ${topics.join(',')}`);
+    } 
+    if (handler !== undefined) {
+      this.handleBatch = handler;
+    }
+    if (newTopics.length == 0) {
+      console.warn(`No new topics to subscribe to, skipping subscription`);
       return;
     }
-    await this.consumer.stop();
-    await this.consumer.subscribe({ topic });
+    newTopics.forEach(t => this.subscribedTopics.set(t[0], {pos: t[1], state: State.Unsubscribed}));
+    this.subscribeToScheduledTopics();
+  }
+  async subscribeToScheduledTopics() {
+    if (!this.isConnected) {
+      return; // wait for connection to be established
+    }
+    const newTopics = Array.from(this.subscribedTopics).filter(t => t[1].state === State.Unsubscribed);
+    if (newTopics.length == 0) {
+      return;
+    }
+    newTopics.forEach(t => {
+      t[1].state = State.Subscribing; 
+    });
+    try {
+      await this.consumer.stop();
+    } catch (e) {
+      console.error(`Failed to subscribe to topics. Can't stop consumption`);
+      return;
+    }
+    try {
+      await this.consumer.subscribe({ topics: newTopics.map(t=>t[0]) });
+    } catch (e) {
+      console.error(`Failed to subscribe to topics ${newTopics.join(',')}: ${e}`);
+      newTopics.forEach(t => this.subscribedTopics.delete(t[0]));
+      // TODO: signal failed subscription outside
+      newTopics.length = 0; // clear the list of new topics
+    }
     await this.consumer.run({
       eachBatch: (batch) => this.handleBatch(batch),
-      autoCommit: false,})
-    this.consumer.seek({ topic, partition: 0, offset: (pos??0).toString() });
+      autoCommit: false,
+      eachBatchAutoResolve: false
+      });
+    newTopics.forEach(topic => {
+      topic[1].state = State.Subscribed;
+      this.consumer.seek({ topic: topic[0], partition: 0, offset: topic[1].pos.toString() })
+    });
   }
 }
 export class KClient {
@@ -308,6 +309,10 @@ export class KClient {
         on a single machine with a shared IO (network card and storage device)
       And hardware parallelism is best addressed with extra process in the consumer group.
   */
+  static async consume(config: KClientConfig, topics: [string, number][],handler?: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KClient>{
+
+    
+  }
   private static clientIdCounter = 0;
   public producer: KProducer | undefined = undefined;
   public consumer: KConsumer | undefined = undefined;
@@ -332,18 +337,15 @@ export class KClient {
     // this.consumer?.commitOffsets();
   }
 
-  async subscribe(topic: string, handler: (pl: kf.EachBatchPayload) => Promise<void>, pos?: number) {
-    if (this.consumer === undefined) {
-      this.consumer = new KConsumer(this.kf.consumer({ 
+  async subscribe(topics: [string, number][], handler?: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KConsumer> {
+    const consumer = new KConsumer(this.kf.consumer({ 
         groupId: "1",
          allowAutoTopicCreation: true, 
-         sessionTimeout: 7000, 
+         sessionTimeout: 7000,
         heartbeatInterval: 2000}));
-    }
-    this.consumer.subscribe(topic, handler, pos);
-    // if (!this.subscribedTopics.has(topic)) {
-    //   await this.consumer.subscribe({ topic, fromBeginning: true })
-    // }
+    consumer.tryConnect()?.then
+    await consumer.subscribe(topics, handler);
+    return consumer; 
   }
   // async unsubscribe() {
   //   if (this.consumer !== undefined) {
