@@ -134,71 +134,17 @@ class ConsumeStats {
   commits = 0
   endBatchProcesses = 0
   crashes = 0
+  stops = 0
 }
 
-export type KfConsumerSubscription = {
-  topic: string,
-  partition?: number,
-  fromBeginning?: boolean
-}
-
-class StateConnected {
-  connect() {
-    return this; // Already connected, no need to do anything
-  }
-}
-class StateConnecting {
-  constructor(private promise: Promise<void>) {
-
-  }
-  async connect(): Promise<StateDisconnected| StateConnected> {
-    try {
-      await this.promise;
-    }
-    catch (e) {
-      console.error(`Failed to connect: ${e}`);
-      return new StateDisconnected();
-    }
-    return new StateConnected();
-  }
-}
-class StateDisconnected {
-  async connect(consumer: kf.Consumer): Promise<StateConnecting> {
-    return new StateConnecting(consumer.connect());
-  }
-}
-
-type ConnectionState = StateConnected | StateDisconnected;
-
-enum State {
-  Subscribed,
-  Unsubscribed,
-  Subscribing
-}
-class KConsumer {
-  subscribtions = new Map<string, KfConsumerSubscription>();
-
-  isOn = true; //maybe for later, if we want to turn off consumption
-  isConnecting = false;
-  isConnected = false;
-  retryTimeout: NodeJS.Timeout | undefined = undefined;
+export class KConsumer {
   stats = new ConsumeStats();
-  subscribedTopics = new Map<string, {pos: number, state: State}>();
-  constructor(private consumer: kf.Consumer) {
+  private constructor(public consumer: kf.Consumer) {
     this.consumer.on('consumer.connect', () => {
-      console.log(`Consumer connected`);
-      if (!this.isConnected) {
-        this.stats.connects++;
-      }
-      this.isConnected = true;
-      this.isConnecting = false;
-      this.subscribeToScheduledTopics();
+      this.stats.connects++;
     })
     this.consumer.on('consumer.disconnect', () => {
-      console.warn(`Consumer disconnected`);
       this.stats.disconnects++;
-      this.isConnected = false;
-      this.isConnecting = false;
     })
     this.consumer.on('consumer.crash', () => {
       this.stats.crashes++;
@@ -210,97 +156,42 @@ class KConsumer {
       this.stats.networkRequests++;
     })
     this.consumer.on('consumer.network.request_timeout', () => {
-      console.warn(`Consumer network.request_timeout`);
       this.stats.networkRequestTimeouts++;
     })
     this.consumer.on('consumer.rebalancing', () => {
       this.stats.rebalances++;
     })
     this.consumer.on('consumer.fetch', () => {
-      console.warn(`Consumer fetching data`);
       this.stats.fetches++;
     })
     this.consumer.on('consumer.stop', () => {
-
+      this.stats.stops++;
     })
     this.consumer.on('consumer.commit_offsets', () => {
-
+      this.stats.commits++;
     })
   }
-  batchHandler : ((pl: kf.EachBatchPayload) => Promise<void>) | undefined = undefined
-  handleBatch(pl: kf.EachBatchPayload): Promise<void> {
-    // console.log(`Received batch on topic ${topic} partition ${partition}: ${messages.length} messages`);
-    if (this.batchHandler === undefined) {
-      console.warn(`No batch handler defined, cannot process batch`);
-      return Promise.resolve();
-    }
-    if (pl.isStale()) {
-      console.warn(`Batch is stale, skipping processing for topic ${pl.batch.lastOffset()} at topic ${pl.batch.topic}
-          partition ${pl.batch.partition}`);
-      return Promise.resolve();
-    }
-    return this.batchHandler(pl);
-  }
-  tryConnect() {
-    // TODO: make a state machine for clearer connection handling
-    if (this.isConnecting || this.isConnected) {
-      return;
-    }
-    this.isConnecting = true;
-    return this.consumer.connect()
-  }
-  async subscribe(topics: [string, number][], handler?: (pl: kf.EachBatchPayload) => Promise<void>) {
-    // TODO: do i do reconnection? What to do with subscrivers if if connection is lost
-    // who should handle it?
-    // should i support manual offset change?
-    const newTopics = topics.filter(topic => topic !== undefined && !this.subscribedTopics.has(topic[0]));
-    if (newTopics.length != topics.length) {
-      console.warn(`Some topics were already subscribed. New: ${newTopics.join(',')} of ${topics.join(',')}`);
-    } 
-    if (handler !== undefined) {
-      this.handleBatch = handler;
-    }
-    if (newTopics.length == 0) {
-      console.warn(`No new topics to subscribe to, skipping subscription`);
-      return;
-    }
-    newTopics.forEach(t => this.subscribedTopics.set(t[0], {pos: t[1], state: State.Unsubscribed}));
-    this.subscribeToScheduledTopics();
-  }
-  async subscribeToScheduledTopics() {
-    if (!this.isConnected) {
-      return; // wait for connection to be established
-    }
-    const newTopics = Array.from(this.subscribedTopics).filter(t => t[1].state === State.Unsubscribed);
-    if (newTopics.length == 0) {
-      return;
-    }
-    newTopics.forEach(t => {
-      t[1].state = State.Subscribing; 
-    });
+  static async subscribe(kafka: kf.Kafka, topics: [string, number][], handler: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KConsumer> {
+    const consumer = new KConsumer(kafka.consumer({
+      groupId: "1",
+      allowAutoTopicCreation: true,
+      sessionTimeout: 7000,
+      heartbeatInterval: 2000
+    }));
     try {
-      await this.consumer.stop();
-    } catch (e) {
-      console.error(`Failed to subscribe to topics. Can't stop consumption`);
-      return;
-    }
-    try {
-      await this.consumer.subscribe({ topics: newTopics.map(t=>t[0]) });
-    } catch (e) {
-      console.error(`Failed to subscribe to topics ${newTopics.join(',')}: ${e}`);
-      newTopics.forEach(t => this.subscribedTopics.delete(t[0]));
-      // TODO: signal failed subscription outside
-      newTopics.length = 0; // clear the list of new topics
-    }
-    await this.consumer.run({
-      eachBatch: (batch) => this.handleBatch(batch),
-      autoCommit: false,
-      eachBatchAutoResolve: false
+      await consumer.consumer.connect()
+      await consumer.consumer.subscribe({ topics: topics.map(t => t[0]) });
+      await consumer.consumer.run({
+        eachBatch: (batch) => handler(batch),
+        autoCommit: false,
+        eachBatchAutoResolve: false
       });
-    newTopics.forEach(topic => {
-      topic[1].state = State.Subscribed;
-      this.consumer.seek({ topic: topic[0], partition: 0, offset: topic[1].pos.toString() })
-    });
+      topics.forEach(t => consumer.consumer.seek({topic:t[0], partition: 0, offset: t[1].toString()}))
+    } catch (e) {
+      consumer.consumer.disconnect();
+      return Promise.reject(e);
+    }
+    return consumer;
   }
 }
 export class KClient {
@@ -309,13 +200,8 @@ export class KClient {
         on a single machine with a shared IO (network card and storage device)
       And hardware parallelism is best addressed with extra process in the consumer group.
   */
-  static async consume(config: KClientConfig, topics: [string, number][],handler?: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KClient>{
-
-    
-  }
   private static clientIdCounter = 0;
   public producer: KProducer | undefined = undefined;
-  public consumer: KConsumer | undefined = undefined;
   private kf: kf.Kafka;
   constructor(public config: KClientConfig) {
     const clientId = `C${KClient.clientIdCounter}_${this.config.name}`
@@ -334,27 +220,5 @@ export class KClient {
       console.error(`Producer is not defined, cannot send message to topic ${topic}`);
     }
     this.producer.write(msg, topic, partition);
-    // this.consumer?.commitOffsets();
   }
-
-  async subscribe(topics: [string, number][], handler?: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KConsumer> {
-    const consumer = new KConsumer(this.kf.consumer({ 
-        groupId: "1",
-         allowAutoTopicCreation: true, 
-         sessionTimeout: 7000,
-        heartbeatInterval: 2000}));
-    consumer.tryConnect()?.then
-    await consumer.subscribe(topics, handler);
-    return consumer; 
-  }
-  // async unsubscribe() {
-  //   if (this.consumer !== undefined) {
-  //     await this.consumer.disconnect();
-  //     this.consumer = undefined;
-  //   }
-  //   if (this.producer !== undefined) {
-  //     await this.producer.disconnect();
-  //     this.producer = undefined;
-  //   }
-  // }
 };

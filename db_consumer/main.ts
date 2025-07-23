@@ -1,16 +1,19 @@
 import { getEnv } from "./common/utils.js";
-import { KClient } from "./common/kafka_client.js";
+import { KClient, KConsumer } from "./common/kafka_client.js";
+
+import * as kf from "kafkajs";
 
 // import { sql } from '@types/mssql'; // Assuming you have a SQL library that supports TypeScript
 
 import { createSchema } from "./common/db_defines.js";
 
 
-const kafka_client = new KClient({ 
-    name: getEnv("HOSTNAME"), 
-    brokers: [getEnv("KAFKA_BROKERS")] 
-});
-
+const clientId = `C0_${getEnv("HOSTNAME")}`
+const kafka_client = new kf.Kafka({
+    // No quotas and authentication/acl => no clientid and ssl/sasl
+    clientId,
+    brokers: [getEnv("KAFKA_BROKERS")]
+})
 /* When the service crashes it will restart consumption from the last offset on recovery. 
     What needs to be handled is the connectivity issues - manage offset counter
     in the controller and retry connections if they fail.
@@ -19,19 +22,20 @@ const kafka_client = new KClient({
 /* CAN KAFKA CLIENT CONSUME UNORDERED MESSAGES?
     UNLIKELY WITH TCP CONNECTIONS + order guarantee per partition.
 */
-import * as kf from "kafkajs";
-import { time } from "console";
-kafka_client.subscribe(
+const consumer = KConsumer.subscribe(kafka_client,
     [[getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"),0], [getEnv("KAFKA_TOPICS_TRANSACTIONS"),0]],
     async (pl: kf.EachBatchPayload) => {
         const { topic, partition, messages } = pl.batch;
-        // pl.resolveOffset(pl.batch.lastOffset())
+        pl.resolveOffset(pl.batch.lastOffset())
         
         console.log(`Received messages: ${messages.map(m => m.value?.toString()).join(';')} with last offset: 
             ${pl.batch.lastOffset()} at topic ${topic} partition ${partition} 
             uncommited: ${JSON.stringify(pl.uncommittedOffsets())}`);
     }
-);
+).catch(e => {
+    // TODO: restart service to retry connection or let some supervisor handle the problem.
+    console.error(`Failed connection to kafka.....${e}`)
+});
 
 
 /*
