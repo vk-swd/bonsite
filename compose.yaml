@@ -128,6 +128,8 @@ services:
     volumes:
       - "${WORKDIR}"
     working_dir: ${WORKDIR}
+    ports:
+    - "127.0.0.1:1433:1433"
     environment:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
@@ -141,8 +143,8 @@ services:
         service: node_app
       volumes:
         - ./${DB_INITIALIZER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
-        - ./${COMMON_DIR_NAME}/db_defines.ts:/${COMMON_DIR_NAME}/db_defines.ts
+        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
       environment:
         << : [*mssql_env]
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
@@ -157,5 +159,6 @@ services:
         - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
       environment:
         << : [*mssql_env]
+        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
 
 

@@ -1,9 +1,11 @@
-import { Transaction, TResult } from './event_types.js'
-import { getEnv } from './utils.js'
+import { connect } from 'http2'
+import { Transaction, TransactionResult, TResult } from './event_types.js'
+import { getEnv, last } from './utils.js'
 
 import sql from 'mssql'
 
 
+// const sql = require('mssql')
 
 const user_sa = getEnv('MSSQL_SA_USERNAME')
 const demo_password = getEnv('MSSQL_PASSWORD')
@@ -26,9 +28,9 @@ const statementUser = `${user_statement_creator}_user`
 const statementCreatorRole = `${user_statement_creator}_role`
 const statementCreatorLogin = `${user_statement_creator}_login`
 
-function connectToDatabase(user: string, database?: string): Promise<sql.ConnectionPool> {
+function connectToDatabase(login: string, database?: string): Promise<sql.ConnectionPool> {
     return sql.connect({
-        user: user,
+        user: login,
         password: demo_password,
         server,
         database,
@@ -41,6 +43,61 @@ function runQuery(pool: sql.ConnectionPool, query: string): Promise<sql.IResult<
         throw e;
     });
 }
+type ColumnDescription = {
+    name: string;
+    type: string;
+    extra?: string; // e.g. 'NOT NULL', 'PRIMARY KEY', etc.
+}
+const transactionColumns: ColumnDescription[] = [
+    { name: 'StatementId', type: 'BIGINT', extra: 'PRIMARY KEY' },
+    { name: 'Date', type: 'DATETIME2(3)' },
+    { name: 'Amount', type: 'DECIMAL(18,2)' },
+    { name: 'FromUserId', type: 'BIGINT' },
+    { name: 'ToUserId', type: 'BIGINT' },
+    { name: 'Status', type: 'TINYINT' }
+]
+const userColumns: ColumnDescription[] = [
+    { name: 'id', type: 'BIGINT IDENTITY(1,1)', extra: ' PRIMARY KEY' },
+    { name: 'Name', type: 'NVARCHAR(100)', extra: ' NOT NULL' }
+]
+const transactionsByUserColumns: ColumnDescription[] = [
+    { name: 'UserId', type: 'BIGINT', extra: ' NOT NULL' },
+    { name: 'Date', type: 'DATETIME2(3)', extra: ' NOT NULL' },
+    { name: 'StatementId', type: 'BIGINT' },
+]
+const kafkaOffsetColumns: ColumnDescription[] = [
+    { name: 'Groupid', type: 'BIGINT' },
+    { name: 'Topic', type: 'NVARCHAR(100)', extra: ' NOT NULL' },
+    { name: 'Partition', type: 'INT', extra: ' NOT NULL' },
+    { name: 'Offset', type: 'NVARCHAR(18)', extra: ' NOT NULL' }
+]
+function columnsToString(columns: ColumnDescription[]): string {
+    return columns.map(c => `${c.name} ${c.type}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
+}
+function columnsToProcedureTypes(columns: ColumnDescription[]): string {
+    return columns.map(c => `@${c.name} ${c.type}`).join(',\n');
+}
+function columnsToProcedureInputs(columns: ColumnDescription[]): string {
+    return columns.map(c => `@${c.name}`).join(', ');
+}
+function columnsToValues(columns: ColumnDescription[]): string {
+    return columns.map(c => `${c.name}`).join(', ');
+}
+function insertionProcedureQuery(procedureName: string, tableName: string, columns: ColumnDescription[]): string {
+    return `
+        CREATE PROCEDURE ${procedureName}
+        ${columnsToProcedureTypes(columns)}
+        AS
+        SET NOCOUNT ON;
+        INSERT INTO ${tableName} (${columnsToValues(columns)})
+        VALUES (${columnsToProcedureInputs(columns)})
+    `;
+}
+const addTransactionProcedure = "addTransactionRecord";
+const addUserProcedure = "addUser";
+const updateTransactionStatusProcedure = "updateTransactionStatus";
+const addTransactionByUserProcedure = "addTransactionByUser";
+const addKafkaOffsetProcedure = "addKafkaOffset";
 export async function createSchema() {
     const pool = await connectToDatabase(user_sa);
     await runQuery(pool, `create database [${database}]`)
@@ -48,43 +105,31 @@ export async function createSchema() {
     await runQuery(pool, `create schema [${schema}]`)
     await runQuery(pool,
         `CREATE TABLE ${usersTable} (
-            id BIGINT IDENTITY(1,1)  PRIMARY KEY,
-            Name NVARCHAR(100) NOT NULL
+            ${columnsToString(userColumns)}
         );`)
 
     await runQuery(pool,
         `CREATE TABLE ${transactionsTable} (
-            StatementId BIGINT PRIMARY KEY, -- ids should not auto increment for idempotency.
-            Date DATETIME2(3) NOT NULL,
-            Amount DECIMAL(18,2) NOT NULL,
-            FromUserId BIGINT NOT NULL,
-            ToUserId BIGINT NOT NULL,
-            Status TINYINT NOT NULL
-            
-            FOREIGN KEY (FromUserId) REFERENCES ${usersTable}(id),
-            FOREIGN KEY (ToUserId) REFERENCES ${usersTable}(id)
+            ${columnsToString(transactionColumns)}
+            FOREIGN KEY (${transactionColumns[3].name}) REFERENCES ${usersTable}(${userColumns[0].name}),
+            FOREIGN KEY (${transactionColumns[4].name}) REFERENCES ${usersTable}(${userColumns[0].name})
         );`)
 
     await runQuery(pool,
         `CREATE TABLE ${transactionsByUserTable} ( 
-            Date DATETIME2(3) NOT NULL,
-            UserId BIGINT NOT NULL,
-            StatementId BIGINT,
-            
-            FOREIGN KEY (StatementId) REFERENCES ${transactionsTable}(StatementId),
-            FOREIGN KEY (UserId) REFERENCES ${usersTable}(id)
+            ${columnsToString(transactionsByUserColumns)}
+            FOREIGN KEY (${transactionsByUserColumns[2].name}) REFERENCES ${transactionsTable}(${transactionColumns[0].name}),
+            FOREIGN KEY (${transactionsByUserColumns[0].name}) REFERENCES ${usersTable}(${userColumns[0].name}) 
         );`)
 
     await runQuery(pool,
-        `CREATE NONCLUSTERED INDEX idx_c_transactionsByUser ON ${transactionsByUserTable} (UserId, Date) INCLUDE (StatementId);`
+        // Make a (UserId, Date) INCLUDE (StatementId) nonclustered index on transactionsByUserTable
+        `CREATE NONCLUSTERED INDEX idx_c_transactionsByUser ON ${transactionsByUserTable} (${transactionsByUserColumns.slice(0,-1)}) INCLUDE (${last(transactionsByUserColumns)!.name});`
     )
     await runQuery(pool,
         `CREATE TABLE ${kafkaOffsetTable} (
-            Groupid BIGINT,
-            Topic NVARCHAR(100) NOT NULL,
-            Partition INT NOT NULL,
-            Offset DECIMAL(18,2) NOT NULL,
-            PRIMARY KEY (GroupId, Topic, Partition)
+            ${columnsToString(kafkaOffsetColumns)}
+            PRIMARY KEY (${kafkaOffsetColumns.slice(0, -1).map(c => c.name).join(', ')})
         );`)
     const make_user = async (user: string, password: string, role: string, login: string) => {
         await runQuery(pool,`CREATE LOGIN ${login} WITH PASSWORD = '${password}'`)
@@ -105,97 +150,117 @@ export async function createSchema() {
     await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser};`);
     await runQuery(pool,`ALTER ROLE ${consumerRole} ADD MEMBER ${consumerUser};`);
 
-    /*
-    CREATE PROCEDURE TransferFunds
-    @FromUserId INT,
-    @ToUserId INT,
-    @Amount DECIMAL(18,2)
-AS
-BEGIN
-    SET NOCOUNT ON;
-    BEGIN TRANSACTION;
-
-    BEGIN TRY
-        -- Debit from sender
-        UPDATE Accounts
-        SET Balance = Balance - @Amount
-        WHERE UserId = @FromUserId;
-
-        -- Credit to receiver
-        UPDATE Accounts
-        SET Balance = Balance + @Amount
-        WHERE UserId = @ToUserId;
-
-        -- Log transaction
-        INSERT INTO Transactions (FromUserId, ToUserId, Amount, CreatedAt)
-        VALUES (@FromUserId, @ToUserId, @Amount, GETDATE());
-
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        ROLLBACK TRANSACTION;
-        THROW; -- rethrow error
-    END CATCH
-END;
-
-    
-    */
-
-
-    // -- Creates a nonclustered index on the Person.Address table with four included (nonkey) columns.
-    // -- index key column is PostalCode and the nonkey columns are
-    // -- AddressLine1, AddressLine2, City, and StateProvinceID.
-
-    // ON Person.Address (PostalCode)
-    // INCLUDE (AddressLine1, AddressLine2, City, StateProvinceID);
-    // GO
-}
-
-async function addTransactionRecord(record: Transaction, state: TResult) {
-    const pool = await sql.connect({ user: user_sa, password: demo_password, server, database, options: { trustServerCertificate: true } })
-    const request = pool.request()
-    request.input('StatementId', sql.BigInt, record.id)
-    request.input('Date', sql.DateTime2(3), new Date(record.dateTime))
-    request.input('Amount', sql.Decimal(18, 2), record.amount)
-    request.input('FromUserId', sql.BigInt, record.userIdFrom)
-    request.input('ToUserId', sql.BigInt, record.userIdTo)
-    request.input('Status', sql.TinyInt, state)
-
-    await request.query(
-        `INSERT INTO ${transactionsTable} (StatementId, Date, Amount, FromUserId, ToUserId, Status)
-         VALUES (@StatementId, @Date, @Amount, @FromUserId, @ToUserId, @Status)`)
-}
-
-async function commitOffset(groupId: number, offset: number) {
-    const pool = await sql.connect({ user: user_sa, password: demo_password, server, database, options: { trustServerCertificate: true } })
-    const request = pool.request()
-    request.input('Groupid', sql.BigInt, groupId)
-    request.input('Offset', sql.Decimal(18, 2), offset)
-
-    await request.query(
-        `INSERT INTO ${kafkaOffsetTable} (Groupid, Offset)
-         VALUES (@Groupid, @Offset)
-         ON DUPLICATE KEY UPDATE Offset = @Offset`)
+    await runQuery(pool,insertionProcedureQuery(addTransactionProcedure, transactionsTable, transactionColumns));
+    await runQuery(pool, insertionProcedureQuery(addTransactionByUserProcedure, transactionsByUserTable, transactionsByUserColumns));
+    await runQuery(pool, `${insertionProcedureQuery(addKafkaOffsetProcedure, kafkaOffsetTable, kafkaOffsetColumns)}
+        ON DUPLICATE KEY UPDATE ${last(kafkaOffsetColumns)?.name} = @${last(kafkaOffsetColumns)?.name};
+    `);
+    await runQuery(pool, `
+        CREATE PROCEDURE ${addUserProcedure}
+        ${columnsToProcedureTypes(userColumns)}
+        AS
+        SET NOCOUNT ON;
+        IF NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${userColumns[0]} = @${userColumns[0]})
+        INSERT INTO ${usersTable} (${columnsToValues(userColumns)})
+        VALUES (${columnsToProcedureInputs(userColumns)});
+    `);
+    await runQuery(pool, `
+        CREATE PROCEDURE ${updateTransactionStatusProcedure}
+        ${columnsToProcedureTypes([transactionColumns[0], last(transactionColumns)!])}
+        AS
+        SET NOCOUNT ON;
+        UPDATE ${transactionsTable}
+        SET ${last(transactionColumns)!.name} = @${last(transactionColumns)!.name}
+        WHERE ${transactionColumns[0].name} = @${transactionColumns[0].name};
+    `);
 }
 
 
-export async function writeTransactionAndOffsetTransactionally(
-    record: Transaction,
-    state: TResult,
-    groupId: number,
-    offset: number
-): Promise<void> {
-    const pool = await sql.connect({ user: user_sa, password: demo_password, server, database, options: { trustServerCertificate: true } })
-    const transaction = new sql.Transaction(pool)
-    try {
-        await transaction.begin()
-        await addTransactionRecord(record, state)
-        await commitOffset(groupId, offset)
-        await transaction.commit()
-    } catch (error) {
-        await transaction.rollback()
-        throw error
-    } finally {
-        pool.close()
+
+// sql.on('error', (e: string) => {
+//     console.error(`SOME SQL ERROR ${e}`);
+// })
+
+export class UserConnection {
+    static async create(): Promise<UserConnection> {
+        sql.map.register(Date, sql.DateTime2(3));
+        const pool = await connectToDatabase(consumerLogin, database);
+        
+        // await runQuery(pool, `ALTER USER ${consumerLogin} WITH DEFAULT_SCHEMA = ${database};`).then(r => console.log(`principals1 ${JSON.stringify(r)}`))
+        // await runQuery(pool, `select * from sys.server_principals where name ;`).then(r => console.log(`principals1 ${JSON.stringify(r)}`))
+        // await runQuery(pool, `select name from sys.database_principals;`).then(r => console.log(`principals2 ${JSON.stringify(r)}`))
+        // throw new Error(`done`)
+        return new UserConnection(pool);
+    }
+    private constructor(private pool: sql.ConnectionPool) {
+
+    }
+    async writeTransactionAndOffsetTransactionally(
+        record: { type: "t", r: Transaction[] } | {type: "r", r: TransactionResult[]},
+        groupId: number,
+        offset: string,
+        partition: number,
+        topic: string
+    ): Promise<void> {
+        const transaction = new sql.Transaction(this.pool)
+        try {
+            // TODO: see how to batch/prepare this
+            await transaction.begin()
+            if (record.type == "t") {
+                for (const r of record.r) {
+                    await this.addUserRecord(r.userIdFrom, `User ${r.userIdFrom}`);
+                    await this.addUserRecord(r.userIdTo, `User ${r.userIdTo}`);
+                    await this.addTransactionRecord(r);
+                    await this.addTransactionByUserRecord(r.userIdFrom, r.dateTime, r.id);
+                }
+            } else {
+                for (const rec of record.r) {
+                    await this.addTransactionByUserRecord(rec.transactionID, rec.dateTime, rec.transactionID);
+                }
+            }
+            await this.commitOffset(groupId, offset, topic, partition)
+            await transaction.commit()
+        } catch (error) {
+            await transaction.rollback()
+            throw error
+        }
+    }
+    async addTransactionRecord(record: Transaction) {
+        const request = this.pool.request()
+        request.input(transactionColumns[0].name, sql.BigInt, record.id)
+        request.input(transactionColumns[1].name, sql.DateTime2(3), new Date(record.dateTime))
+        request.input(transactionColumns[2].name, sql.Decimal(18, 2), record.amount)
+        request.input(transactionColumns[3].name, sql.BigInt, record.userIdFrom)
+        request.input(transactionColumns[4].name, sql.BigInt, record.userIdTo)
+        request.input(transactionColumns[5].name, sql.TinyInt, TResult.UNDEFINED)
+        await request.execute(addTransactionProcedure);            
+    }
+    async addTransactionByUserRecord(userId: number, dateTime: number, statementId: number) {
+        const request = this.pool.request()
+        request.input(transactionsByUserColumns[0].name, sql.BigInt, userId)
+        request.input(transactionsByUserColumns[1].name, sql.DateTime2(3), new Date(dateTime))
+        request.input(transactionsByUserColumns[2].name, sql.BigInt, statementId)
+        await request.execute(addTransactionByUserProcedure);
+    }
+    async addUserRecord(id: number, name: string) {
+        const request = this.pool.request()
+        request.input(userColumns[0].name, sql.BigInt, id)
+        request.input(userColumns[1].name, sql.NVarChar(100), name)
+        await request.execute(addUserProcedure);
+    }
+    async updateTransactionStatus(transactionId: number, state: TResult) {
+        const request = this.pool.request()
+        request.input(transactionColumns[0].name, sql.BigInt, transactionId)
+        request.input(last(transactionColumns)!.name, sql.TinyInt, state)
+        await request.execute(updateTransactionStatusProcedure);
+    }
+    async commitOffset(groupId: number, offset: string, topic: string, partition: number = 0) {
+        const request = this.pool.request()
+        request.input(kafkaOffsetColumns[0].name, sql.BigInt, groupId)
+        request.input(kafkaOffsetColumns[1].name, sql.NVarChar(100), topic)
+        request.input(kafkaOffsetColumns[2].name, sql.Int, partition)
+        request.input(kafkaOffsetColumns[3].name, sql.NVarChar(18), offset)
+        await request.execute(addKafkaOffsetProcedure);
     }
 }
+ 

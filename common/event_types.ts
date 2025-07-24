@@ -10,6 +10,7 @@ export type Transaction = {
 }
 
 export enum TResult {
+    UNDEFINED = -1, // used to mark that result is not yet processed
     CONFIRMED = 0,
     TIMEOUT = 1,
     FRAUD = 2,
