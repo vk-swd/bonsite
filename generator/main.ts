@@ -3,8 +3,6 @@ import { GenApiServer } from "./api.js";
 import { localReg, MonitoringServer, mt, readMetrics } from "./monitoring_local.js";
 import { Sender } from "./sender.js";
 
-
-
 const sender = new Sender();
 const monitoring = new MonitoringServer(() => {
     mt();

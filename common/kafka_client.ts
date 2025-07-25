@@ -4,11 +4,6 @@ import { logger } from './logger.js';
 
 const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
 
-export type KMessage = {
-  producerId: number,
-  message: string
-}
-
 export type KClientConfig = {
   name: string,
   brokers: string[]
@@ -27,9 +22,8 @@ class ProducerStats {
 export class KProducer {
   public stats = new ProducerStats();
 
-  id = 0;
   retryTimer: NodeJS.Timeout | undefined = undefined;
-  outbox = new Array<{ msg: KMessage, state: string, topic: string, partition?: number }>();
+  outbox = new Array<{ msg: string, topic: string, partition?: number }>();
   isConnected = false;
   isStopped = false;
   /*  "outbox" is a simplified version of reliability guarantee 
@@ -43,6 +37,7 @@ export class KProducer {
   */
   constructor(private producer: kf.Producer) {
     this.producer.on('producer.connect', () => {
+      this.isConnected = true;
       // TODO: test that this will be triggered every time connection was established
       // TODO: also check that the connection will be restored after a break and this will be emit
     })
@@ -59,17 +54,23 @@ export class KProducer {
       this.stats.networkRequestTOCount++;
       // TODO: should i reconnect manually if the connection was broken, or the producer will attempt reconnecting?
     })
-    this.producer.on('producer.network.request', () => {
+    this.producer.on('producer.network.request', (data) => {
       this.stats.networkRequestCount++;
+      logger.debug(`Network request: ${JSON.stringify(data)}`);
+      // TODO: is this something that emit when producer sends? Why?
+    })
+    this.producer.on('producer.network.request_queue_size', (data) => {
+      this.stats.networkRequestCount++;
+      logger.debug(`Network request queue size: ${JSON.stringify(data)}`);
       // TODO: is this something that emit when producer sends? Why?
     })
     this.connect();
   }
   connect() {
+    this.isStopped = false;
     if (this.isConnected) {
       return;
     }
-    this.isStopped = false;
     this.producer.connect();
   }
   disconnect() {
@@ -93,22 +94,23 @@ export class KProducer {
       this.producer.send({
         topic: mssg.topic,
         messages: [
-          { value: JSON.stringify(mssg.msg) },
+          { value: mssg.msg, partition: mssg.partition } // key is optional, but can be used for partitioning
         ]
       })
         .then(res => {
           if (res.length != 1) {
-            console.warn(`Sent 1 msg and received more reports or none!: ${JSON.stringify(res)}`)
+            logger.warn(`Sent 1 msg and received more reports or none!: ${JSON.stringify(res)}`)
           }
         })
         .catch(e => {
-          console.error(`Failed to send the record because: ${e}`)
-          this.outbox.push(mssg)
+          logger.error(`Failed to send the record because: ${e}`)
+          this.outbox.push(mssg) //potential for reordering here
           this.retryDelivery()
           this.stats.msgFailed++;
         })
     })
     this.retryTimer = undefined;
+    // Clear here but return item if send failed
     this.outbox.length = 0;
   }
   retryDelivery() {
@@ -118,8 +120,7 @@ export class KProducer {
     }
   }
   async write(msg: string, topic: string, partition?: number) {
-    const mssg = { msg: { message: msg, producerId: this.id }, state: "idle", topic, partition };
-    this.outbox.push(mssg)
+    this.outbox.push({ msg, topic, partition })
     this.attemptDelivery();
   }
 }
@@ -210,14 +211,11 @@ export class KClient {
       clientId,
       brokers: this.config.brokers,
     })
-    console.log(`Making client ${clientId} at ${KAFKA_HOSTNAME}`)
+    logger.log(`Making client ${clientId} at ${KAFKA_HOSTNAME}`)
   }
   async send(msg: string, topic: string, partition?: number) {
     if (this.producer === undefined) {
       this.producer = new KProducer(this.kf.producer());
-    }
-    if (this.producer === undefined) {
-      console.error(`Producer is not defined, cannot send message to topic ${topic}`);
     }
     this.producer.write(msg, topic, partition);
   }
