@@ -16,7 +16,7 @@ export class MonitoringServer {
                 res.setHeader('Content-Type', prom.register.contentType);
                 scrape();
                 res.writeHead(200);
-                res.end(await this.register.metrics());     
+                res.end(await this.register.metrics());
             }
         });
         this.server.listen(PORT, () => {

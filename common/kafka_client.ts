@@ -1,6 +1,7 @@
 import * as kf from 'kafkajs'
-import { getEnv } from './utils.js';
+import { getEnv, KConsumerOffsetInfo } from './utils.js';
 import { logger } from './logger.js';
+import { EventEmitter } from 'events';
 
 const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
 
@@ -172,22 +173,41 @@ export class KConsumer {
       this.stats.commits++;
     })
   }
-  static async subscribe(kafka: kf.Kafka, topics: [string, number][], handler: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KConsumer> {
+  static async subscribe(kafka: kf.Kafka, groupId: string, topics: string[],
+    offsetProvider: (partitions: KConsumerOffsetInfo[]) => Promise<KConsumerOffsetInfo[]>, 
+    handler: (pl: kf.EachBatchPayload) => Promise<void>): Promise<KConsumer> {
     const consumer = new KConsumer(kafka.consumer({
-      groupId: "1",
+      groupId,
       allowAutoTopicCreation: true,
       sessionTimeout: 7000,
       heartbeatInterval: 2000
     }));
     try {
       await consumer.consumer.connect()
-      await consumer.consumer.subscribe({ topics: topics.map(t => t[0]) });
+      console.log(`Consumer connected with groupId ${groupId}`);
+      consumer.consumer.on('consumer.group_join', async (event: kf.ConsumerGroupJoinEvent) => {
+        const partitionsPerTOpic = Object.entries(event.payload.memberAssignment)
+          .map(([topic, partitions]) => ({ topic, partitions: partitions.map(p => 
+              ({ id: p })) } as KConsumerOffsetInfo));
+        
+        const offsets = await offsetProvider(partitionsPerTOpic)
+        offsets.forEach(o => o.partitions.forEach(p => {
+            if (p.offset !== undefined) {
+              consumer.consumer.seek({ topic: o.topic, partition: p.id, offset: p.offset });
+            }
+        }));
+      });
+
+      await consumer.consumer.subscribe({ topics });
+    
       await consumer.consumer.run({
         eachBatch: (batch) => handler(batch),
         autoCommit: false,
         eachBatchAutoResolve: false
       });
-      topics.forEach(t => consumer.consumer.seek({topic:t[0], partition: 0, offset: t[1].toString()}))
+
+      console.log(`Consumer run successful`);
+      // topics.forEach(t => consumer.consumer.seek({topic:t[0], partition: 0, offset: t[1].toString()}))
     } catch (e) {
       consumer.consumer.disconnect();
       return Promise.reject(e);

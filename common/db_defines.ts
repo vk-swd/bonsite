@@ -1,5 +1,5 @@
 import { Transaction, TransactionResult, TResult } from './event_types.js'
-import { getEnv, last } from './utils.js'
+import { getEnv, KConsumerOffsetInfo, last } from './utils.js'
 
 import sql from 'mssql'
 import { logger } from './logger.js'
@@ -44,7 +44,10 @@ type ColumnDescription = {
     name: string;
     type: string;
     extra?: string; // e.g. 'NOT NULL', 'PRIMARY KEY', etc.
+    jsType?: string; // optional, used for type inference
 }
+
+
 const transactionColumns: ColumnDescription[] = [
     { name: 'StatementId', type: 'BIGINT', extra: 'PRIMARY KEY' },
     { name: 'Date', type: 'DATETIME' },
@@ -63,7 +66,7 @@ const transactionsByUserColumns: ColumnDescription[] = [
     { name: 'StatementId', type: 'BIGINT' },
 ]
 const kafkaOffsetColumns: ColumnDescription[] = [
-    { name: 'Groupid', type: 'BIGINT' },
+    { name: 'Groupid', type: 'NVARCHAR(18)', extra: ' NOT NULL' },
     { name: 'Topic', type: 'NVARCHAR(100)', extra: ' NOT NULL' },
     { name: 'Partition', type: 'INT', extra: ' NOT NULL' },
     { name: 'Offset', type: 'NVARCHAR(18)', extra: ' NOT NULL' }
@@ -214,6 +217,33 @@ export async function createSchema() {
     }
 }
 
+export class Offsets {
+    static create(gropuId: string, queryResult: sql.IResult<any>): Offsets {
+        const mapping = new Map<string, string>();
+        // console.log(`recordset: ${JSON.stringify(queryResult.recordset)}`);
+        // console.log(`output: ${JSON.stringify(queryResult.recordset.map(r => typeof r))}`);
+        if (queryResult.recordset.length == 0 || 
+            queryResult.recordset.filter(r => typeof r !== 'object').length != 0
+        ) {
+            return new Offsets(mapping);
+        }
+        // queryResult.recordset.forEach(r => kafkaOffsetColumns.forEach(c => 
+        //     console.log(`typeof ${c.name} is ${typeof r[c.name]}`)));
+
+        const records = queryResult.recordset.map(r => JSON.parse(r));
+        records.filter(r => r[kafkaOffsetColumns[0].name] == gropuId).forEach(row => {
+            mapping.set(`${row[kafkaOffsetColumns[1].name]}-${row[kafkaOffsetColumns[2].name]}`, 
+                row[kafkaOffsetColumns[3].name]);
+        });
+        return new Offsets(mapping); 
+    }
+    private constructor(private mapping: Map<string, string>) {
+    }
+    getOffset(topic: string, partition: number = 0): string | undefined {
+        return this.mapping.get(`${topic}-${partition}`);
+    }
+}
+
 export class UserConnection {
     static async create(): Promise<UserConnection> {
         sql.map.register(Date, sql.DateTime2(3));
@@ -221,11 +251,13 @@ export class UserConnection {
         return new UserConnection(pool);
     }
     private constructor(private pool: sql.ConnectionPool) {
-
+    }
+    isConnectionAlive(): boolean {
+        return this.pool.connected;
     }
     async writeTransactionAndOffsetTransactionally(
         record: { type: "t", r: Transaction[] } | {type: "r", r: TransactionResult[]},
-        groupId: number,
+        groupId: string,
         offset: string,
         partition: number,
         topic: string
@@ -266,6 +298,7 @@ export class UserConnection {
             throw error +` ${iter} transactions and ${iter2} results were processed`;
         }
     }
+
     async addTransactionRecord(record: Transaction) {
         const request = this.pool.request()
         try {
@@ -305,7 +338,7 @@ export class UserConnection {
         request.input(last(transactionColumns)!.name, sql.TinyInt, state)
         await request.execute(updateTransactionStatusProcedure);
     }
-    async commitOffset(groupId: number, offset: string, topic: string, partition: number = 0) {
+    async commitOffset(groupId: string, offset: string, topic: string, partition: number = 0) {
         logger.log(`Committing offset ${offset} for group ${groupId}, topic ${topic}, partition ${partition}`);
         const request = this.pool.request()
         request.input(kafkaOffsetColumns[0].name, sql.BigInt, groupId)
@@ -314,6 +347,48 @@ export class UserConnection {
         request.input(kafkaOffsetColumns[3].name, sql.NVarChar(18), offset)
         const results = await request.execute(addKafkaOffsetProcedure);
         logger.log(`Results of committing offset: ${JSON.stringify(results)}`);
+    }
+    async getOffsets(groupId: string, topics: KConsumerOffsetInfo[]): Promise<Offsets | undefined> {
+        const request = this.pool.request()
+        let query = `SELECT TOP 1 * FROM ${kafkaOffsetTable} WHERE `
+
+        query += `${columtEqArg(kafkaOffsetColumns[0])}`
+        request.input(kafkaOffsetColumns[0].name, sql.BigInt, Number(groupId))
+
+        query += ` AND `;
+
+        query += `(`
+
+        query += `${topics.map((topic, t_idx) => {
+            const tParamName = kafkaOffsetColumns[1].name + `${t_idx}`;
+            let topicLine = `(`;
+            
+            topicLine += ` ${kafkaOffsetColumns[1].name} = @${tParamName}`;
+            request.input(tParamName, sql.NVarChar(100), topic)
+
+            topicLine += ` AND `
+            
+            topicLine += `${kafkaOffsetColumns[2].name} IN `
+            topicLine += `(${topic.partitions.map((partition, p_idx) => {
+                const pParamName = kafkaOffsetColumns[2].name + `${t_idx}${p_idx}`;
+                request.input(pParamName, sql.Int, partition.id);
+                return `@${pParamName}`;
+            }).join(',')})`;
+            
+            topicLine = `)`;
+            return topicLine;
+        }).join(` OR `)}`;
+
+        query += `)`
+        
+        const result = await request.query(query);
+        console.log(`records: ${JSON.stringify(result.recordset)}`);
+        console.log(`outputs: ${kafkaOffsetColumns.forEach(c => console.log(`output ${c.name} => ${result.output[c.name]}`))}`);
+        console.log(`columns: ${JSON.stringify(result.recordset.columns)}`);
+        if (result.recordsets.length == 0) {
+            return undefined;
+        }
+        return Offsets.create(groupId, result);
     }
 }
  
