@@ -1,10 +1,10 @@
 import * as prom from 'prom-client'
-import * as fs from 'fs';
 import { logger } from './common/logger.js';
+import { getRestoredMetrics } from "./common/monitoring.js";
 
+export { MonitoringServer, dumpRegistry } from "./common/monitoring.js";
 export const localReg: prom.Registry = new prom.Registry();
 
-const restoredMetrics = restoreRegistryFromDisk();
 
 async function makeCounter(name: string, help: string): Promise<prom.Counter> {
     const counter = new prom.Counter({
@@ -12,43 +12,23 @@ async function makeCounter(name: string, help: string): Promise<prom.Counter> {
         help,
         registers: [localReg],
     });
-    const restoredValue = (await restoredMetrics).get(name);
+    const restoredValue = (await getRestoredMetrics()).get(name);
     if (restoredValue !== undefined) {
         counter.inc(restoredValue);
     }
     return counter;
 }
-export const disconnectCount: prom.Counter = await makeCounter('kafka_failed_to_parse_messages', 'Number of times messages failed to parse');
+
+export const dbDisconnectCount: prom.Counter = await makeCounter('kafka_failed_to_parse_messages', 'Number of times messages failed to parse');
 export const crashCount: prom.Counter = await makeCounter('crash_count', 'Number of times application was killed manually');
+export const kafkaConnectFailure: prom.Counter = await makeCounter('kafka_connect_failure', 'Number of times Kafka connection failed');
+export const kafkaParseFailure: prom.Counter = await makeCounter('kafka_parse_failure', 'Number of times Kafka messages failed to parse');
+export const kafkaDisconnectCount: prom.Counter = await makeCounter('kafka_disconnect_count', 'Number of times Kafka consumer disconnected');
+export const kafkaRequestTimeout: prom.Counter = await makeCounter('kafka_connect_timeout', 'Number of times Kafka connection timed out');
+export const dbConnectionFailure: prom.Counter = await makeCounter('db_connection_failure', 'Number of times database connection failed');
+export const dbQueryFailure: prom.Counter = await makeCounter('db_query_failure', 'Number of times database query failed');
 // export const networkRequestTOCount: prom.Counter = await makeCounter('kafka_network_request_timeout', 'Number of times network request timed out');
 // export const networkRequestCount: prom.Counter = await makeCounter('kafka_failed_to_parse_messages', 'Number of times messages failed to parse');
 // export const msgPosted: prom.Counter = await makeCounter('kafka_failed_to_parse_messages', 'Number of times messages failed to parse');
 
-const LOCAL_REGISTRY_FILE_NAME = 'registry.json';
-async function restoreRegistryFromDisk() {
-    // Some scrapes might might happen during recovery and miss most recent data.
-    // Ideally metrics should also be pushed at a dedicated collecting service, together
-    // with logs and other telemetry data. But it will not be implemented in this demo..
-    const res = new Map<string, number>();
-    try {
-        const data = await fs.readFileSync(LOCAL_REGISTRY_FILE_NAME, 'utf8');
-        const metrics = JSON.parse(data);
-        metrics.forEach((metric: any) => {
-            res.set(metric.name, metric.values[0].value);
-        });
-    } catch (e) {
-        logger.error("Failed to read registry from disk:" + e);
-    }
-    return res;
-}
 
-export async function dumpRegistry() {
-    if (localReg == undefined) {
-        logger.error("Registry is not initialized");
-        return;
-    }
-    const registry = await localReg!.getMetricsAsJSON();
-    await fs.writeFileSync(LOCAL_REGISTRY_FILE_NAME, JSON.stringify(registry, null, 2));
-}
-
-export { MonitoringServer } from "./common/monitoring.js";

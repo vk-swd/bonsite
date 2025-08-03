@@ -3,9 +3,44 @@ import * as prom from 'prom-client'
 import { Server, createServer } from 'http';
 import { logger } from './logger.js';
 import { getEnv } from './utils.js';
+import * as fs from 'fs';
 
 const PORT = getEnv("MONITORING_PORT");
 
+
+let restoredMetrics: Map<string, number> | undefined = undefined;
+export async function getRestoredMetrics() {
+    if (restoredMetrics === undefined) {
+        restoredMetrics = await restoreRegistryFromDisk();
+    }
+    return restoredMetrics;
+}
+const LOCAL_REGISTRY_FILE_NAME = 'registry.json';
+async function restoreRegistryFromDisk(): Promise<Map<string, number>> {
+    // Some scrapes might might happen during recovery and miss most recent data.
+    // Ideally metrics should also be pushed at a dedicated collecting service, together
+    // with logs and other telemetry data. But it will not be implemented in this demo..
+    const res = new Map<string, number>();
+    try {
+        const data = await fs.readFileSync(LOCAL_REGISTRY_FILE_NAME, 'utf8');
+        const metrics = JSON.parse(data);
+        metrics.forEach((metric: any) => {
+            res.set(metric.name, metric.values[0].value);
+        });
+    } catch (e) {
+        logger.error("Failed to read registry from disk:" + e);
+    }
+    return res;
+}
+
+export async function dumpRegistry(localReg: prom.Registry | undefined = prom.register) {
+    if (localReg == undefined) {
+        logger.error("Registry is not initialized");
+        return;
+    }
+    const registry = await localReg!.getMetricsAsJSON();
+    await fs.writeFileSync(LOCAL_REGISTRY_FILE_NAME, JSON.stringify(registry, null, 2));
+}
 
 
 export class MonitoringServer {

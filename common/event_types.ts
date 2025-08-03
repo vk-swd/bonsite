@@ -26,3 +26,4 @@ export const TransactionResultValidator = z.object({
     state: z.nativeEnum(TResult)
 });
 export type TransactionResult = z.infer<typeof TransactionResultValidator>;
+export type TransactionMessages = { type: "t", r: Transaction[] } | { type: "r", r: TransactionResult[] } | { type: "e", r: string[] }

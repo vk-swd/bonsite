@@ -1,7 +1,7 @@
 
 export type KConsumerOffsetInfo = {
   topic: string, 
-  partitions: { id: number, offset?: string }[]
+  partitions: number[]
 }
 
 export function last<T>(a: Array<T>): T | undefined {
