@@ -2,10 +2,10 @@ import { z } from "zod";
 
 export const TransactionValidator = z.object({
     id: z.number(),
-    userIdFrom: z.number(),
-    userIdTo: z.number(),
     dateTime: z.number(),
     amount: z.number(),
+    userIdFrom: z.number(),
+    userIdTo: z.number(),
     description: z.string().optional(),
     merchantInfo: z.string().optional(),
     location: z.string().optional()
@@ -21,7 +21,7 @@ export enum TResult {
     BLOCKED = 4
 }
 export const TransactionResultValidator = z.object({
-    transactionID: z.number(),
+    id: z.number(),
     dateTime: z.number(),
     state: z.nativeEnum(TResult)
 });

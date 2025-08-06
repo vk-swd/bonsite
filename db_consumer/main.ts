@@ -117,14 +117,30 @@ export async function processConsumedBatch(topic: string, partition: number, mes
     let resend = true;
     while (resend) {
         try {
-            await db_connection.writeTransactionAndOffsetTransactionally(
+            const res = await db_connection.writeTransactionAndOffsetTransactionally(
                 msgs!,
                 groupId,
                 lastOffset,
                 partition,
                 topic)
-            console.log(`stp 11`)
-            resend = false;
+            if (res.rolledBack) {
+                if (msgs.type == "e") {
+                    // mtrx.dbRawWriteFailure?.inc(messages.length);
+                    const msg = `Failed to write raw data for topic ${topic} partition ${partition} with offset ${lastOffset}`
+                    logger.error(msg);
+                    throw await crash(msg);
+                } else {
+                    // mtrx.dbRollbackCount?.inc(1);
+                    msgs = { type: "e", r: messages };
+                    logger.error(`Transaction rolled back for topic ${topic} partition ${partition} with offset ${lastOffset}`);   
+                }
+            } else {
+                // res.duds
+                // res.newCount
+                resend = false;
+                // mtrx.dbWriteSuccess?.inc(messages.length);
+                logger.log(`Successfully wrote ${messages.length} messages to topic ${topic} partition ${partition} with offset ${lastOffset}`);
+            }
         } catch (e) {
             const msg = `batch for topic ${topic} partition ${partition} with ${messages.length} messages offset ${lastOffset} `;
             if (!(e instanceof ConnectionError)) {
@@ -134,15 +150,11 @@ export async function processConsumedBatch(topic: string, partition: number, mes
                 mtrx.dbDisconnectCount?.inc(1);
                 logger.error(`Lost connection to database while writing (${msg}): ${e.message}`);
                 throw await crash(e);
-            } else if (msgs.type !== "e") {
-                logger.error(`Failed to write (${msg}) as non raw data : ${e.message}`);
+            } else {
+                logger.error(`Failed to write (${msg}) of type ${msgs.type} : ${e.message}`);
                 mtrx.dbQueryFailure?.inc(messages.length);
                 throw await crash(e);
-            } else if (msgs.type == "e"){
-                console.error(`Failed to write (${msg}) as raw data : ${e.message}, exiting...`);
-                throw await crash(e);
             }
-            msgs = { type: "e", r: messages };
         }
     }
 }

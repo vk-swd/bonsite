@@ -1,5 +1,5 @@
 import { createSchema, UserConnection } from './common/db_defines.js';
-import { Transaction, TransactionResult } from './common/event_types.js';
+import { Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
 import { getEnv, last } from './common/utils.js';
 import { processConsumedBatch } from './main.js';
 import { describe, it } from 'mocha'
@@ -7,15 +7,53 @@ import { describe, it } from 'mocha'
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
+import { logger } from './common/logger.js';
 chai.use(chaiAsPromised);
+chai.config.includeStack = true;
+chai.config.truncateThreshold = 10000
 
 const groupId = getEnv("KAFKA_GROUP_ID");
 const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS_TRANSACTIONS")];
 const [topic_transaction_res, topic_transactions] = topics;
-console.log(`Using groupId: ${groupId}, topics: ${topics}`);
 
+enum RecordStatus {
+    IGNORED,
+    PROCESSED
+}
+type Batch = { status: RecordStatus, t: Transaction | TransactionResult, o: string }[];
+function getIgnored<T>(batch: Batch): T[] {
+    return batch.filter(b => b.status === RecordStatus.IGNORED)
+                .map(b => b.t as T);
+}
 
-type Batch = { t: Transaction | TransactionResult, o: string }[];
+function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[]): Transaction[] {
+    const res: Transaction[] = [];
+    for (const tBatch of tBatches) {
+        for (const tRecord of tBatch) {
+            if (tRecord.status !== RecordStatus.PROCESSED) {
+                continue;
+            }
+            let hasResult = false;
+            for (const resBatch of resBatches) {
+                for (const resRecord of resBatch) {
+                    if (resRecord.t.id !== tRecord.t.id
+                        || resRecord.status !== RecordStatus.PROCESSED
+                        || (resRecord.t as TransactionResult).state !== TResult.CONFIRMED) {
+                        continue;
+                    }
+                    res.push(tRecord.t as Transaction);
+                    hasResult = true;
+                    break;
+                }
+                if (hasResult) {
+                    break;
+                }
+            }            
+        }
+    }
+    return res;
+}
+
 function sendBatch(topic: string, batch: Batch, db_connection: UserConnection) {
     const offset = last(batch)!.o;
     const messages = batch.map(b => JSON.stringify(b.t));
@@ -27,153 +65,113 @@ const partitionsPerTOpic = [
     { topic: topic_transactions, partitions: [0] }
 ];
 
-async function testOffsets(t: string, r: string, connection: UserConnection) {
+async function testOffsets(topic: string, val: string, connection: UserConnection) {
     const offsets = await connection.getOffsets(groupId, partitionsPerTOpic);
-    chai.expect(offsets.getOffset(topic_transactions, 0)??'0', `expected ${t} from ${topic_transactions}`).to.equal(t);
-    chai.expect(offsets.getOffset(topic_transaction_res, 0)??'0', `expected ${r} from ${topic_transaction_res}`).to.equal(r);
+    chai.expect(offsets.getOffset(topic, 0)??'0', `expected ${val} from ${topic}`).to.equal(val);
 }
 
-
-
+function dataToTransaction(data: string): Transaction {
+    const parsed = JSON.parse(data);
+    return TransactionValidator.parse({
+        id: parsed.id,
+        dateTime: new Date(parsed.dateTime).getMilliseconds(),
+        amount: parsed.amount,
+        userIdFrom: parsed.userIdFrom,
+        userIdTo: parsed.userIdTo
+    });
+}
+function dataToTransactionRes(data: string): TransactionResult {
+    const parsed = JSON.parse(data);
+    return TransactionResultValidator.parse({
+        id: parsed.transactionID,
+        dateTime: new Date(parsed.dateTime).getMilliseconds(),
+        state: parsed.state as TResult
+    });
+}
 describe('Kafka Consumer Tests', function () {
     this.timeout(10000); // Set timeout for the tests
     let db_connection: UserConnection | undefined = undefined
-    function compare(o1: string, o2:string){ 
-        it('compare offsets', async () => {
-            await testOffsets(o1, o2, db_connection!);
-        })
-    }
-
     this.beforeEach(async () => {
         await createSchema();
         try {
             db_connection = await UserConnection.create();
         } catch (e) {
-            console.error(`Failed to create database connection: ${e}`);
+            logger.error(`Failed to create database connection: ${e}`);
             exit(1);
         }
-    });
-    this.afterEach(async () => {
-        if (db_connection) {
-            console.log(`Closing database connection`);
-            await db_connection.close();
-            console.log(`Database connection closed`);
-            db_connection = undefined;
-        }
-    });     
-    it(`test simple conflict detection`, async () => {
+    }); 
+    it(`Simple functional test`, async () => {
         let tIdx = 1;
+        let rIdx = 1;
         const batches: Batch[] = [
             [
-                { t: {id: 1, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 1, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 2, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 1, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 2, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 3, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
             ],
             [
-                { t: {id: 1, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 1, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 1, userIdFrom: 2, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 2, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 4, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 4, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 5, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 5, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-            ],
-        ]
-        try {
-        await sendBatch(topic_transactions, batches[0], db_connection!);
-        // await expect(db_connection!.getTransactions(), `couldnt get transaction`).to.eventually.eq([
-        //     { id: 1, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0 },
-        //     { id: 2, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 1 },
-        //     { id: 3, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 2 },
-        // ]);
-        // expect((await db_connection!.getRawData()).map(d => d.data)).to.eventually.eq([
-        //     '{id: 1, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 1}',
-        //     '{id: 2, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 1}',
-        //     '{id: 3, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 2}'
-        // ]);
-        await sendBatch(topic_transactions, batches[1], db_connection!);
-        const rex: Transaction[] = [
-        { id: 1, userIdFrom: 0, userIdTo: 1, dateTime: 0, amount: 1 },
-        { id: 2, userIdFrom: 0, userIdTo: 1, dateTime: 0, amount: 1 },
-        { id: 3, userIdFrom: 0, userIdTo: 1, dateTime: 0, amount: 1 },
-        { id: 4, userIdFrom: 0, userIdTo: 1, dateTime: 0, amount: 1 },
-        { id: 5, userIdFrom: 0, userIdTo: 1, dateTime: 0, amount: 1 }];
-        const res = await db_connection!.getTransactions();
-        res.forEach((r,idx) => {
-            console.log(`compare ${rex[idx]==r} ${JSON.stringify(rex[idx])} vs ${JSON.stringify(r)}`)
-        })
-        expect(JSON.stringify(res), `comparing ${JSON.stringify(res)}`).to.eq(JSON.stringify(rex));
-        // expect((await db_connection!.getRawData()).map(d => d.data)).to.eventually.eq([
-        //     '{id: 1, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 1}',
-        //     '{id: 2, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 1}',
-        //     '{id: 3, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 2}',
-        //     '{id: 1, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 1}',
-        //     '{id: 1, userIdFrom: 2, userIdTo: 1, amount: 1, dateTime: 1}',
-        //     '{id: 3, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 2}',
-        //     '{id: 3, userIdFrom: 2, userIdTo: 1, amount: 1, dateTime: 2}',
-        //     '{id: 4, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 2}',
-        //     '{id: 5, userIdFrom: 1, userIdTo: 1, amount: 1, dateTime: 2}',
-        // ]);
-        } catch (e) {
-            console.error(`Error during conflict detection test: ${e}`);
-            throw e;
-        }
-    });
-
-    it('should process transactions and results', async () => {
-        await compare('0', '0');
-        let tIdx = 1;
-        let tIdxR = 1;
-        const batches: Batch[] = [
-            [
-                { t: {id: 1, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 2, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 1}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 2}, o: `${tIdx++}` },
-                { t: {id: 4, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 3}, o: `${tIdx++}` },
-                { t: {id: 5, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 4}, o: `${tIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 1, dateTime: 200, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 2, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 2, dateTime: 200, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 3, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
             ],
             [
-                { t: {id: 1, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 0}, o: `${tIdx++}` },
-                { t: {id: 2, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 1}, o: `${tIdx++}` },
-                { t: {id: 3, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 2}, o: `${tIdx++}` },
-                { t: {id: 4, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 3}, o: `${tIdx++}` },
-                { t: {id: 5, userIdFrom: 0, userIdTo: 1, amount: 1, dateTime: 4}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 2, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 2, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 4, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 4, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 5, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 5, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
             ],
-            [    
-                { t: {transactionID: 1, dateTime: 10, state: 1}, o: `${tIdxR++}` },
-                { t: {transactionID: 2, dateTime: 11, state: 2}, o: `${tIdxR++}` },
-                { t: {transactionID: 3, dateTime: 12, state: 3}, o: `${tIdxR++}` },
-                { t: {transactionID: 4, dateTime: 13, state: 4}, o: `${tIdxR++}` },
-                { t: {transactionID: 5, dateTime: 14, state: 0}, o: `${tIdxR++}` },
-            ],
-            [    
-                { t: {transactionID: 1, dateTime: 10, state: 1}, o: `${tIdxR++}` },
-                { t: {transactionID: 2, dateTime: 11, state: 2}, o: `${tIdxR++}` },
-                { t: {transactionID: 3, dateTime: 12, state: 3}, o: `${tIdxR++}` },
-                { t: {transactionID: 4, dateTime: 13, state: 4}, o: `${tIdxR++}` },
-                { t: {transactionID: 5, dateTime: 14, state: 0}, o: `${tIdxR++}` },
+            [
+                { status: RecordStatus.IGNORED,     t: {id: 2, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 4, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { status: RecordStatus.PROCESSED,   t: {id: 5, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
             ]
         ]
-        await sendBatch(topic_transactions, batches[0], db_connection!);
-        await compare('5', '0')
-        await sendBatch(topic_transactions, batches[1], db_connection!);
-        await compare('10', '0');
-        // await sendBatch(topic_transaction_res, batches[2], db_connection);
-        // await compare('5', '5');
-        /*  Normal
-            Duplicates
-            Unordered
-            Conflicts
-            Malformed
-            Lost connection - check offset
-        */
+        function compareObjecs<T>(actual: T[], expected: T[], message: string) {
+            const a = actual
+            const e = expected;
+            chai.expect(a, `expected ${e} but got ${a}`).to.deep.equal(e);
+        }
+        async function sendTransactions(tBatch: Batch, msg: string) {
+            const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);
+            await sendBatch(topic_transactions, tBatch, db_connection!); 
+            const ignored = (await db_connection!.getRawData(expectedIgnored.length))
+                                                .map(r => dataToTransaction(r))
+            compareObjecs(ignored, expectedIgnored, msg);
+                
+            await testOffsets(topic_transactions, last(tBatch)!.o, db_connection!);
+        }
+        async function sendTResults(resBatch: Batch, msg: string) {
+            await sendBatch(topic_transaction_res, resBatch, db_connection!);
+            const expectedIgnored = getIgnored<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
+            const ignored = ((await db_connection!.getRawData(expectedIgnored.length))
+                                                .map(r => dataToTransactionRes(r)));
+            compareObjecs(ignored, expectedIgnored, msg);
+            await testOffsets(topic_transaction_res, last(resBatch)!.o, db_connection!);
+        }
+        async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], msg: string) {
+            const expectedReturned = getReturnedTransactions(tBatch, resBatches);
+            const returned = await db_connection!.getTransactions(0);
+            compareObjecs(returned, expectedReturned, msg);
+        }   
+
+        await sendTransactions(batches[0], `Sending transactions batch 0`);
+        await sendTResults(batches[1], `Sending transaction results batch 1`);
+        await checkValidTransactions([batches[0]], [batches[1]], `Checking valid transactions after batch 0 and 1`);
+        
+        await sendTransactions(batches[2], `Sending transactions batch 2`);
+        await sendTResults(batches[3], `Sending transaction results batch 3`);
+        await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], `Checking valid transactions after batch 2 and 3`);
     });
-    this.afterAll(async () => {
-        exit(0); // Exit after tests
-    })
 });
