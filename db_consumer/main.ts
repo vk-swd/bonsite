@@ -3,7 +3,7 @@ import { getEnv, KConsumerOffsetInfo, last } from "./common/utils.js";
 import * as kf from "kafkajs";
 
 import { ConnectionError, ConnectionErrorType, Offsets, UserConnection } from "./common/db_defines.js";
-import { Transaction, TransactionMessages, TransactionResult, TransactionResultValidator, TransactionValidator } from "./common/event_types.js";
+import { InKafkaMessage, MetadataWrapperValidator, Transaction, TransactionMessages, TransactionResult, TransactionResultValidator, TransactionValidator } from "./common/event_types.js";
 import { logger } from "./common/logger.js";
 import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
@@ -103,9 +103,8 @@ export async function processConsumedBatch(topic: string, partition: number, mes
     }
     let msgs: TransactionMessages;
     try {
-        msgs = topic == topic_transactions ?
-                { type: "t", r: parseMsgs<Transaction>(messages, TransactionValidator) } :
-                { type: "r", r: parseMsgs<TransactionResult>(messages, TransactionResultValidator) };
+        const kMsgs = parseMsgs<InKafkaMessage>(messages, MetadataWrapperValidator)
+        msgs = { type: topic == topic_transactions ? "t" : "r", r: kMsgs };
     } catch (e) {
         /*  Version mismatch between producer and consumer or data corruption/tampering.
             Don't block service, save for later inspection.
@@ -124,7 +123,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
                 partition,
                 topic)
             if (res.rolledBack) {
-                if (msgs.type == "e") {
+                if (msgs!.type == "e") {
                     // mtrx.dbRawWriteFailure?.inc(messages.length);
                     const msg = `Failed to write raw data for topic ${topic} partition ${partition} with offset ${lastOffset}`
                     logger.error(msg);
@@ -151,7 +150,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
                 logger.error(`Lost connection to database while writing (${msg}): ${e.message}`);
                 throw await crash(e);
             } else {
-                logger.error(`Failed to write (${msg}) of type ${msgs.type} : ${e.message}`);
+                logger.error(`Failed to write (${msg}) of type ${msgs!.type} : ${e.message}`);
                 mtrx.dbQueryFailure?.inc(messages.length);
                 throw await crash(e);
             }
@@ -270,10 +269,10 @@ async function runConsumption() {
     }
 }
 
-// runConsumption().catch(e => {
-//     logger.error(`Failed to reconnect to kafka: ${e}`);
-//     // retryConnection();
-// });
+runConsumption().catch(e => {
+    logger.error(`Failed to reconnect to kafka: ${e}`);
+    // retryConnection();
+});
 
 let retryTimer: NodeJS.Timeout | undefined = undefined
 function retryConnection() {

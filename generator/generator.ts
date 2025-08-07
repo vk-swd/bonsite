@@ -2,7 +2,7 @@
 import { getEnv } from './common/utils.js';
 import { GenParameters } from './common/generator_parameters.js';
 import { last, PriorityQ } from './common/utils.js'
-import { Transaction, TransactionResult, TResult } from './common/event_types.js';
+import { InKafkaMessage, Transaction, TransactionResult, TResult } from './common/event_types.js';
 
 
 
@@ -27,17 +27,17 @@ export type TransactionResultScheduled = {
 const KAFKA_TOPICS_TRANSACTIONS: string = getEnv("KAFKA_TOPICS_TRANSACTIONS");
 const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
 const MS_PER_SECOND = 1000;
-export type TransactionEvent = {topic: string, event: Transaction | TransactionResult}
+export type TransactionEvent = {topic: string, event: InKafkaMessage, seqNumberer?: () => number};
 
 class TransactionEventsQueue {
-    private events = new PriorityQ<TransactionEvent>((a,b) => a.event.dateTime < b.event.dateTime);
+    private events = new PriorityQ<TransactionEvent>((a,b) => a.event.payload.dateTime < b.event.payload.dateTime);
     private lastTransactionTime: number | undefined = undefined;
     getLastTransactionTime(): number | undefined {
         return this.lastTransactionTime;
     }
     enqueEvent(event: TransactionEvent) {
         if (event.topic === KAFKA_TOPICS_TRANSACTIONS) {
-            this.lastTransactionTime = event.event.dateTime;
+            this.lastTransactionTime = event.event.payload.dateTime;
         }
         this.events.push(event);
     }
@@ -46,7 +46,7 @@ class TransactionEventsQueue {
     }
     dequeEvents(now: number): Array<TransactionEvent> {
         const res = new Array<TransactionEvent>();
-        while (!this.events.isEmpty() && this.events.peek()!.event.dateTime < now) {
+        while (!this.events.isEmpty() && this.events.peek()!.event.payload.dateTime < now) {
             res.push(this.events.pop()!);
         }
         return res;        
@@ -61,6 +61,13 @@ class DelayGenerator {
         return now + Math.random() * this.maxDelayMs;
     }
 }
+class Counters {
+    constructor(
+        public transactionCounter: number = 0,
+        public transactionResultCounter: number = 0,
+    ) {}
+}
+
 export class Generator {
     static transactionId = 0;
     static resultTransactionId = 0;
@@ -82,8 +89,16 @@ export class Generator {
             this.generate(Math.ceil(intervalMs / MS_PER_SECOND) * MS_PER_SECOND, this.now);
         }
         this.now = now;
-        return this.queue.dequeEvents(this.now);
+        const events = this.queue.dequeEvents(now);
+        for (const e of events) {
+            if (e.seqNumberer !== undefined) {
+                e.event.metadata.seqNumber = e.seqNumberer();
+            }
+        }
+        return events;
     }
+    msgMetaDataPerUser = new Map<number, Counters>();
+    anomalyCounter = 0;
     generate(interval: number, now: number) {
         if (this.currentParams == undefined) {
             throw new Error(`Inset generator parameters`)
@@ -91,7 +106,7 @@ export class Generator {
         /*  Not going for much realism, where consumers rarely have transactions with other consumers
             Also transaction latency is not emulating any thread contention, so 
                 transaction result delay will be random.
-        */        
+        */
         const maxTotalEventsPerSec = this.currentParams.maxTransactionsPerSec * this.currentParams.userCount;
         const maxEventsPerInterval = maxTotalEventsPerSec * interval / MS_PER_SECOND ;
         const eventCount = Math.round(Math.random() * maxEventsPerInterval);
@@ -102,6 +117,12 @@ export class Generator {
             // Can make internal transfers too (same id to and from)
             const userIdFrom = Math.floor(Math.random() * this.currentParams.userCount);
             const userIdTo = Math.floor(Math.random() * this.currentParams.userCount);
+            if (this.msgMetaDataPerUser.get(userIdFrom) === undefined) {
+                this.msgMetaDataPerUser.set(userIdFrom, new Counters());
+            }
+            if (this.msgMetaDataPerUser.get(userIdTo) === undefined) {
+                this.msgMetaDataPerUser.set(userIdTo, new Counters());
+            }
             const transaction: Transaction = {
                 id: Generator.transactionId++,
                 userIdFrom,
@@ -111,11 +132,19 @@ export class Generator {
             }
             const result: TransactionResult = {
                 dateTime: this.delayGenerator.delay(now),
-                transactionID: transaction.id,
+                id: transaction.id,
                 state: generateTransactionResult()
             }
-            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: transaction });
-            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: result });
+            const tEvent: InKafkaMessage = { payload: transaction, metadata: 
+                { seqNumber: this.msgMetaDataPerUser.get(userIdFrom)!.transactionCounter++, 
+                    isIgnored: false } };
+            const rEvent: InKafkaMessage = { payload:result, metadata: 
+                { seqNumber: 0,
+                    isIgnored: false } };
+            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: tEvent });
+            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent, seqNumberer: () => {
+                return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultCounter++;
+            }});
         }
     }
     queueSize(): number {
@@ -137,6 +166,7 @@ export function testGeneratorContinuous() {
         const newNow = Date.now();
         console.log(`current pending events ${gen.queueSize()} at ${newNow} ms maxConsumed ${maxConsumed} maxQueueSize ${maxQS}`);
     }, 1000);
+
     const to1: NodeJS.Timeout = setTimeout(() => {
         const newNow = Date.now();
         if (newNow - now > generationIntervalMs + 200) {
@@ -157,10 +187,10 @@ export function testGeneratorContinuous() {
         maxConsumed = Math.max(maxConsumed, events.length);
         let lastEventTime = 0;
         for (const e of events) {
-            if (e.event.dateTime < lastEventTime) {
-                throw new Error(`Events are not ordered: ${e.event.dateTime} < ${lastEventTime}`);
+            if (e.event.payload.dateTime < lastEventTime) {
+                throw new Error(`Events are not ordered: ${e.event.payload.dateTime} < ${lastEventTime}`);
             }
-            lastEventTime = e.event.dateTime;
+            lastEventTime = e.event.payload.dateTime;
         }
         now = newNow;
         to1.refresh()

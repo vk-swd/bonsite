@@ -57,13 +57,13 @@ export class Sender {
         this.timeout = undefined;
     }
     send(event: TransactionEvent) {
-        if (this.lastEvent.time > event.event.dateTime) {
+        if (this.lastEvent.time > event.event.payload.dateTime) {
             throw new Error(`Bad order of generated events old ${JSON.stringify(this.lastEvent.event)} new ${JSON.stringify(event)}`)
         }
         const msg = JSON.stringify(event.event);
         this.client.send(msg, event.topic);
         // this.writeOnDisk(`${msg}\n`);
-        this.lastEvent.time = event.event.dateTime;
+        this.lastEvent.time = event.event.payload.dateTime;
         this.lastEvent.event = event;
     }
     buffer: string[] = [];

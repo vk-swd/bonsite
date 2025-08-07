@@ -1,5 +1,5 @@
 import { createSchema, UserConnection } from './common/db_defines.js';
-import { Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
+import { InKafkaMessage, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
 import { getEnv, last } from './common/utils.js';
 import { processConsumedBatch } from './main.js';
 import { describe, it } from 'mocha'
@@ -20,10 +20,10 @@ enum RecordStatus {
     IGNORED,
     PROCESSED
 }
-type Batch = { status: RecordStatus, t: Transaction | TransactionResult, o: string }[];
+type Batch = { status: RecordStatus, t: InKafkaMessage, o: string }[];
 function getIgnored<T>(batch: Batch): T[] {
     return batch.filter(b => b.status === RecordStatus.IGNORED)
-                .map(b => b.t as T);
+                .map(b => b.t.payload as T);
 }
 
 function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[]): Transaction[] {
@@ -34,14 +34,16 @@ function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[]): Transa
                 continue;
             }
             let hasResult = false;
+            const trans = tRecord.t.payload as Transaction;
             for (const resBatch of resBatches) {
                 for (const resRecord of resBatch) {
-                    if (resRecord.t.id !== tRecord.t.id
+                    const result = resRecord.t.payload as TransactionResult;
+                    if (result.id !== trans.id
                         || resRecord.status !== RecordStatus.PROCESSED
-                        || (resRecord.t as TransactionResult).state !== TResult.CONFIRMED) {
+                        || result.state !== TResult.CONFIRMED) {
                         continue;
                     }
-                    res.push(tRecord.t as Transaction);
+                    res.push(trans);
                     hasResult = true;
                     break;
                 }
@@ -137,7 +139,12 @@ describe('Kafka Consumer Tests', function () {
                 { status: RecordStatus.PROCESSED,   t: {id: 4, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
                 { status: RecordStatus.PROCESSED,   t: {id: 5, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
             ]
-        ]
+        ].map(b => b.map(t => {
+            return { status: t.status, 
+                t: { metadata: { seqNumber: 0, isIgnored: false }, payload: t.t } as InKafkaMessage,
+                o: t.o };
+        }));
+
         function compareObjecs<T>(actual: T[], expected: T[], message: string) {
             const a = actual
             const e = expected;

@@ -1,11 +1,8 @@
-import { Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from './event_types.js'
+import { Metadata, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from './event_types.js'
 import { getEnv, KConsumerOffsetInfo, last } from './utils.js'
 
-import sql, { columns, Table } from 'mssql'
+import sql from 'mssql'
 import { logger } from './logger.js'
-import { receiveMessageOnPort } from 'worker_threads'
-import { tracingChannel } from 'diagnostics_channel'
-import { set } from 'zod'
 
 const user_sa = getEnv('MSSQL_SA_USERNAME')
 const demo_password = getEnv('MSSQL_PASSWORD')
@@ -74,6 +71,14 @@ enum Procedures {
     INSERT_IF_NOT_EXISTS = 'INSERT_IF_NOT_EXISTS',
     UPSERT = 'UPSERT'
 }
+type MetadataSerialized = {
+    metadata: string;
+}
+
+const [tc_id, tc_date, tc_amount, tc_uFrom, tc_uTo] = Object.keys(TransactionValidator.shape);
+type TransactionStored = MetadataSerialized & Transaction;
+type TransactionResultStored = MetadataSerialized & TransactionResult;
+
 const usersTable: TableDescription<{id: "", name:""}> = {
     name: `${schema}.users`, columns: {
         id: { name: 'id', type: 'BIGINT', extra: 'PRIMARY KEY' }, //IDENTITY(1,1)
@@ -85,40 +90,92 @@ const usersTable: TableDescription<{id: "", name:""}> = {
     procedures: [ Procedures.INSERT_IF_NOT_EXISTS ],
 }
 
+const transactionsTable: TableDescription<TransactionStored> = {
+    name: `${schema}.transactions`, 
+    columns: {
+        id: { name: "id", type: 'BIGINT', extra: 'PRIMARY KEY' },
+        dateTime: { name: "dateTime", type:'DATETIME', extra: 'NOT NULL' },
+        amount: { name: "amount", type: 'DECIMAL(18,2)', extra: 'NOT NULL' },
+        userIdFrom: { name: "userIdFrom", type: 'BIGINT', extra: 'NOT NULL' },
+        userIdTo: { name: "userIdTo", type: 'BIGINT', extra: 'NOT NULL' },
+        metadata: { name: "metadata", type: 'NVARCHAR(max)', extra: 'NOT NULL' }
+    },
+    permissions: [
+        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
+        { role: statementCreatorRole, permissions: ['SELECT'] }
+    ],
+    foreignKeys: [
+        { column: tc_uFrom, references: `${usersTable.name}(${usersTable.columns.id.name})` },
+        { column: tc_uTo, references: `${usersTable.name}(${usersTable.columns.id.name})` }
+    ],
+    procedures: [ Procedures.INSERT_CONFLICT_AWARE ],
+}
+
+const transactionResultsTable: TableDescription<TransactionResultStored> ={
+    name: `${schema}.transaction_results`, columns: {
+        id: { name: "transactionID", type: 'BIGINT', extra: 'PRIMARY KEY' },
+        dateTime: { name: "dateTime", type: 'DATETIME', extra: 'NOT NULL' },
+        state: { name: "state", type: 'TINYINT', extra: 'NOT NULL' },
+        metadata: { name: "metadata", type: 'NVARCHAR(max)', extra: 'NOT NULL' }
+    }, permissions: [
+        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
+        { role: statementCreatorRole, permissions: ['SELECT'] }
+    ],
+    procedures: [ Procedures.INSERT_CONFLICT_AWARE ],
+}
 
 
-const [tc_id, tc_date, tc_amount, tc_uFrom, tc_uTo] = Object.keys(TransactionValidator.shape);
-const transactionsTable: TableDescription<Transaction> = {
-        name: `${schema}.transactions`, 
-        columns: {
-            id: { name: "id", type: 'BIGINT', extra: 'PRIMARY KEY' },
-            dateTime: { name: "dateTime", type:'DATETIME', extra: 'NOT NULL' },
-            amount: { name: "amount", type: 'DECIMAL(18,2)', extra: 'NOT NULL' },
-            userIdFrom: { name: "userIdFrom", type: 'BIGINT', extra: 'NOT NULL' },
-            userIdTo: { name: "userIdTo", type: 'BIGINT', extra: 'NOT NULL' },
-        },
-        permissions: [
-            { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
-            { role: statementCreatorRole, permissions: ['SELECT'] }
-        ],
-        foreignKeys: [
-            { column: tc_uFrom, references: `${usersTable.name}(${usersTable.columns.id.name})` },
-            { column: tc_uTo, references: `${usersTable.name}(${usersTable.columns.id.name})` }
-        ],
-        procedures: [ Procedures.INSERT_CONFLICT_AWARE ],
-    }
+const transactionsByUserTable: TableDescription<{idx:"", userId:"", date: "", transId: ""}> = {
+    name: `${schema}.transactions_by_user`, columns: {
+        idx: { name: 'idx', type: 'BIGINT', extra: 'identity(1,1) primary key' },
+        userId: { name: 'UserId', type: 'BIGINT', extra: 'NOT NULL' },
+        date: { name: 'Date', type: 'DATETIME', extra: 'NOT NULL' },
+        transId: { name: "TransactionId", type: 'BIGINT', extra: 'NOT NULL' }
+    }, permissions: [
+        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
+        { role: statementCreatorRole, permissions: ['SELECT'] }
+    ],
+    foreignKeys: [
+        { column: 'UserId', references: `${usersTable.name}(${usersTable.columns.id.name})` },
+        { column: tc_id, references: 
+            `${transactionsTable.name}(${tc_id})` }
+    ],
+    nonClusteredIndexes: [
+        {
+            name: 'idx_c_transactionsByUser',
+            columns: ['UserId', 'Date'],
+            include: ["TransactionId"]
+        }
+    ]
+}
 
- const transactionResultsTable: TableDescription<TransactionResult> ={
-        name: `${schema}.transaction_results`, columns: {
-            id: { name: "transactionID", type: 'BIGINT', extra: 'PRIMARY KEY' },
-            dateTime: { name: "dateTime", type: 'DATETIME', extra: 'NOT NULL' },
-            state: { name: "state", type: 'TINYINT', extra: 'NOT NULL' }
-        }, permissions: [
-            { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
-            { role: statementCreatorRole, permissions: ['SELECT'] }
-        ],
-        procedures: [ Procedures.INSERT_CONFLICT_AWARE ],
-    }
+const kafkaOffsetTable: TableDescription<{groupId: "", topic:"", partition:"",offset:""}> = {
+    name: `${schema}.kafka_offsets`, columns: {
+        groupId: { name: 'Groupid', type: 'NVARCHAR(18)', extra: 'NOT NULL' },
+        topic: { name: 'Topic', type: 'NVARCHAR(100)', extra: 'NOT NULL' },
+        partition: { name: 'Partition', type: 'INT', extra: 'NOT NULL' },
+        offset: { name: 'Offset', type: 'NVARCHAR(18)', extra: 'NOT NULL' }
+    }, permissions: [
+        { role: consumerRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
+    ],
+    primaryKey: ['Groupid', 'Topic', 'Partition']
+}
+
+const rawDataTable: TableDescription<{idx: "", data: ""}> = {
+    name: `${schema}.raw_data`, columns: {
+        idx: { name: 'idx', type: 'BIGINT', extra: 'identity(1,1) primary key' },
+        data: { name: 'data', type: 'NVARCHAR(max)', extra: 'NOT NULL' }
+    }, permissions: [
+        { role: consumerRole, permissions: ['INSERT', `SELECT`] }
+    ],
+    nonClusteredIndexes: [
+        {
+            name: `reverse_order_idx`,
+            columns: ['idx DESC']
+        }
+    ]
+}
+
 
 const typeToSqlFactoryType = new Map<string, sql.ISqlType>([
     ['BIGINT', { type: sql.BigInt }],
@@ -126,60 +183,7 @@ const typeToSqlFactoryType = new Map<string, sql.ISqlType>([
     ['DECIMAL(18,2)', { type: sql.Decimal(18, 2) }],
     ['NVARCHAR(100)', { type: sql.NVarChar(100) }],
     ['TINYINT', { type: sql.TinyInt }]
- ]);
-
-const transactionsByUserTable: TableDescription<{idx:"", userId:"", date: "", transId: ""}> = {
-        name: `${schema}.transactions_by_user`, columns: {
-            idx: { name: 'idx', type: 'BIGINT', extra: 'identity(1,1) primary key' },
-            userId: { name: 'UserId', type: 'BIGINT', extra: 'NOT NULL' },
-            date: { name: 'Date', type: 'DATETIME', extra: 'NOT NULL' },
-            transId: { name: "TransactionId", type: 'BIGINT', extra: 'NOT NULL' }
-        }, permissions: [
-            { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
-            { role: statementCreatorRole, permissions: ['SELECT'] }
-        ],
-        foreignKeys: [
-            { column: 'UserId', references: `${usersTable.name}(${usersTable.columns.id.name})` },
-            { column: tc_id, references: 
-                `${transactionsTable.name}(${tc_id})` }
-        ],
-        nonClusteredIndexes: [
-            {
-                name: 'idx_c_transactionsByUser',
-                columns: ['UserId', 'Date'],
-                include: ["TransactionId"]
-            }
-        ]
-    }
-
-
-const kafkaOffsetTable: TableDescription<{groupId: "", topic:"", partition:"",offset:""}> = {
-        name: `${schema}.kafka_offsets`, columns: {
-            groupId: { name: 'Groupid', type: 'NVARCHAR(18)', extra: 'NOT NULL' },
-            topic: { name: 'Topic', type: 'NVARCHAR(100)', extra: 'NOT NULL' },
-            partition: { name: 'Partition', type: 'INT', extra: 'NOT NULL' },
-            offset: { name: 'Offset', type: 'NVARCHAR(18)', extra: 'NOT NULL' }
-        }, permissions: [
-            { role: consumerRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
-        ],
-        primaryKey: ['Groupid', 'Topic', 'Partition']
-    }
-
-const rawDataTable: TableDescription<{idx: "", data: ""}> = {
-        name: `${schema}.raw_data`, columns: {
-            idx: { name: 'idx', type: 'BIGINT', extra: 'identity(1,1) primary key' },
-            data: { name: 'data', type: 'NVARCHAR(max)', extra: 'NOT NULL' }
-        }, permissions: [
-            { role: consumerRole, permissions: ['INSERT', `SELECT`] }
-        ],
-        nonClusteredIndexes: [
-            {
-                name: `reverse_order_idx`,
-                columns: ['idx DESC']
-            }
-        ]
-    }
-
+]);
 
 function columnsToString(columns: ColumnDescription[]): string {
     return columns.map(c => `${c.name} ${c.type}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
@@ -547,7 +551,7 @@ export class UserConnection {
                     ${Object.values(transactionsTable.columns).map(c => `${c.name} ${c.type}`).join(', ')})`);
                 for (let i = 0; i < record.r.length; i++) {
                     const r = record.r[i];
-                    await this.addTransactionRecord(r,  request1!);
+                    await this.addTransactionRecord({...r.payload as Transaction, metadata: JSON.stringify(r.metadata)},  request1!);
                 }
                 const r = await request1.batch(`exec ${uberProc}`);
                 result.duds = r.recordset[0][duds];
@@ -556,8 +560,9 @@ export class UserConnection {
             } else if (record.type == "r") {
                 await request1.batch(`create table #${tt} (iddx int identity(1,1) primary key, 
                     ${Object.values(transactionResultsTable.columns).map(c => `${c.name} ${c.type}`).join(', ')})`);
-                for (const rec of record.r) {
-                    await this.updateTransactionStatus(rec.id, rec.dateTime, rec.state, request1);
+                for (const rec1 of record.r) {
+                    const rec = rec1.payload as TransactionResult;
+                    await this.updateTransactionStatus({...rec, metadata: JSON.stringify(rec1.metadata)}, request1);
                 }
                 const r = await request1.batch(`exec ${resProc}`);
                 result.duds = r.recordset[0][duds];
@@ -565,7 +570,7 @@ export class UserConnection {
                 await request1.batch(`DROP TABLE #${tt}`);
             } else if (record.type == "e") {
                 for (const rec of record.r) {
-                    await this.saveRawData(rec,  request1!);
+                    await this.saveRawData(rec, request1!);
                 }
             }
             await this.commitOffset(groupId, offset, topic, partition, request1);
@@ -590,7 +595,7 @@ export class UserConnection {
         return result;
     }
 
-    async addTransactionRecord(record: Transaction, request: sql.Request): Promise<void> {
+    async addTransactionRecord(record: TransactionStored, request: sql.Request): Promise<void> {
         let quer
         try {
             const columns = (Object.entries(transactionsTable.columns));
@@ -600,6 +605,7 @@ export class UserConnection {
             request.input(placeholders[2], sql.Decimal(18, 2), record.amount)
             request.input(placeholders[3], sql.BigInt, record.userIdFrom)
             request.input(placeholders[4], sql.BigInt, record.userIdTo)
+            request.input(placeholders[5], sql.NVarChar(sql.MAX), record.metadata)
             quer = `INSERT INTO #${tt} (${columns.map(c => c[1].name).join(',')})
                 VALUES (${placeholders.map(p => `@${p}`).join(',')});`
             await request.batch(quer);
@@ -628,12 +634,13 @@ export class UserConnection {
         // request.input(userColumns[1].name, sql.NVarChar(100), name)
         // await request.execute(addUserProcedure);
     }
-    async updateTransactionStatus(transactionId: number, dateTime: number, state: TResult, request: sql.Request): Promise<void> {
+    async updateTransactionStatus(record: TransactionResultStored, request: sql.Request): Promise<void> {
         const columns = (Object.values(transactionResultsTable.columns) as ValueWithMeta[]);
         const placeholders = columns.map((c, i) => `${c.name}${this.pidx++}`);
-        request.input(placeholders[0], sql.BigInt, transactionId)
-        request.input(placeholders[1], sql.DateTime, new Date(dateTime).toISOString())
-        request.input(placeholders[2], sql.TinyInt, state)
+        request.input(placeholders[0], sql.BigInt, record.id)
+        request.input(placeholders[1], sql.DateTime, new Date(record.dateTime).toISOString())
+        request.input(placeholders[2], sql.TinyInt, record.state)
+        request.input(placeholders[3], sql.NVarChar(sql.MAX), record.metadata)
         await request.batch(`INSERT INTO #${tt}
             (${columnsToFullNameList(transactionResultsTable)})
             VALUES (${placeholders.map(p => `@${p}`).join(',')});`);

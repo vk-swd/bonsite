@@ -26,4 +26,16 @@ export const TransactionResultValidator = z.object({
     state: z.nativeEnum(TResult)
 });
 export type TransactionResult = z.infer<typeof TransactionResultValidator>;
-export type TransactionMessages = { type: "t", r: Transaction[] } | { type: "r", r: TransactionResult[] } | { type: "e", r: string[] }
+
+export const MetadataValidator = z.object({
+    seqNumber: z.number(),
+    isIgnored: z.boolean()
+})
+export const MetadataWrapperValidator = z.object({
+    metadata: MetadataValidator,
+    payload: z.union([
+        TransactionValidator,TransactionResultValidator])
+});
+export type InKafkaMessage = z.infer<typeof MetadataWrapperValidator>;
+export type Metadata = z.infer<typeof MetadataValidator>;
+export type TransactionMessages = { type: "t", r: InKafkaMessage[] } | { type: "r", r: InKafkaMessage[] } | { type: "e", r: string[] }
