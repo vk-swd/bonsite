@@ -269,9 +269,13 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
         ` 
     }
     result += `
+        declare @${newCount} int;
+        declare @${duds} int;
+        set @${duds} = 0;
         BEGIN TRY
             INSERT INTO ${table.name}
             SELECT ${(Object.values(table.columns) as ValueWithMeta[]).map(c  => c.name).join(',')} FROM #${tt};
+            set @${newCount} = @@ROWCOUNT;
         END TRY
         BEGIN CATCH
             CREATE NONCLUSTERED INDEX temp_idx ON #${tt}(${tIdColumn.name}, iddx);
@@ -295,7 +299,6 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
                 select ${(Object.values(table.columns) as ValueWithMeta[]).map(c  => c.name).join(',')}
                 from #distinctNew;
 
-            declare @${newCount} int;
             set @${newCount} = @@ROWCOUNT;
 
             with nonDistinct as (select * from #marked${tt}
@@ -309,7 +312,6 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
                         ) AS derived(data))
                 insert into ${rawDataTable.name} select * from jsonned;
 
-            declare @${duds} int;
             set @${duds} = @@ROWCOUNT;
         `
     if (table.name == transactionsTable.name) {
@@ -322,9 +324,8 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
         `;
     }
     result += `
-        select * from #marked${tt}
-        --select @${duds} as ${duds}, @${newCount} as ${newCount};
-    END CATCH;`
+    END CATCH;
+    select @${duds} as ${duds}, @${newCount} as ${newCount};`
 
     return result;      
 };
@@ -551,7 +552,7 @@ export class UserConnection {
                     ${Object.values(transactionsTable.columns).map(c => `${c.name} ${c.type}`).join(', ')})`);
                 for (let i = 0; i < record.r.length; i++) {
                     const r = record.r[i];
-                    await this.addTransactionRecord({...r.payload as Transaction, metadata: JSON.stringify(r.metadata)},  request1!);
+                    await this.addTransactionRecord(r.payload as Transaction, JSON.stringify(r.metadata),  request1!);
                 }
                 const r = await request1.batch(`exec ${uberProc}`);
                 result.duds = r.recordset[0][duds];
@@ -560,9 +561,8 @@ export class UserConnection {
             } else if (record.type == "r") {
                 await request1.batch(`create table #${tt} (iddx int identity(1,1) primary key, 
                     ${Object.values(transactionResultsTable.columns).map(c => `${c.name} ${c.type}`).join(', ')})`);
-                for (const rec1 of record.r) {
-                    const rec = rec1.payload as TransactionResult;
-                    await this.updateTransactionStatus({...rec, metadata: JSON.stringify(rec1.metadata)}, request1);
+                for (const rec of record.r) {
+                    await this.addTransactionResult(rec.payload as TransactionResult, JSON.stringify(rec.metadata), request1);
                 }
                 const r = await request1.batch(`exec ${resProc}`);
                 result.duds = r.recordset[0][duds];
@@ -595,7 +595,7 @@ export class UserConnection {
         return result;
     }
 
-    async addTransactionRecord(record: TransactionStored, request: sql.Request): Promise<void> {
+    async addTransactionRecord(record: Transaction, metadata: string, request: sql.Request): Promise<void> {
         let quer
         try {
             const columns = (Object.entries(transactionsTable.columns));
@@ -605,13 +605,24 @@ export class UserConnection {
             request.input(placeholders[2], sql.Decimal(18, 2), record.amount)
             request.input(placeholders[3], sql.BigInt, record.userIdFrom)
             request.input(placeholders[4], sql.BigInt, record.userIdTo)
-            request.input(placeholders[5], sql.NVarChar(sql.MAX), record.metadata)
+            request.input(placeholders[5], sql.NVarChar(sql.MAX), metadata)
             quer = `INSERT INTO #${tt} (${columns.map(c => c[1].name).join(',')})
                 VALUES (${placeholders.map(p => `@${p}`).join(',')});`
             await request.batch(quer);
         } catch (e) {
             throw `Failed to add transaction record ${JSON.stringify(record)} query ${quer}: ${e}`
         }
+    }
+    async addTransactionResult(record: TransactionResult, metadata: string, request: sql.Request): Promise<void> {
+        const columns = (Object.values(transactionResultsTable.columns) as ValueWithMeta[]);
+        const placeholders = columns.map((c, i) => `${c.name}${this.pidx++}`);
+        request.input(placeholders[0], sql.BigInt, record.id)
+        request.input(placeholders[1], sql.DateTime, new Date(record.dateTime).toISOString())
+        request.input(placeholders[2], sql.TinyInt, record.state)
+        request.input(placeholders[3], sql.NVarChar(sql.MAX), metadata)
+        await request.batch(`INSERT INTO #${tt}
+            (${columnsToFullNameList(transactionResultsTable)})
+            VALUES (${placeholders.map(p => `@${p}`).join(',')});`);
     }
     async commitOffset(groupId: string, offset: string, topic: string, partition: number, request: sql.Request): Promise<void> {
         const columns = (Object.values(kafkaOffsetTable.columns) as ValueWithMeta[]);
@@ -633,17 +644,6 @@ export class UserConnection {
         // request.input(userColumns[0].name, sql.BigInt, id)
         // request.input(userColumns[1].name, sql.NVarChar(100), name)
         // await request.execute(addUserProcedure);
-    }
-    async updateTransactionStatus(record: TransactionResultStored, request: sql.Request): Promise<void> {
-        const columns = (Object.values(transactionResultsTable.columns) as ValueWithMeta[]);
-        const placeholders = columns.map((c, i) => `${c.name}${this.pidx++}`);
-        request.input(placeholders[0], sql.BigInt, record.id)
-        request.input(placeholders[1], sql.DateTime, new Date(record.dateTime).toISOString())
-        request.input(placeholders[2], sql.TinyInt, record.state)
-        request.input(placeholders[3], sql.NVarChar(sql.MAX), record.metadata)
-        await request.batch(`INSERT INTO #${tt}
-            (${columnsToFullNameList(transactionResultsTable)})
-            VALUES (${placeholders.map(p => `@${p}`).join(',')});`);
     }
     async getOffsets(groupId: string, topics: KConsumerOffsetInfo[]): Promise<Offsets> {
         const request = this.pool.request()
