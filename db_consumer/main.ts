@@ -8,8 +8,7 @@ import { logger } from "./common/logger.js";
 import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
 
-const monitoring = new mtrx.MonitoringServer(async () => {
-}, await mtrx.localReg);
+
 
 
 const MAGIC_CRUSH_NUMBER = 42;
@@ -102,6 +101,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         return;
     }
     let msgs: TransactionMessages;
+    mtrx.kafkaIncomingMessageCount?.inc(messages.length);
     try {
         const kMsgs = parseMsgs<InKafkaMessage>(messages, MetadataWrapperValidator)
         msgs = { type: topic == topic_transactions ? "t" : "r", r: kMsgs };
@@ -123,21 +123,20 @@ export async function processConsumedBatch(topic: string, partition: number, mes
                 partition,
                 topic)
             if (res.rolledBack) {
+                mtrx.dbRollbackCount?.inc(1);
                 if (msgs!.type == "e") {
-                    // mtrx.dbRawWriteFailure?.inc(messages.length);
                     const msg = `Failed to write raw data for topic ${topic} partition ${partition} with offset ${lastOffset}`
                     logger.error(msg);
                     throw await crash(msg);
                 } else {
-                    // mtrx.dbRollbackCount?.inc(1);
+                    mtrx.dbRollbackCount?.inc(1);
                     msgs = { type: "e", r: messages };
                     logger.error(`Transaction rolled back for topic ${topic} partition ${partition} with offset ${lastOffset}`);   
                 }
             } else {
-                // res.duds
-                // res.newCount
+                mtrx.dbKnownMessageWritten?.inc(res.duds);
+                mtrx.dbUnknownMessageWritten?.inc(res.newCount);
                 resend = false;
-                // mtrx.dbWriteSuccess?.inc(messages.length);
                 logger.log(`Successfully wrote ${messages.length} messages to topic ${topic} partition ${partition} with offset ${lastOffset}`);
             }
         } catch (e) {
@@ -177,15 +176,34 @@ export async function processConsumedBatch(topic: string, partition: number, mes
     When processing critical information, like financial transactions, handling data inconsistencies
     automatically may cause data loss or corruption, hence raw data is saved for later inspection.
  */
-async function runConsumption() {
-    let db_connection: UserConnection;
+async function connectToDb(): Promise<UserConnection> {
     try {
-        db_connection = await UserConnection.create()
+        return await UserConnection.create()
     } catch (e) {
         mtrx.dbConnectionFailure?.inc(1);
         logger.error(`Failed to connect to database: ${e}`);
         throw await crash(e);
     }
+}
+function partitionInfoFromGroupJoinEvent(event: kf.ConsumerGroupJoinEvent): KConsumerOffsetInfo[] {
+    return Object.entries(event.payload.memberAssignment)
+        .map(([topic, partitions]) => ({
+            topic, partitions
+        } as KConsumerOffsetInfo));
+}
+async function assignOffsets(offsetInfo: KConsumerOffsetInfo[]
+    , offsets: Offsets
+    , consumer: kf.Consumer): Promise<void> {
+    offsetInfo.forEach(o => {
+        o.partitions.forEach(p => {
+            const offset = offsets?.getOffset(o.topic, p);
+            if (offset !== undefined) {
+                consumer.seek({ topic: o.topic, partition: p, offset });
+            }
+        });
+    })   
+}
+async function connectToKafka(db_connection: UserConnection): Promise<kf.Consumer> {
     const kafka_connect_conf = {
         clientId: `C0_${getEnv("HOSTNAME")}`,
         brokers: [getEnv("KAFKA_BROKERS")]
@@ -199,46 +217,35 @@ async function runConsumption() {
         heartbeatInterval: 2000
     };
     const consumer = kafka_client.consumer(consumer_config);
+    consumer.on(`consumer.disconnect`, () => {
+        if (!exiting) {
+            logger.log(`Consumer lost connection`);
+            mtrx.kafkaDisconnectCount?.inc(1);
+        }
+    });
+    consumer.on(`consumer.network.request_timeout`, () => {
+        logger.log(`consumer.network.request_timeout`);
+        mtrx.kafkaRequestTimeout?.inc(1);
+    });
+    consumer.on('consumer.group_join', async (event: kf.ConsumerGroupJoinEvent) => {
+        const offsetInfo = partitionInfoFromGroupJoinEvent(event);
+        const offsets = await getOffsetsWhenPartitionsAssigned(offsetInfo, db_connection)
+        assignOffsets(offsetInfo, offsets, consumer)
+    });
     try {
         await consumer.connect()
     } catch (e) {
         mtrx.kafkaConnectFailure?.inc(1);
         logger.error(`Failed to connect to kafka with config: `
-            + `${kafka_connect_conf}; gropuId: ${groupId}; topics: ${topics.join(',')};`
+            + `${kafka_connect_conf}; gropuId: ${groupId};`
             + `error: ${e}`);
         throw await crash(e);
     }
-
+    logger.log(`Connected to kafka with config: ${JSON.stringify(kafka_connect_conf)}; groupId ${groupId}`);
+    return consumer;
+}
+async function subscribeToKafka(consumer: kf.Consumer, db_connection: UserConnection): Promise<void> {
     try {
-        logger.log(`Consumer connected to ${JSON.stringify(kafka_connect_conf)}; groupId ${groupId}`);
-        consumer.on(`consumer.disconnect`, () => {
-            if (!exiting) {
-                logger.log(`Consumer lost connection to ${JSON.stringify(kafka_connect_conf)}; groupId ${groupId}`);
-                mtrx.kafkaDisconnectCount?.inc(1);
-            }
-        });
-        consumer.on(`consumer.network.request_timeout`, () => {
-            logger.log(`consumer.network.request_timeoutm ${JSON.stringify(kafka_connect_conf)}; groupId ${groupId}`);
-            mtrx.kafkaRequestTimeout?.inc(1);
-        });
-        consumer.on('consumer.group_join', async (event: kf.ConsumerGroupJoinEvent) => {
-            const partitionsPerTOpic = Object.entries(event.payload.memberAssignment)
-                .map(([topic, partitions]) => ({
-                    topic, partitions
-                } as KConsumerOffsetInfo));
-            logger.log(`Partitions assigned: ${JSON.stringify(partitionsPerTOpic)}`);
-            const offsets = await getOffsetsWhenPartitionsAssigned(partitionsPerTOpic, db_connection)
-            partitionsPerTOpic.forEach(o => {
-                o.partitions.forEach(p => {
-                    const offset = offsets?.getOffset(o.topic, p);
-                    if (offset !== undefined) {
-                        logger.log(`Seeking to offset ${offset} for topic ${o.topic} partition ${p}`);
-                        consumer.seek({ topic: o.topic, partition: p, offset });
-                    }
-                });
-            })
-        });
-
         await consumer.subscribe({ topics });
         await consumer.run({
             // Failed batch processing might cause the application to stop for restat.
@@ -261,28 +268,21 @@ async function runConsumption() {
         })
         console.log(`Consumer run successful`);
     } catch (e) {
-        mtrx.kafkaConnectFailure?.inc(1);
-        logger.error(`Failed to subscribe to kafka with config: `
-            + `${kafka_connect_conf}; gropuId: ${groupId}; topics: ${topics.join(',')};`
+        mtrx.kafkaSubscribeFailure?.inc(1);
+        logger.error(`Failed to subscribe to topics: ${topics.join(',')};`
             + `error: ${e}`);
         throw await crash(e);
     }
 }
 
-runConsumption().catch(e => {
-    logger.error(`Failed to reconnect to kafka: ${e}`);
-    // retryConnection();
-});
-
-let retryTimer: NodeJS.Timeout | undefined = undefined
-function retryConnection() {
-    if (retryTimer !== undefined) {
-        clearTimeout(retryTimer);
-    }
-    retryTimer = setTimeout(() => {
-        runConsumption().catch(e => {
-            logger.error(`Failed to reconnect to kafka: ${e}`);
-            retryConnection();
-        });
-    }, 5000);
+let monitoring: mtrx.MonitoringServer | undefined = undefined
+async function runConsumption() {
+    monitoring = new mtrx.MonitoringServer(async () => {
+    }, await mtrx.localReg);
+    const db_connection: UserConnection = await connectToDb();
+    const consumer: kf.Consumer = await connectToKafka(db_connection);
+    await subscribeToKafka(consumer, db_connection);
 }
+
+
+// runConsumption();

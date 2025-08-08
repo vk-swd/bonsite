@@ -1,4 +1,4 @@
-import { Metadata, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from './event_types.js'
+import { Metadata, MetadataValidator, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from './event_types.js'
 import { getEnv, KConsumerOffsetInfo, last } from './utils.js'
 
 import sql from 'mssql'
@@ -336,6 +336,7 @@ class GetTransactionsProc {
     public userId = transactionsByUserTable.columns.userId;
     public transId = transactionsByUserTable.columns.transId;
     public name = `${schema}.getTransactions`;
+    
     getProcedureQuery(): string {
         return`
             CREATE PROCEDURE ${this.name}
@@ -639,19 +640,13 @@ export class UserConnection {
         await request!.batch(`exec ${addKafkaOffsetProcedure} ${columns
             .map((_, i) => `${param(i)} = @${placeholders[i]}`).join(', ')};`);
     }
-    async addUserRecord(id: number, name: string) {
-        const request = this.pool.request()
-        // request.input(userColumns[0].name, sql.BigInt, id)
-        // request.input(userColumns[1].name, sql.NVarChar(100), name)
-        // await request.execute(addUserProcedure);
-    }
     async getOffsets(groupId: string, topics: KConsumerOffsetInfo[]): Promise<Offsets> {
         const request = this.pool.request()
         // building a "select * from 'table' where 'group...' AND ((topic1 + partitins1) OR (topic2 + partitions2) OR ...)" query
         const selectFromOffsets = `SELECT * FROM ${kafkaOffsetTable.name} `
-
         const whereGroupIsArg = `WHERE ${columtEqArg(kafkaOffsetTable.columns.groupId)}`
         request.input(kafkaOffsetTable.columns.groupId.name, sql.NVarChar(18), groupId)
+        // Making "topic = @topic AND partition IN (@pt11, @pt12, ...)" for each topic
         const partitionsPerTopics = `${topics.map((topic, t_idx) => {
             //topic = @topic
             const tParamName = kafkaOffsetTable.columns.topic.name + `${t_idx}`;
@@ -674,7 +669,6 @@ export class UserConnection {
             logger.error(`Error running query ${query} for ${JSON.stringify(topics)}: ${e}`);
             throw e;
         }
-
         logger.debug(`got offsets: ${JSON.stringify(result)}`);
         return Offsets.create(groupId, result);
     }
@@ -722,21 +716,45 @@ export class UserConnection {
             throw e;
         }
     }
+    async streamTransactions(processor: (metadata: Metadata, userId?: number) => void): Promise<void> {
+        const tables = [transactionsTable, transactionResultsTable,rawDataTable];
+        for (const table of tables) {
+            await new Promise<void>((resolve, reject) => {
+                const request = this.pool.request();
+                request.stream = true; // Enable streaming
+                request.on('row', row => {
+                    if (table.name == transactionsTable.name) {
+                        processor(MetadataValidator.parse(JSON.parse(row.metadata)), row.userIdFrom);
+                    } else if (table.name == transactionResultsTable.name) {
+                        processor(MetadataValidator.parse(JSON.parse(row.metadata)), -1);
+                    } else {
+                        processor(MetadataValidator.parse(JSON.parse(JSON.parse(row.data).metadata)));
+                    }
+                })
+                request.on('done', row => {
+                    resolve();
+                    logger.debug(`Streaming done: ${JSON.stringify(row)}`);
+                })
+                request.query(`SELECT * FROM ${table.name}`);
+            })
+        }
+    }
     close(): Promise<void> {
         return this.pool.close();
     }
 }
- 
+function transaction(row: any) {
+    return TransactionValidator.parse({
+        id: parseInt(row.id),
+        amount: parseInt(row.amount), 
+        dateTime: (new Date(row.dateTime).getMilliseconds()),
+        userIdFrom: parseInt(row.userIdFrom),
+        userIdTo: parseInt(row.userIdTo)
+    });
+ }
 function transactions(sqlRes: sql.IResult<any>): Transaction[] {
     if (!sqlRes || !sqlRes.recordset || sqlRes.recordset.length === 0) {
         return [];
     }
-    return sqlRes.recordset.map(r => {
-        return TransactionValidator.parse({
-            id: parseInt(r['id']),
-            amount: parseInt(r['amount']), 
-            dateTime: (new Date(r['dateTime']).getMilliseconds()),
-            userIdFrom: parseInt(r['userIdFrom']),
-            userIdTo: parseInt(r['userIdTo'])});
-    });
+    return sqlRes.recordset.map(r => transaction(r));
 }

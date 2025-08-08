@@ -104,3 +104,100 @@ export function testQ() {
     }
     console.log(`${new Date().toLocaleString()} ending test`)
 }
+
+
+
+type Range = { start: number; end: number };
+
+export class RangeSet {
+    private ranges: Range[] = [];
+
+    add(num: number) {
+        if (this.ranges.length === 0) {
+            this.ranges.push({ start: num, end: num });
+            return;
+        }
+        if (last(this.ranges)!.end + 1 == num) {
+            // Extend the last range
+            this.ranges[this.ranges.length - 1].end = num;
+            return;
+        }
+        // Binary search to find where to insert
+        let left = 0, right = this.ranges.length - 1;
+        while (left <= right) {
+            const mid = (left + right) >> 1;
+            if (this.ranges[mid].end < num) {
+                left = mid + 1;
+            } else if (this.ranges[mid].start > num) {
+                right = mid - 1;
+            } else {
+                // Number is inside an existing range → ignore
+                return;
+            }
+        }
+        // Try to merge with neighbors
+        if (left == this.ranges.length) {
+            if (last(this.ranges)!.end + 1 === num) {
+                // Extend the last range
+                this.ranges[this.ranges.length - 1].end = num;
+                return;
+            }
+            this.ranges.push({ start: num, end: num });
+            return;
+        }
+        if (left === 0) {
+            if (this.ranges[0].start - 1 === num) {
+                // Extend the first range
+                this.ranges[0].start = num;
+                return;
+            }
+            this.ranges.unshift({ start: num, end: num });
+            return;
+        }
+
+        const prev = this.ranges[right];
+        const next = this.ranges[left];
+        if (prev.end + 1 !== num && next.start - 1 !== num) {
+            this.ranges.splice(left, 0, { start: num, end: num });
+            return;
+        } 
+        if (prev.end + 1 === num) {
+            // Extend previous range
+            prev.end = num;
+        }
+        if (next.start - 1 === num) {
+            next.start = num;
+        }
+        if (prev.end + 1 >= next.start) {
+            // Merge two ranges
+            prev.end = next.end;
+            this.ranges.splice(left, 1);
+        }
+    }
+
+    getRanges(): Range[] {
+        return this.ranges;
+    }
+}
+function shuffle<T>(array: T[]): void {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1)); // random index from 0 to i
+      [array[i], array[j]] = [array[j], array[i]];   // swap elements
+    }
+  }
+export function testRangeSet() {
+    console.log(`${new Date().toLocaleString()} starting test`)
+    for (let i = 0; i < 100000; i++) {
+        const a: string[] = [];
+        let arr = Array.from({ length: 1000 }, (_,i) => i);
+        shuffle(arr);
+        const rs = new RangeSet();
+        arr.forEach(e => rs.add(e));
+        const ranges = rs.getRanges();
+        if (ranges.length !== 1 || ranges[0].start !== 0 || ranges[0].end !== arr.length - 1) {
+            console.log(`TEST FAILURE. Expected 1 range, got ${ranges.length} at ${i} sample of size ${arr.length}`);
+            throw new Error(`Test failed at ${i}`);
+        }
+    }
+    console.log(`${new Date().toLocaleString()} ending test`)
+}

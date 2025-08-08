@@ -1,6 +1,6 @@
 import { createSchema, UserConnection } from './common/db_defines.js';
-import { InKafkaMessage, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
-import { getEnv, last } from './common/utils.js';
+import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
+import { getEnv, last, RangeSet, testRangeSet } from './common/utils.js';
 import { processConsumedBatch } from './main.js';
 import { describe, it } from 'mocha'
 // addint as promised
@@ -8,6 +8,7 @@ import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
 import { logger } from './common/logger.js';
+import { error } from 'console';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
@@ -171,7 +172,7 @@ describe('Kafka Consumer Tests', function () {
             const expectedReturned = getReturnedTransactions(tBatch, resBatches);
             const returned = await db_connection!.getTransactions(0);
             compareObjecs(returned, expectedReturned, msg);
-        }   
+        }
 
         await sendTransactions(batches[0], `Sending transactions batch 0`);
         await sendTResults(batches[1], `Sending transaction results batch 1`);
@@ -182,3 +183,60 @@ describe('Kafka Consumer Tests', function () {
         await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], `Checking valid transactions after batch 2 and 3`);
     });
 });
+
+describe.only(`Audit tables`, function () {
+    this.timeout(10000000); // Set timeout for the tests
+    it(`Audit tables`, async () => {
+        // expect(testRangeSet()).not.to.throw;
+        const db_connection = await UserConnection.create();
+        class Stat {
+            seqNumberRange = new RangeSet();
+            wrongRecord = 0;
+        }
+        const userStats = new Map<number,Stat>();
+        const rawStats = new Stat();
+        const resStat = new Stat();
+        const query = await db_connection.streamTransactions((metadata: Metadata, userId?: number) => {
+            if (userId === undefined) {
+                if (!metadata.isIgnored) {
+                    rawStats.wrongRecord++;
+                    return;
+                }
+                rawStats.seqNumberRange.add(metadata.seqNumber);
+            } else if (userId >= 0) {
+                if (!userStats.has(userId!)) {
+                    userStats.set(userId, new Stat());
+                }
+                const stats = userStats.get(userId)!;
+                if (metadata.isIgnored) {
+                    stats.wrongRecord++;
+                    return;
+                }
+                stats.seqNumberRange.add(metadata.seqNumber);
+            } else {
+                if (metadata.isIgnored) {
+                    resStat.wrongRecord++;
+                    return;
+                }
+                resStat.seqNumberRange.add(metadata.seqNumber);
+            }
+        });
+        const makeReport = (stats: Stat, name: string) => {
+            const ranges = stats.seqNumberRange.getRanges();
+            const rangeStr = ranges.map(r => `[${r.start}, ${r.end})`). join(', ');
+            return `${name} stats: wrong records: ${stats.wrongRecord}, seqNumber ranges: ${rangeStr}`;
+        }
+        const report = [
+            makeReport(rawStats, `Raw messages`),
+            makeReport(resStat, `Transaction results`),
+            ...Array.from(userStats.entries()).map(([userId, stats]) => makeReport(stats, `User ${userId}`))
+        ].join('\n');
+        logger.info(report);
+        /*
+            signal generator to produce N messages with the following parameters to test performance:
+            chance of duplicate
+            chance of reorder
+            chance of invalid messages = wrong type, missing fields, etc.
+        */
+    });
+})
