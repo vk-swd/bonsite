@@ -73,26 +73,49 @@ export class Generator {
     static resultTransactionId = 0;
     private queue = new TransactionEventsQueue();
     private currentParams: GenParameters | undefined = undefined;
-    private now = 0;
     private delayGenerator = new DelayGenerator(100);
     start(params: GenParameters, now: number) {
-        this.now = now;
         // Generation is done under assumption that every second represents 1 day
         // Convert the params.requestIntervalMs to dayTimeMs
         this.currentParams = params;
         this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
+        this.queue = new TransactionEventsQueue();
     }
-    getEvents(now: number): Array<TransactionEvent> {
-        const intervalMs = now - this.now;
-        if (this.queue.getLastTransactionTime() ?? -1 < now) {
-            // Generate in seconds to better preserve the "transactionPerSecond" ratio
-            this.generate(Math.ceil(intervalMs / MS_PER_SECOND) * MS_PER_SECOND, this.now);
+    eventsPerInterval() {
+        if (this.currentParams === undefined) {
+            throw new Error(`Generator parameters are not set`);
         }
-        this.now = now;
+        return this.currentParams.maxTransactionsPerSec * this.currentParams.userCount * this.currentParams.generationIntervalMs / MS_PER_SECOND;
+    }
+    getEvents(now: number): Array<TransactionEvent> | undefined {
+        //TODO now to Date type
+        /* high latency might cause overinflated generated sets
+        * so chunks of defined generation intervals will be produced.
+        */
+        if (this.currentParams?.transactionCount !== undefined && this.currentParams?.transactionCount == 0) {
+            console.log(`Reached transaction count limit ${this.currentParams.transactionCount}, stopping generation`);
+            return undefined;
+        }
+        const intervalMs: number = this.currentParams?.generationIntervalMs!;
+        const lastTransactionTime = this.queue.getLastTransactionTime();
+        if (lastTransactionTime == undefined || lastTransactionTime < now) {
+            // Generate in seconds to better preserve the "transactionPerSecond" ratio
+            const startGenerationTime = Math.max(lastTransactionTime??0, now - intervalMs);
+            this.generate(Math.ceil(intervalMs / MS_PER_SECOND) * MS_PER_SECOND, startGenerationTime);
+        }
         const events = this.queue.dequeEvents(now);
         for (const e of events) {
             if (e.seqNumberer !== undefined) {
                 e.event.metadata.seqNumber = e.seqNumberer();
+            }
+        }
+        if (this.currentParams?.transactionCount !== undefined) { 
+            if (this.currentParams.transactionCount > events.length) {
+                this.currentParams.transactionCount -= events.length;
+            } else {
+                const res = events.slice(0, this.currentParams.transactionCount);
+                this.currentParams.transactionCount = 0;
+                return res;
             }
         }
         return events;
@@ -182,8 +205,7 @@ export function testGeneratorContinuous() {
             throw new Error(`Queue leaked: ${gen.queueSize()} > ${maxQueueSize}`);
         }
         maxQS = Math.max(maxQS, gen.queueSize());
-
-        const events = gen.getEvents(newNow);
+        const events = gen.getEvents(newNow)!;
         maxConsumed = Math.max(maxConsumed, events.length);
         let lastEventTime = 0;
         for (const e of events) {

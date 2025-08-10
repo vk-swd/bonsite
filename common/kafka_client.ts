@@ -2,6 +2,8 @@ import * as kf from 'kafkajs'
 import { getEnv, KConsumerOffsetInfo } from './utils.js';
 import { logger } from './logger.js';
 import { EventEmitter } from 'events';
+import PQueue from 'p-queue';
+import { threadId } from 'worker_threads';
 
 const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
 
@@ -20,13 +22,18 @@ class ProducerStats {
   public retryCount: number = 0
 }
 
-export class KProducer {
+export class KProducer extends EventEmitter {
   public stats = new ProducerStats();
-
+  public static event = {
+    requestMessages: 'requestMessages',
+  }
   retryTimer: NodeJS.Timeout | undefined = undefined;
   outbox = new Array<{ msg: string, topic: string, partition?: number }>();
   isConnected = false;
   isStopped = false;
+  queue = new PQueue({concurrency: 100, autoStart: true});
+  inFlight = 0;
+
   /*  "outbox" is a simplified version of reliability guarantee 
         during the delivery.
       For delivery of critical information some redundant storage 
@@ -37,8 +44,10 @@ export class KProducer {
         parameters like Kafka does.
   */
   constructor(private producer: kf.Producer) {
+    super();
     this.producer.on('producer.connect', () => {
       this.isConnected = true;
+      this.queue.size
       // TODO: test that this will be triggered every time connection was established
       // TODO: also check that the connection will be restored after a break and this will be emit
     })
@@ -79,6 +88,9 @@ export class KProducer {
     this.isConnected = false;
     this.producer.disconnect();
   }
+  getInFlight() {
+    return this.inFlight;
+  }
   attemptDelivery() {
     if (!this.isConnected) {
       return;
@@ -90,7 +102,8 @@ export class KProducer {
           outbox structure is not backed up properly, but such guarantees are
           beyond the scope of this project.
     */
-    this.outbox.forEach(mssg => {
+   this.outbox.forEach(mssg => {
+      this.inFlight++;
       this.stats.msgSent++;
       this.producer.send({
         topic: mssg.topic,
@@ -98,20 +111,20 @@ export class KProducer {
           { value: mssg.msg, partition: mssg.partition } // key is optional, but can be used for partitioning
         ]
       })
-        .then(res => {
-          if (res.length != 1) {
-            logger.warn(`Sent 1 msg and received more reports or none!: ${JSON.stringify(res)}`)
-          }
+        .then(_ => {
+          this.inFlight--;
         })
         .catch(e => {
-          logger.error(`Failed to send the record because: ${e}`)
-          this.outbox.push(mssg) //potential for reordering here
-          this.retryDelivery()
+          this.inFlight--;
           this.stats.msgFailed++;
+          if (!this.isStopped) {
+            // Relying on KafkaJS built-in retries to prevent busy looping in case of send failures.
+            this.outbox.push(mssg)
+            this.retryDelivery()
+          }
         })
-    })
+    });
     this.retryTimer = undefined;
-    // Clear here but return item if send failed
     this.outbox.length = 0;
   }
   retryDelivery() {
@@ -120,7 +133,7 @@ export class KProducer {
       this.retryTimer = setTimeout(this.attemptDelivery, 1000);
     }
   }
-  async write(msg: string, topic: string, partition?: number) {
+  write(msg: string, topic: string, partition?: number) {
     this.outbox.push({ msg, topic, partition })
     this.attemptDelivery();
   }
@@ -143,6 +156,12 @@ export class KClient {
       brokers: this.config.brokers,
     })
     logger.log(`Making client ${clientId} at ${KAFKA_HOSTNAME}`)
+  }
+  getProducer() {
+    if (this.producer === undefined) {
+      this.producer = new KProducer(this.kf.producer({retry: {retries: 10}}));
+    }
+    return this.producer;
   }
   async send(msg: string, topic: string, partition?: number) {
     if (this.producer === undefined) {

@@ -15,7 +15,9 @@
       "prettier":"3.6.2",
       "events":"3.3.0",
       "zod":"3.25.73",
-      "prom-client": "15.1.3"
+      "prom-client": "15.1.3",
+      "p-queue": "*",
+      "@types/p-queue": "*"
     },
     "prettier": {
       "printWidth": 80

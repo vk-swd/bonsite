@@ -50,10 +50,19 @@ async function loadMetrics() {
   //   }
   // });
 }
-
+const getValyeElement = (id: string): HTMLInputElement => {
+  const element = document.getElementById(id);
+  if (!element) {
+    throw new Error(`Element with id ${id} not found`);
+  }
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error(`Element with id ${id} is not an HTMLInputElement`);
+  }
+  return element;
+};
 async function loadStatement() {
-  const start = (document.getElementById("startDate") as HTMLInputElement).value;
-  const end = (document.getElementById("endDate") as HTMLInputElement).value;
+  const start = getValyeElement("startDate").value;
+  const end = getValyeElement("endDate").value;
 
   const res: Response = await fetch(`http://localhost:3001/api/statements?start=${start}&end=${end}`);
   const data = JSON.parse(await res.json());
@@ -92,7 +101,7 @@ function downloadStatement() {
 document.getElementById("b_bank_statement")!.addEventListener('click', () => loadStatement())
 document.getElementById("b_download")!.addEventListener('click', () => downloadStatement())
 document.getElementById("input_button")!.addEventListener('click', () => {
-  const id = (document.getElementById("input1") as HTMLInputElement)!.value;
+  const id = getValyeElement("input1").value;
   // const name = (document.getElementById("input2") as HTMLInputElement)!.value;
   // const color = (document.getElementById("input3") as HTMLInputElement)!.value;
   // const hairlen = (document.getElementById("input4") as HTMLInputElement)!.value;
@@ -131,7 +140,7 @@ document.getElementById("get_face")!.addEventListener('click', () => {
       console.error("Request failed:", error);
     });
 })
-
+import { GenParameters } from "./common/generator_parameters.js";
 const genButton = document.getElementById("gen_button")!
 genButton.addEventListener('click', () => {
   let query = "";
@@ -140,11 +149,16 @@ genButton.addEventListener('click', () => {
     genButton.textContent = "Start Gen"
     query = `{ stopGen }`
   } else {
+    const params: GenParameters = {
+      userCount: parseInt(getValyeElement("userCountInput").value),
+      maxTransactionsPerSec: parseInt(getValyeElement("tPerSecInput").value),
+      generationIntervalMs: parseInt(getValyeElement("genIntervalInput").value),
+      maxDelayMs: parseInt(getValyeElement("maxdelayInput").value),
+      transactionCount: parseInt(getValyeElement("msgCountInput").value)
+    };
     genButton.textContent = "Started Gen"
     genButton.dataset.isStarted = "true";
-    query = `{ startGen(params: {userCount: ${1}, 
-      maxTransactionsPerSec: ${1}, 
-      generationIntervalMs: ${1000}}) }`
+    query = `{ startGen(params: ${JSON.stringify(params).replace(/"/g, "")}) }`
   }
 
   fetch("/graphql", {

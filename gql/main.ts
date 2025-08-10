@@ -5,6 +5,7 @@ import { buildSchema, GraphQLError, GraphQLObjectType, GraphQLSchema, GraphQLSch
 import { GenParameters, startUrl, stoptUrl } from "./common/generator_parameters.js";
 import { getEnv } from "./common/utils.js";
 import { logger } from "./common/logger.js";
+import { GenParametersValidator } from "./common/generator_parameters.js";
  
 // Construct a schema using GraphQL schema language
 // const schema: GraphQLSchema = buildSchema(`
@@ -26,9 +27,7 @@ type Face {
   piercing: Piercing,
 }
 input GenParameters {
-    userCount: Int!,
-    maxTransactionsPerSec: Int!,
-    generationIntervalMs: Int!
+  ${Object.keys(GenParametersValidator.shape).map(key => `  ${key}: Int!`).join(",\n")}
 }
 type Piercing {
   name: String!,

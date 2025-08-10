@@ -732,8 +732,8 @@ export class UserConnection {
                     }
                 })
                 request.on('done', row => {
+                    logger.debug(`Pausing stream: ${JSON.stringify(row)}`);
                     resolve();
-                    logger.debug(`Streaming done: ${JSON.stringify(row)}`);
                 })
                 request.query(`SELECT * FROM ${table.name}`);
             })

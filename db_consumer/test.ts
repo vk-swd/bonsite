@@ -226,7 +226,7 @@ describe.only(`Audit tables`, function () {
             const rangeStr = ranges.map(r => `[${r.start}, ${r.end})`). join(', ');
             return `${name} stats: wrong records: ${stats.wrongRecord}, seqNumber ranges: ${rangeStr}`;
         }
-        const report = [
+        const report = ['\n',
             makeReport(rawStats, `Raw messages`),
             makeReport(resStat, `Transaction results`),
             ...Array.from(userStats.entries()).map(([userId, stats]) => makeReport(stats, `User ${userId}`))

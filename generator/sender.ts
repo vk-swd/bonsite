@@ -5,6 +5,7 @@ import { Generator, TransactionEvent } from "./generator.js";
 
 import fs from 'fs';
 import { clear } from "console";
+import { logger } from "./common/logger.js";
 
 export class SenderStats {
     public maxSendIntervalMs: number = 0
@@ -12,7 +13,7 @@ export class SenderStats {
 }
 
 export class Sender {
-    public client = new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]})
+    public producer = new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}).getProducer()
     private generator = new Generator();
     private timeout: NodeJS.Timeout | undefined = undefined;
     public stats = new SenderStats()
@@ -39,13 +40,20 @@ export class Sender {
         this.timeout = setTimeout(() => { this.sendEvents()} , params.generationIntervalMs);
     }
     sendEvents() {
+        const eventsPerInterval = this.generator.eventsPerInterval();
+        if (this.producer.getInFlight() > eventsPerInterval * 2) {
+            logger.warn(`Current in-flight messages ${this.producer.getInFlight()} is greater than events per interval ${eventsPerInterval}, skipping sending`);
+            this.timeout?.refresh();
+            return;
+        }
         const now = Date.now();
         this.stats.maxSendIntervalMs = Math.max(now - this.stats.lastSendTimeMs, this.stats.maxSendIntervalMs); 
         this.stats.lastSendTimeMs = now;
-        /* convert time increment into proper time of day as 1 second will equal one day */
         const events = this.generator.getEvents(now)
-        console.log(`Sending events ${JSON.stringify(events)} at ${now} ms stats ${JSON.stringify(this.stats)} and this ${JSON.stringify(this.lastEvent)} and ${this}`);
-        
+        if (events === undefined) {
+            this.stop();
+            return;
+        }
         events.forEach(e => this.send(e))
         this.timeout?.refresh()
     }
@@ -61,7 +69,7 @@ export class Sender {
             throw new Error(`Bad order of generated events old ${JSON.stringify(this.lastEvent.event)} new ${JSON.stringify(event)}`)
         }
         const msg = JSON.stringify(event.event);
-        this.client.send(msg, event.topic);
+        this.producer.write(msg, event.topic);
         // this.writeOnDisk(`${msg}\n`);
         this.lastEvent.time = event.event.payload.dateTime;
         this.lastEvent.event = event;

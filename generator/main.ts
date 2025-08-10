@@ -6,7 +6,7 @@ import { Sender } from "./sender.js";
 const sender = new Sender();
 const monitoring = new MonitoringServer(() => {
     mt();
-    const producer = sender.client.producer;
+    const producer = sender.producer;
     if (!producer) {
         console.warn("No producer available for metrics");
         return;

@@ -5,6 +5,7 @@ export const GenParametersValidator = z.object({
     maxTransactionsPerSec: z.number(),
     generationIntervalMs: z.number(),
     maxDelayMs: z.number().optional(),
+    transactionCount: z.number().optional(),
 });
 
 export type GenParameters = z.infer<typeof GenParametersValidator>;

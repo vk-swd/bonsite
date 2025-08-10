@@ -26,9 +26,10 @@ services:
       volumes:
         - ./${FRONTEND_NAME}:${SOURCEDIR}
         - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
+        - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
       container_name: frontend_builder
-      tty: false
-      stdin_open: false
+      # tty: false
+      # stdin_open: false
 
   frontend_server:
     image: nginx:mainline-alpine3.22
