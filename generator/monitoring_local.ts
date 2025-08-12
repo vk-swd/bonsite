@@ -78,6 +78,7 @@ export function readMetrics(producer: KProducer, sender: Sender) {
     producer.stats.reconnectAttempts = 0;
     producer.stats.retryCount = 0;
     // sender.stats.maxSendIntervalMs = 0;
+    return localReg.metrics();
 }
 
 export { MonitoringServer } from "./common/monitoring.js";

@@ -8,11 +8,13 @@ services:
         - ${WORKDIR}/${COMMON_DIR_NAME}
         - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
         - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
+        - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
       working_dir: ${WORKDIR}
       entrypoint: ["/bin/bash", "-c"]
-      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; exec bash"]
+      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; apt update; apt install -y procps net-tools iputils-ping; npm run deploy; exec bash"]
       environment:
         - NODE_PRESERVE_SYMLINKS=1
+        - MONITORING_PORT=${PROM_PORT}
       networks: 
         - backend_net
       tty: true
@@ -32,7 +34,6 @@ services:
       - KAFKA_GROUP_ID=${KAFKA_GROUP_ID}
       - KAFKA_TOPICS_TRANSACTIONS=${KAFKA_TOPICS_TRANSACTIONS}
       - KAFKA_TOPICS_TRANSACTION_RESULTS=${KAFKA_TOPICS_TRANSACTION_RESULTS}
-      - MONITORING_PORT=${PROM_PORT}
 
   kafka-app:
     image: apache/kafka:3.9.1

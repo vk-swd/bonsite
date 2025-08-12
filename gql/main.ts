@@ -1,88 +1,57 @@
 import express from "express";
 import { createHandler } from "graphql-http/lib/use/express";
-import { GraphQLResolveInfo }from "graphql/type"
-import { buildSchema, GraphQLError, GraphQLObjectType, GraphQLSchema, GraphQLSchemaConfig } from "graphql";
-import { GenParameters, startUrl, stoptUrl } from "./common/generator_parameters.js";
+import { buildSchema, GraphQLError, GraphQLSchema } from "graphql";
+import { GenParameters, RequestResult, RequestResultValidator, startUrl, stoptUrl } from "./common/generator_parameters.js";
 import { getEnv } from "./common/utils.js";
 import { logger } from "./common/logger.js";
-import { GenParametersValidator } from "./common/generator_parameters.js";
+import { GenParametersValidator, RequestStatus } from "./common/generator_parameters.js";
+import * as mtx from "./monitoring_local.js";
  
-// Construct a schema using GraphQL schema language
-// const schema: GraphQLSchema = buildSchema(`
-//   type Query {
-//     hello: String
-//   }
-// `);
+
 const schema: GraphQLSchema = buildSchema(`
 type Query {
-  hello: String
-  face(id: ID): Face
-  startGen(params: GenParameters!): Int
-  stopGen: Int
+  startGen(params: GenParameters!): Result
+  stopGen: Result
+  hello:String
 }
-type Face {
-  name: String!,
-  color: String,
-  hairLength: Int!,
-  piercing: Piercing,
+type Result {
+  ${Object.keys(RequestResultValidator.shape).map((key, idx) => `${key}: ${idx == 0 ? "Int!" : "String"}`).join(",\n")}
 }
 input GenParameters {
   ${Object.keys(GenParametersValidator.shape).map(key => `  ${key}: Int!`).join(",\n")}
 }
-type Piercing {
-  name: String!,
-  go(i: Int): Int
-}
-type Mutation {
-  addFace(id: ID!, name: String, color: String, hairLen: Int!): Boolean
-}
 `);
-type Face = {
-  name: string,
-  color: string,
-  hairLength: number,
-  piercing?: { name: string },
-}
-const faces = new Map<string, Face>();
+
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 const GENERATOR_HOST = getEnv("GENERATOR_HOST");
+const GRAPH_QL_PORT = getEnv("GRAPH_QL_PORT");
+
 const Query = {
-  hello() {
-    return "Hello world!";
-  },
-  face(arg: {id: string}) {
-    console.log(`requesting face ${JSON.stringify(arg)}`);
-    return faces.get(arg.id);
-  },
-  name() {
-    "hyirsing"
-  },
-  addFace(arg: {id: string, name: string, color: string, hairLength: number}) {
-    console.log(`add face ${JSON.stringify(arg)}`);
-    if (faces.has(arg.id)) {
-      return false;
-    }
-    const  {id,...rest} = arg;
-    faces.set(arg.id, {...rest, piercing: {name: `${Math.random()}`}} as Face);
-    return true;
-  },
-  go(i: number): number {
-    return i;
-  },
+  hello: () => "Hello world!",
   stopGen() {
     logger.info(`stop gen`)
-    fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}/${stoptUrl}`, {
+    mtx.metrics?.requestCount.inc();
+    return fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}/${stoptUrl}`, {
       method: "POST",
       headers: {
       "Content-Type": "application/json",
         Accept: "application/json",
       }
-    }).then(re=>re.status)
-    .catch(e => logger.info(`stopGen WEIRD ERROR ${e}`))
+    })
+    .then(re=> {
+      mtx.metrics?.requestSuccess.inc();
+      return { status: RequestStatus.OK, message: re.status } })
+    .catch(e => {
+      const msg = `stopGen WEIRD ERROR ${e}`;
+      logger.error(msg);
+      mtx.metrics?.requestError.inc();
+      return { status: RequestStatus.ERROR, message: msg };
+    });
   },
-  startGen: async (arg: {params: GenParameters} )  => {
+  startGen: async (arg: {params: GenParameters} ): Promise<RequestResult>  => {
+    mtx.metrics?.requestCount.inc();
     logger.info(`toggleGentoggleGentoggleGentoggleGen ${JSON.stringify(arg.params)}`)
-    fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}/${startUrl}`, {
+    return await fetch(`http://${GENERATOR_HOST}:${GENERATOR_PORT}/${startUrl}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -90,41 +59,45 @@ const Query = {
       },
       body: JSON.stringify(arg.params),
     })
-    .then(res => {
-      // TODO: code generation for having a single souce of truth for gen parameters or
-      // at least pass error back to the client somehow          
-      return res.text();
-    })
-    .then(res => logger.info(`gql recived response to the toggel ${res}`))
-    .catch(e => {
-      logger.info(`GOT SOME ERROR: "${e}" ON GEN PARAMS: ${JSON.stringify(arg)} for address ${`${GENERATOR_HOST}:${GENERATOR_PORT}`}`);
-    });
+      .then(res => res.text())
+      .then(res => {
+        mtx.metrics?.requestSuccess.inc();
+        return { status: RequestStatus.OK, message: res } as RequestResult;
+      })
+      .catch(e => {
+        mtx.metrics?.requestError.inc();
+        const res =
+        {
+          status: RequestStatus.ERROR,
+          message: `GOT SOME ERROR: "${e}" ON GEN PARAMS: ${JSON.stringify(arg.params)} for address ${GENERATOR_HOST}:${GENERATOR_PORT}`
+        };
+        logger.error(res.message);
+        return res;
+      });
   }
 }
 
-const app = express();
- 
-app.all(
-  "/graphql",
-  // (req, res) => {
-  //   console.log(`request received ${req.method} ${req.url}`);
-  //   return 1
-  // }
-  createHandler({
-    schema,
-    rootValue: Query,
-  })
-);
+try {
+  await mtx.startMonitoring();
 
-// app.use(cors({ origin: 'http://127.0.0.1:81' }));
-
-// Start the server at port 4000
-app.listen(4000, () => {
-  console.log("Running a GraphQL API server at http://localhost:4000/graphql");
-});
-
-console.log(`items size ${faces.size}`)
-
+  const app = express();
+  app.all(
+    "/graphql",
+    createHandler({
+      schema,
+      rootValue: Query,
+    })
+  );
+  app.listen(GRAPH_QL_PORT, () => {
+    console.log(`Running a GraphQL API server at http://localhost:${GRAPH_QL_PORT}/graphql`);
+  });
+} catch (e) {
+  const msg = `Error starting GraphQL server: ${JSON.stringify(e)}`;
+  logger.error(msg);
+  mtx.metrics?.serverSetUpFailed.inc();
+  await mtx.dumpRegistry();
+  throw new GraphQLError(msg);
+}
 
 
 

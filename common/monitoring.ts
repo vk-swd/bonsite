@@ -7,6 +7,18 @@ import * as fs from 'fs';
 
 const PORT = getEnv("MONITORING_PORT");
 
+export async function makeCounter(name: string, help: string, reg: prom.Registry): Promise<prom.Counter> {
+    const counter = new prom.Counter({
+        name,
+        help,
+        registers: [reg],
+    });
+    const restoredValue = (await getRestoredMetrics()).get(name);
+    if (restoredValue !== undefined) {
+        counter.inc(restoredValue);
+    }
+    return counter;
+}
 
 let restoredMetrics: Map<string, number> | undefined = undefined;
 export async function getRestoredMetrics() {
@@ -45,13 +57,12 @@ export async function dumpRegistry(localReg: prom.Registry | undefined = prom.re
 
 export class MonitoringServer {
     private server: Server;
-    constructor(scrape: () => void = () => {}, private register: prom.Registry = this.register) {
+    constructor(scrape: () => Promise<string>) {
         this.server = createServer(async (req, res) => {
             if (req.url === '/metrics') {
                 res.setHeader('Content-Type', prom.register.contentType);
-                scrape();
                 res.writeHead(200);
-                res.end(await this.register.metrics());
+                res.end(await scrape());
             }
         });
         this.server.listen(PORT, () => {

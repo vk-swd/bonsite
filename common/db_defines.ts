@@ -435,7 +435,6 @@ export async function createSchema() {
                     ${insertQuery(kafkaOffsetTable)}
             `)
         );
-
         
         await runQuery(pool, procedureQuery(uberProc, "", [],generateRecordInsertProc(transactionsTable)));
         await runQuery(pool, procedureQuery(resProc, "", [], generateRecordInsertProc(transactionResultsTable)));

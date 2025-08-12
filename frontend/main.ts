@@ -1,4 +1,5 @@
 import { json } from 'stream/consumers';
+import { GenParameters, RequestResultValidator } from "./common/generator_parameters";
 
 // async function loadData() {
 //   const query = `
@@ -100,54 +101,14 @@ function downloadStatement() {
 
 document.getElementById("b_bank_statement")!.addEventListener('click', () => loadStatement())
 document.getElementById("b_download")!.addEventListener('click', () => downloadStatement())
-document.getElementById("input_button")!.addEventListener('click', () => {
-  const id = getValyeElement("input1").value;
-  // const name = (document.getElementById("input2") as HTMLInputElement)!.value;
-  // const color = (document.getElementById("input3") as HTMLInputElement)!.value;
-  // const hairlen = (document.getElementById("input4") as HTMLInputElement)!.value;
-  // const piercing = (document.getElementById("input5") as HTMLInputElement)!.value;
-  fetch("/graphql", {
-    method: "POST",
-    headers: {
-    "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ query: id}),
-    //`mutation { addFace({id: ${id},name: ${name},color: ${color}, hairLen: ${hairlen}}) }`
-  })
-    .then(response => response.json())
-    .then(data => {
-      console.log("Data returned 1:", data);
-    })
-    .catch(error => {
-      console.error("Request failed:", error);
-    });
-})
-document.getElementById("get_face")!.addEventListener('click', () => {
-  fetch("/graphql", {
-    method: "POST",
-    headers: {
-    "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ query: "{ hello }" }),
-  })
-    .then(response => response.json())
-    .then(data => {
-      console.log("Data returned 1:", data);
-    })
-    .catch(error => {
-      console.error("Request failed:", error);
-    });
-})
-import { GenParameters } from "./common/generator_parameters.js";
+
 const genButton = document.getElementById("gen_button")!
 genButton.addEventListener('click', () => {
   let query = "";
   if (genButton.dataset.isStarted == "true") {
     genButton.dataset.isStarted = "false";
     genButton.textContent = "Start Gen"
-    query = `{ stopGen }`
+    query = `{ stopGen {status, message, data}}`
   } else {
     const params: GenParameters = {
       userCount: parseInt(getValyeElement("userCountInput").value),
@@ -158,9 +119,9 @@ genButton.addEventListener('click', () => {
     };
     genButton.textContent = "Started Gen"
     genButton.dataset.isStarted = "true";
-    query = `{ startGen(params: ${JSON.stringify(params).replace(/"/g, "")}) }`
+    query = `{ startGen(params: ${JSON.stringify(params).replace(/"/g, "")}) {status, message, data}  }`
   }
-
+  console.log(`query is ${query}`);
   fetch("/graphql", {
     method: "POST",
     headers: {
@@ -168,9 +129,10 @@ genButton.addEventListener('click', () => {
       Accept: "application/json",
     },
     body: JSON.stringify({ query }),
-  }).then(response => response.text())
+  }).then(response => response.json())
     .then(data => {
-      console.log("Data returned 2:", data);
+      const results = RequestResultValidator.parse(genButton.dataset.isStarted == "true" ? data.data.startGen : data.data.stopGen);
+      
     })
     .catch(error => {
       console.error("Request failed:", error);

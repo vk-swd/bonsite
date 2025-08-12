@@ -2,7 +2,7 @@
     "name": "graphql",
     "version": "1.0.0",
     "scripts": {
-        "deploy": "tsc; node build/main.js &> logs.log"
+        "deploy": "tsc; node build/main.js"
     },
     "private": true,
     "license": "UNLICENSED",
@@ -18,7 +18,8 @@
         "express":"5.1.0",
         "cors":"2.8.5",
         "prettier": "3.4.2",
-        "zod":"3.25.73"
+        "zod":"3.25.73",
+        "prom-client": "15.1.3"
     },
     "prettier": {
         "printWidth": 80

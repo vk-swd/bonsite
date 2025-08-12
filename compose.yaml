@@ -3,9 +3,9 @@ networks:
     driver: bridge
     name: backend_net
 
+
 volumes:
   frontend_deploy_folder:
-  config_folder:
 
 x-environment: &mssql_env
   MSSQL_HOSTNAME: ${MSSQL_HOSTNAME}
@@ -28,8 +28,8 @@ services:
         - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
       container_name: frontend_builder
-      # tty: false
-      # stdin_open: false
+      tty: false
+      stdin_open: false
 
   frontend_server:
     image: nginx:mainline-alpine3.22
@@ -39,6 +39,8 @@ services:
       - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
       - NGINX_PORT=${NGINX_PORT}
       - NGINX_FOLDER=${NGINX_FOLDER}
+      - GRAPH_QL_PORT=${GRAPH_QL_PORT}
+      - GRAPH_QL_HOSTNAME=${GRAPH_QL_APP_NAME}
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
@@ -58,6 +60,7 @@ services:
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
         - GENERATOR_HOST=${GENERATOR_NAME}
+        - GRAPH_QL_PORT=${GRAPH_QL_PORT}
 
   generator:
       extends: 
@@ -69,17 +72,6 @@ services:
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
 
- 
-
-  # monitoring-analytics:
-  #   extends:
-  #     file: base_yamls/node_app.yaml
-  #     service: node_app
-  #   container_name: ${MONITORING_ANALYTICS}
-  #   hostname: ${MONITORING_ANALYTICS}
-  #   environment:
-  #       - M_PORT=${PROM_PORT}
-  
 
   prometheus:
     image: prom/prometheus
@@ -88,10 +80,14 @@ services:
     volumes:
       - ./${PROMETHEUS_NAME}:${SOURCEDIR}
     hostname: "${PROMETHEUS_NAME}"
+    environment:
+      - GRAPH_QL_APP_NAME=${GRAPH_QL_APP_NAME}
+      - GENERATOR_NAME=${GENERATOR_NAME}
+      - MONITORING_PORT=${PROM_PORT}
+      - DB_CONSUMER_NAME=${DB_CONSUMER_NAME}
     entrypoint: ["sh", "-c"]
     tty: true
-    command: ['sed "s/__TARGET_PLACEHOLDER__/${PROMETHEUS_TARGETS}/" 
-              ${SOURCEDIR}/prometheus.template.yml > /etc/prometheus/prometheus.yml;
+    command: ['${SOURCEDIR}/generateConfig.sh > /etc/prometheus/prometheus.yml;
               prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
               exec sh']
     networks: 
@@ -156,6 +152,7 @@ services:
       extends: 
         file: base_services.yaml
         service: node_kafka_app
+      hostname: "${DB_CONSUMER_NAME}"
       volumes:
         - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts

@@ -9,10 +9,9 @@ const monitoring = new MonitoringServer(() => {
     const producer = sender.producer;
     if (!producer) {
         console.warn("No producer available for metrics");
-        return;
     }
-    readMetrics(producer, sender);
-}, localReg);
+    return readMetrics(producer, sender);
+});
 
 
 const api = new GenApiServer();
