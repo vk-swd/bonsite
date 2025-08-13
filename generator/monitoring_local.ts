@@ -1,84 +1,52 @@
 import * as prom from 'prom-client'
-import { KProducer } from './common/kafka_client.js';
-import { Sender } from './sender.js';
-import { Generator } from './generator.js';
+import { logger } from './common/logger.js';
+import { makeCounter, MonitoringServer } from "./common/monitoring.js";
 
-export const localReg = new prom.Registry();
-const disconnectCount = new prom.Counter({
-    name: 'kafka_producer_disconnect_count',
-    help: 'Number of times the producer disconnected',
-    registers: [localReg],
-});
-const networkRequestTOCount = new prom.Counter({
-    name: 'kafka_producer_network_request_timeout_count',
-    help: 'Number of network request timeouts',
-    registers: [localReg],
-});
-const networkRequestCount = new prom.Counter({
-    name: 'kafka_producer_network_request_count',
-    help: 'Number of network requests made by the producer',
-    registers: [localReg],
-});
-const msgPosted = new prom.Counter({
-    name: 'kafka_producer_msg_posted',
-    help: 'Number of messages posted to the producer',
-    registers: [localReg],
-});
-const msgSent = new prom.Counter({
-    name: 'kafka_producer_msg_sent',
-    help: 'Number of messages sent by the producer',
-    registers: [localReg],
-});
-const msgFailed = new prom.Counter({
-    name: 'kafka_producer_msg_failed',
-    help: 'Number of messages that failed to be sent by the producer',
-    registers: [localReg],
-});
-const reconnectAttempts = new prom.Counter({
-    name: 'kafka_producer_reconnect_attempts',
-    help: 'Number of times the producer attempted to reconnect',
-    registers: [localReg],
-});
-const retryCount = new prom.Counter({
-    name: 'kafka_producer_retry_count',
-    help: 'Number of retries made by the producer',
-    registers: [localReg],
-});
-const maxSendIntervalMs = new prom.Gauge({
-    name: 'kafka_producer_max_send_interval_ms',
-    help: 'Maximum interval in milliseconds between sending messages',
-    registers: [localReg],
-});
-const generatedTransactionId = new prom.Gauge({
-    name: 'generatedTransactionId',
-    help: 'id of last message produced by generator',
-    registers: [localReg],
-});
 
-export function mt() {
-    generatedTransactionId.set(Generator.transactionId);
-}
-export function readMetrics(producer: KProducer, sender: Sender) {
-    disconnectCount.inc(producer.stats.disconnectCount);
-    networkRequestTOCount.inc(producer.stats.networkRequestTOCount);
-    networkRequestCount.inc(producer.stats.networkRequestCount);
-    msgPosted.inc(producer.stats.msgPosted);
-    msgSent.inc(producer.stats.msgSent);
-    msgFailed.inc(producer.stats.msgFailed);
-    reconnectAttempts.inc(producer.stats.reconnectAttempts);
-    retryCount.inc(producer.stats.retryCount);
-    // maxSendIntervalMs.set(sender.stats.maxSendIntervalMs);
-    // Reset stats after reading
-    producer.stats.disconnectCount = 0;
-    producer.stats.networkRequestTOCount = 0;
-    producer.stats.networkRequestCount = 0;
-    producer.stats.msgPosted = 0;
-    producer.stats.msgSent = 0;
-    producer.stats.msgFailed = 0;
-    producer.stats.reconnectAttempts = 0;
-    producer.stats.retryCount = 0;
-    // sender.stats.maxSendIntervalMs = 0;
-    return localReg.metrics();
+export const localReg: prom.Registry = new prom.Registry();
+
+class Metrics {
+    constructor(
+        public apiCallCount: prom.Counter,
+        public failedApiCallCount: prom.Counter,
+        public disconnectCount: prom.Counter,
+        public networkRequestTOCount: prom.Counter,
+        public networkRequestCount: prom.Counter,
+        public msgPosted: prom.Counter,
+        public msgSent: prom.Counter,
+        public msgFailed: prom.Counter,
+        public reconnectAttempts: prom.Counter,
+        public retryCount: prom.Counter,
+        public maxSendIntervalMs: prom.Gauge,
+        public generatedTransactionId: prom.Gauge
+    ) {}
 }
 
-export { MonitoringServer } from "./common/monitoring.js";
+export let metrics: Metrics | undefined = undefined;
+let server : MonitoringServer | undefined = undefined;
+
+export async function startMonitoring() {
+    if (server !== undefined) {
+        logger.warn("Monitoring server is already started");
+        return;
+    }
+    metrics = new Metrics(
+        await makeCounter('api_call_count', 'Number of API calls made to the generator', localReg),
+        await makeCounter('api_failed_call_count', 'Number of failed API calls made to the generator', localReg),
+        await makeCounter('kafka_producer_disconnect_count', 'Number of times the producer disconnected', localReg),
+        await makeCounter('kafka_producer_network_request_timeout_count', 'Number of network request timeouts', localReg),
+        await makeCounter('kafka_producer_network_request_count', 'Number of network requests made by the producer', localReg),
+        await makeCounter('kafka_producer_msg_posted', 'Number of messages posted to the producer', localReg),
+        await makeCounter('kafka_producer_msg_sent', 'Number of messages sent by the producer', localReg),
+        await makeCounter('kafka_producer_msg_failed', 'Number of messages that failed to be sent by the producer', localReg),
+        await makeCounter('kafka_producer_reconnect_attempts', 'Number of times the producer attempted to reconnect', localReg),
+        await makeCounter('kafka_producer_retry_count', 'Number of retries made by the producer', localReg),
+        new prom.Gauge({ name: 'kafka_producer_max_send_interval_ms', help: 'Maximum interval in milliseconds between sending messages', registers: [localReg] }),
+        new prom.Gauge({ name: 'generatedTransactionId', help: 'id of last message produced by generator', registers: [localReg] })
+    );
+    server = new MonitoringServer(async () => {
+        logger.info("Scraping metrics");
+        const metrics = await localReg.metrics();
+        return metrics;
+    });
+}

@@ -74,12 +74,19 @@ export class Generator {
     private queue = new TransactionEventsQueue();
     private currentParams: GenParameters | undefined = undefined;
     private delayGenerator = new DelayGenerator(100);
+
+    msgMetaDataPerUser = new Map<number, Counters>();
+    generatedNow = 0;
+    anomalyCounter = 0;
+    lastUserCount = 0;
     start(params: GenParameters, now: number) {
         // Generation is done under assumption that every second represents 1 day
         // Convert the params.requestIntervalMs to dayTimeMs
         this.currentParams = params;
         this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
         this.queue = new TransactionEventsQueue();
+        this.generatedNow = 0;
+        this.lastUserCount = this.msgMetaDataPerUser.size;
     }
     eventsPerInterval() {
         if (this.currentParams === undefined) {
@@ -112,16 +119,35 @@ export class Generator {
         if (this.currentParams?.transactionCount !== undefined) { 
             if (this.currentParams.transactionCount > events.length) {
                 this.currentParams.transactionCount -= events.length;
+                this.generatedNow += events.length;
             } else {
                 const res = events.slice(0, this.currentParams.transactionCount);
                 this.currentParams.transactionCount = 0;
+                this.generatedNow += res.length;
                 return res;
             }
         }
         return events;
     }
-    msgMetaDataPerUser = new Map<number, Counters>();
-    anomalyCounter = 0;
+    percentComplete(): number {
+        if (this.currentParams === undefined) {
+            return 0;
+        }
+        if (this.currentParams.transactionCount == undefined) {            
+            return -1; // Not defined, so not complete
+        }
+        if (this.currentParams.transactionCount === 0) {
+            return 100; // Already completed
+        }
+        const totalEvents = this.generatedNow + this.currentParams.transactionCount;
+        return this.generatedNow * 100 / totalEvents;
+    }
+    generatedCount(): number {
+        return this.generatedNow;
+    }
+    userCount(): number {
+        return this.msgMetaDataPerUser.size - this.lastUserCount;
+    }
     generate(interval: number, now: number) {
         if (this.currentParams == undefined) {
             throw new Error(`Inset generator parameters`)

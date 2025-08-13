@@ -34,6 +34,7 @@ services:
   frontend_server:
     image: nginx:mainline-alpine3.22
     container_name: frontend_server
+    dns_search: backend_net
     environment:
       - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
       - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
@@ -51,7 +52,7 @@ services:
   gql:
       extends: 
         file: base_services.yaml
-        service: node_app
+        service: node_monitored_app
       volumes: 
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
@@ -151,7 +152,7 @@ services:
   db_consumer:
       extends: 
         file: base_services.yaml
-        service: node_kafka_app
+        service: node_monitored_app
       hostname: "${DB_CONSUMER_NAME}"
       volumes:
         - ./${DB_CONSUMER_NAME}:${SOURCEDIR}

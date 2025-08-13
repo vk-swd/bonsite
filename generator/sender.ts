@@ -1,5 +1,5 @@
 import { getEnv } from "./common/utils.js";
-import { GenParameters } from "./common/generator_parameters.js";
+import { GenerationState, GenParameters, ProgressReport } from "./common/generator_parameters.js";
 import { KClient } from "./common/kafka_client.js";
 import { Generator, TransactionEvent } from "./generator.js";
 
@@ -23,6 +23,14 @@ export class Sender {
     constructor() {
         // console.log(`initial stats ${JSON.stringify(this.stats)}`);
         this.stream = fs.createWriteStream('output.txt', { flags: 'a' }); // 'a' = append
+    }
+    progress(): ProgressReport {
+        return {
+            totalSent: this.generator.generatedCount(),
+            totalUsers: this.generator.userCount(),
+            isRunning: this.isStopped() ? GenerationState.STOPPED : GenerationState.RUNNING,
+            percentComplete: this.generator.percentComplete()
+        }
     }
     start(params: GenParameters) {
         // console.log(`starting generator with params ${JSON.stringify(params)} stats ${JSON.stringify(this.stats)}`);
@@ -57,8 +65,11 @@ export class Sender {
         events.forEach(e => this.send(e))
         this.timeout?.refresh()
     }
+    isStopped(): boolean {
+        return this.timeout === undefined;
+    }
     stop() {
-        if (this.timeout == undefined) {
+        if (this.isStopped()) {
             return;
         }
         clearTimeout(this.timeout);
@@ -73,29 +84,6 @@ export class Sender {
         // this.writeOnDisk(`${msg}\n`);
         this.lastEvent.time = event.event.payload.dateTime;
         this.lastEvent.event = event;
-    }
-    buffer: string[] = [];
-    writeOnDisk(line:string) {
-        if (this.buffer.length) {
-            // waiting for 'drain' event
-            this.buffer.push(line);
-            return;
-        }
-        if (this.stream.write(line)) {
-            return;
-        }
-        this.buffer.push(line);
-        const sendBuffered = () => {
-            while(this.buffer.length) {
-                const line = this.buffer[0];
-                if (!this.stream.write(line)) {
-                    this.stream.once('drain', sendBuffered);
-                    break;
-                }
-                this.buffer.shift();
-            }
-        }
-        this.stream.once('drain', sendBuffered);
     }
 }
 

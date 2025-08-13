@@ -12,6 +12,7 @@ export type GenParameters = z.infer<typeof GenParametersValidator>;
 
 export const startUrl = "start"
 export const stoptUrl = "stop"
+export const progressUrl = "progress"
 
 export enum RequestStatus {
     OK = 200,
@@ -23,3 +24,16 @@ export const RequestResultValidator = z.object({
     data: z.union([z.null(), z.string()]).optional(),
 });
 export type RequestResult = z.infer<typeof RequestResultValidator>;
+
+export enum GenerationState {
+    RUNNING = 1,
+    STOPPED = 2
+}
+
+export const ProgressReportValidator = z.object({
+    totalSent: z.number(),
+    totalUsers: z.number(),
+    isRunning: z.nativeEnum(GenerationState),
+    percentComplete: z.number()
+});
+export type ProgressReport = z.infer<typeof ProgressReportValidator>;

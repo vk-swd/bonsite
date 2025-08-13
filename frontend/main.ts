@@ -102,6 +102,47 @@ function downloadStatement() {
 document.getElementById("b_bank_statement")!.addEventListener('click', () => loadStatement())
 document.getElementById("b_download")!.addEventListener('click', () => downloadStatement())
 
+const testButt = document.getElementById("test_butt")!
+testButt.addEventListener('click', () => {
+  
+  const  query = `{ getProgress {
+    ... on ProgressReport {
+      totalSent
+      totalUsers
+      isRunning
+      percentComplete
+    }
+    ... on Result {
+      status
+      message
+      data
+    }
+  }}`
+  const  query1 = `{ query: { hello} }`
+  console.log(`query is ${JSON.stringify(query)}`);
+  fetch("/graphql", {
+    method: "POST",
+    headers: {
+    "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query }),
+  }).then(response => 
+    {
+      console.log(`Response status: ${JSON.stringify(response.body)}`);
+      return response.text()
+  })
+    .then(data => {
+
+      console.log(`Response status: ${JSON.stringify(data)}`);
+      // const results = RequestResultValidator.parse(genButton.dataset.isStarted == "true" ? data.data.startGen : data.data.stopGen);
+    })
+    .catch(error => {
+      console.error("Request failed:", error);
+    });
+
+
+})
 const genButton = document.getElementById("gen_button")!
 genButton.addEventListener('click', () => {
   let query = "";
@@ -132,7 +173,6 @@ genButton.addEventListener('click', () => {
   }).then(response => response.json())
     .then(data => {
       const results = RequestResultValidator.parse(genButton.dataset.isStarted == "true" ? data.data.startGen : data.data.stopGen);
-      
     })
     .catch(error => {
       console.error("Request failed:", error);

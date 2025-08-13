@@ -8,21 +8,27 @@ services:
         - ${WORKDIR}/${COMMON_DIR_NAME}
         - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
         - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
-        - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
       working_dir: ${WORKDIR}
       entrypoint: ["/bin/bash", "-c"]
       command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; apt update; apt install -y procps net-tools iputils-ping; npm run deploy; exec bash"]
       environment:
         - NODE_PRESERVE_SYMLINKS=1
-        - MONITORING_PORT=${PROM_PORT}
       networks: 
         - backend_net
       tty: true
       stdin_open: true
 
+  node_monitored_app:
+    extends: 
+      service: node_app
+    volumes:
+      - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
+    environment:
+      - MONITORING_PORT=${PROM_PORT}
+
   node_kafka_app:
     extends:
-      service: node_app
+      service: node_monitored_app
     volumes:
       - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
       - ./${COMMON_DIR_NAME}/kafka_client.ts:${WORKDIR}/${COMMON_DIR_NAME}/kafka_client.ts

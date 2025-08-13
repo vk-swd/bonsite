@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 import { EventEmitter } from 'events';
 import PQueue from 'p-queue';
 import { threadId } from 'worker_threads';
+import { metrics } from '../monitoring_local.js';
 
 const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
 
@@ -11,19 +12,8 @@ export type KClientConfig = {
   name: string,
   brokers: string[]
 }
-class ProducerStats {
-  public disconnectCount: number = 0
-  public networkRequestTOCount: number = 0
-  public networkRequestCount: number = 0
-  public msgPosted: number = 0
-  public msgSent: number = 0
-  public msgFailed: number = 0
-  public reconnectAttempts: number = 0
-  public retryCount: number = 0
-}
 
 export class KProducer extends EventEmitter {
-  public stats = new ProducerStats();
   public static event = {
     requestMessages: 'requestMessages',
   }
@@ -52,25 +42,25 @@ export class KProducer extends EventEmitter {
       // TODO: also check that the connection will be restored after a break and this will be emit
     })
     this.producer.on('producer.disconnect', () => {
-      this.stats.disconnectCount++;
+      metrics?.disconnectCount.inc();
       this.isConnected = false;
       if (!this.isStopped) {
         this.producer.connect();
-        this.stats.reconnectAttempts++;
+        metrics?.reconnectAttempts.inc();
       }
       // TODO: should i reconnect manually if the connection was broken, or the producer will attempt reconnecting?
     })
     this.producer.on('producer.network.request_timeout', () => {
-      this.stats.networkRequestTOCount++;
+      metrics?.networkRequestTOCount.inc();
       // TODO: should i reconnect manually if the connection was broken, or the producer will attempt reconnecting?
     })
     this.producer.on('producer.network.request', (data) => {
-      this.stats.networkRequestCount++;
+      metrics?.networkRequestCount.inc();
       logger.debug(`Network request: ${JSON.stringify(data)}`);
       // TODO: is this something that emit when producer sends? Why?
     })
     this.producer.on('producer.network.request_queue_size', (data) => {
-      this.stats.networkRequestCount++;
+      metrics?.networkRequestCount.inc();
       logger.debug(`Network request queue size: ${JSON.stringify(data)}`);
       // TODO: is this something that emit when producer sends? Why?
     })
@@ -104,7 +94,7 @@ export class KProducer extends EventEmitter {
     */
    this.outbox.forEach(mssg => {
       this.inFlight++;
-      this.stats.msgSent++;
+      metrics?.msgSent.inc();
       this.producer.send({
         topic: mssg.topic,
         messages: [
@@ -116,7 +106,7 @@ export class KProducer extends EventEmitter {
         })
         .catch(e => {
           this.inFlight--;
-          this.stats.msgFailed++;
+          metrics?.msgFailed.inc();
           if (!this.isStopped) {
             // Relying on KafkaJS built-in retries to prevent busy looping in case of send failures.
             this.outbox.push(mssg)
@@ -129,11 +119,12 @@ export class KProducer extends EventEmitter {
   }
   retryDelivery() {
     if (this.retryTimer == undefined) {
-      this.stats.retryCount++;
+      metrics?.retryCount.inc();
       this.retryTimer = setTimeout(this.attemptDelivery, 1000);
     }
   }
   write(msg: string, topic: string, partition?: number) {
+    metrics?.msgPosted.inc();
     this.outbox.push({ msg, topic, partition })
     this.attemptDelivery();
   }

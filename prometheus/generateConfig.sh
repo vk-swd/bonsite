@@ -4,7 +4,7 @@ services="$DB_CONSUMER_NAME $GRAPH_QL_APP_NAME $GENERATOR_NAME"
 
 job() {
     echo "  - job_name: '$1'"
-    echo "    scrape_interval: 10s"
+    echo "    scrape_interval: 4s"
     echo "    scrape_timeout: 1s"
     echo "    static_configs:"
     echo "      - targets: ['$2:$3']"

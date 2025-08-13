@@ -1,15 +1,17 @@
 import { createServer, Server } from 'http';
 import { EventEmitter } from 'events';
-import { GenParameters, GenParametersValidator, startUrl, stoptUrl as stopUrl } from './common/generator_parameters.js';
+import { GenParameters, GenParametersValidator, ProgressReport, progressUrl, startUrl, stoptUrl as stopUrl } from './common/generator_parameters.js';
 import { getEnv } from './common/utils.js';
+import * as mt from './monitoring_local.js'
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 export class GenApiServer extends EventEmitter {
     private server: Server;
-    constructor() {
+    constructor(progressReporter: () => ProgressReport) {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.url}`)
+            mt.metrics?.apiCallCount.inc();
             if (req.method === 'POST') { 
                 if (req.url === '/' + startUrl) {
                     let data = '';
@@ -25,6 +27,7 @@ export class GenApiServer extends EventEmitter {
                             res.writeHead(200);
                             res.end();
                         } catch (error) {
+                            mt.metrics?.failedApiCallCount.inc();
                             res.writeHead(400);
                             res.end(`Malformed JSON: ${error}`);
                         }
@@ -33,11 +36,24 @@ export class GenApiServer extends EventEmitter {
                     this.emit('stop');
                     res.writeHead(200);
                     res.end();
+                } else {
+                    mt.metrics?.failedApiCallCount.inc();
+                    res.writeHead(404);
+                    res.end('Not Found');
+                }
+            } else if (req.method === 'GET') {
+                if (req.url === '/' + progressUrl) {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(progressReporter()));
+                } else {
+                    mt.metrics?.failedApiCallCount.inc();
+                    res.writeHead(404);
+                    res.end('Not Found');
                 }
             } else {
-                console.log(`RECEIVING SOME weird request ${req.url}`)
+                mt.metrics?.failedApiCallCount.inc();
                 res.writeHead(404);
-                res.end('Unsupported request');
+                res.end('Not Found');
             }
         });
         this.server.listen(GENERATOR_PORT, () => {
