@@ -170,7 +170,7 @@ describe('Kafka Consumer Tests', function () {
         }
         async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], msg: string) {
             const expectedReturned = getReturnedTransactions(tBatch, resBatches);
-            const returned = await db_connection!.getTransactions(0);
+            const returned = await db_connection!.getTransactions({ userId: 0 });
             compareObjecs(returned, expectedReturned, msg);
         }
 

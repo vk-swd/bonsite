@@ -1,10 +1,9 @@
-import { getEnv } from "./common/utils.js";
-// import { sql } from '@types/mssql'; // Assuming you have a SQL library that supports TypeScript
-
 import { createSchema } from "./common/db_defines.js";
+import { logger } from "./common/logger.js";
 
+const now = Date.now();
 createSchema().then(res => {
-    console.log(`Schema created successfully ${JSON.stringify(res)}`);
+    logger.log(`Schema created successfully ${JSON.stringify(res)} in ${Date.now() - now} ms`);
 }).catch((err: any) => {
-    console.error("Error creating schema:", err);
+    logger.error("Error creating schema:" + err);
 });

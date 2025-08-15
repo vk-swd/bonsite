@@ -1,4 +1,4 @@
-import { Metadata, MetadataValidator, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from './event_types.js'
+import { Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from './event_types.js'
 import { getEnv, KConsumerOffsetInfo, last } from './utils.js'
 
 import sql from 'mssql'
@@ -47,9 +47,9 @@ type ColumnDescription = {
     jsType?: string; // optional, used for type inference
 }
 
-type ValueWithMeta = { name: string, type: string, extra?: string }
+// type ValueWithMeta = { name: string, type: string, extra?: string }
 type Transformed<T> = {
-  [K in keyof T]: ValueWithMeta
+  [K in keyof T]: ColumnDescription
 }
 
 
@@ -149,7 +149,7 @@ const transactionsByUserTable: TableDescription<{idx:"", userId:"", date: "", tr
     ]
 }
 
-const kafkaOffsetTable: TableDescription<{groupId: "", topic:"", partition:"",offset:""}> = {
+const kafkaOffsetTable: TableDescription<Offset> = {
     name: `${schema}.kafka_offsets`, columns: {
         groupId: { name: 'Groupid', type: 'NVARCHAR(18)', extra: 'NOT NULL' },
         topic: { name: 'Topic', type: 'NVARCHAR(100)', extra: 'NOT NULL' },
@@ -274,7 +274,7 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
         set @${duds} = 0;
         BEGIN TRY
             INSERT INTO ${table.name}
-            SELECT ${(Object.values(table.columns) as ValueWithMeta[]).map(c  => c.name).join(',')} FROM #${tt};
+            SELECT ${(Object.values(table.columns) as ColumnDescription[]).map(c  => c.name).join(',')} FROM #${tt};
             set @${newCount} = @@ROWCOUNT;
         END TRY
         BEGIN CATCH
@@ -296,7 +296,7 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
                 select * into #distinctNew from distinctNew;
                 
             insert into ${table.name} 
-                select ${(Object.values(table.columns) as ValueWithMeta[]).map(c  => c.name).join(',')}
+                select ${(Object.values(table.columns) as ColumnDescription[]).map(c  => c.name).join(',')}
                 from #distinctNew;
 
             set @${newCount} = @@ROWCOUNT;
@@ -307,7 +307,7 @@ function generateRecordInsertProc<T>(table: TableDescription<T>): string {
             jsonned as (SELECT data
                         FROM nonDistinct AS t
                         CROSS APPLY (
-                            SELECT ${(Object.values(table.columns) as ValueWithMeta[]).map(c  => `t.${c.name} as ${c.name}`).join(',')}
+                            SELECT ${(Object.values(table.columns) as ColumnDescription[]).map(c  => `t.${c.name} as ${c.name}`).join(',')}
                             FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
                         ) AS derived(data))
                 insert into ${rawDataTable.name} select * from jsonned;
@@ -429,8 +429,8 @@ export async function createSchema() {
         
         await runQuery(pool, 
             procedureQuery(addKafkaOffsetProcedure, kafkaOffsetTable.name, Object.values(kafkaOffsetTable.columns), `
-                if ${ifExistsQuery(kafkaOffsetTable.name, Object.values(kafkaOffsetTable.columns).slice(0,-1))}
-                    ${updateQuery(kafkaOffsetTable.name, [kafkaOffsetTable.columns.offset], Object.values(kafkaOffsetTable.columns).slice(0,-1))}
+                if ${ifExistsQuery(kafkaOffsetTable.name, Object.values(kafkaOffsetTable.columns).slice(0,-1) as ColumnDescription[])}
+                    ${updateQuery(kafkaOffsetTable.name, [kafkaOffsetTable.columns.offset], Object.values(kafkaOffsetTable.columns).slice(0,-1) as ColumnDescription[])}
                 else 
                     ${insertQuery(kafkaOffsetTable)}
             `)
@@ -454,6 +454,7 @@ export async function createSchema() {
         await runQuery(pool, `GRANT EXECUTE ON ${procGetTransactions.name} TO ${consumerRole};`);
         await runQuery(pool, `GRANT EXECUTE ON ${addKafkaOffsetProcedure} TO ${consumerRole};`);
         await runQuery(pool, `GRANT EXECUTE ON ${getRawDataRecordsProc.name} TO ${consumerRole};`);
+        await pool.close();
     } catch (e) {
         console.error(`Error creating schema: ${e}`);
         throw e;
@@ -464,17 +465,12 @@ function setQueryInput<T>(request: sql.Request, column: ColumnDescription, value
     request.input(arg ? arg : column.name, typeToSqlFactoryType.get(column.type)!, value);
 }
 export class Offsets {
-    static create(gropuId: string, queryResult: sql.IResult<any>): Offsets {
+    static create(queryResult: sql.IResult<any>): Offsets {
         try {
             const mapping = new Map<string, string>();
-            if (queryResult.recordset.length == 0 ||
-                queryResult.recordset.filter(r => typeof r !== 'object').length != 0
-            ) {
-                return new Offsets(mapping);
-            }
-            queryResult.recordset.filter(r => r[kafkaOffsetTable.columns.groupId.name] == gropuId).forEach(row => {
-                mapping.set(`${row[kafkaOffsetTable.columns.topic.name]}-${row[kafkaOffsetTable.columns.partition.name]}`,
-                    row[kafkaOffsetTable.columns.offset.name]);
+            queryResult.recordset.forEach(q => {
+                const offset = OffsetValidator.parse(q)
+                mapping.set(`${offset.topic}-${offset.partition}`, offset.offset);
             });
             return new Offsets(mapping);
         } catch (e) {
@@ -606,7 +602,7 @@ export class UserConnection {
             request.input(placeholders[3], sql.BigInt, record.userIdFrom)
             request.input(placeholders[4], sql.BigInt, record.userIdTo)
             request.input(placeholders[5], sql.NVarChar(sql.MAX), metadata)
-            quer = `INSERT INTO #${tt} (${columns.map(c => c[1].name).join(',')})
+            quer = `INSERT INTO #${tt} (${columns.map(c => (c[1] as ColumnDescription).name).join(',')})
                 VALUES (${placeholders.map(p => `@${p}`).join(',')});`
             await request.batch(quer);
         } catch (e) {
@@ -614,7 +610,7 @@ export class UserConnection {
         }
     }
     async addTransactionResult(record: TransactionResult, metadata: string, request: sql.Request): Promise<void> {
-        const columns = (Object.values(transactionResultsTable.columns) as ValueWithMeta[]);
+        const columns = (Object.values(transactionResultsTable.columns)  as ColumnDescription[]);
         const placeholders = columns.map((c, i) => `${c.name}${this.pidx++}`);
         request.input(placeholders[0], sql.BigInt, record.id)
         request.input(placeholders[1], sql.DateTime, new Date(record.dateTime).toISOString())
@@ -625,7 +621,7 @@ export class UserConnection {
             VALUES (${placeholders.map(p => `@${p}`).join(',')});`);
     }
     async commitOffset(groupId: string, offset: string, topic: string, partition: number, request: sql.Request): Promise<void> {
-        const columns = (Object.values(kafkaOffsetTable.columns) as ValueWithMeta[]);
+        const columns = (Object.values(kafkaOffsetTable.columns) as ColumnDescription[]);
         const param = (columnIdx: number) => procParameterName(fullColumnName(kafkaOffsetTable.name, columns[columnIdx]));
         const placeholders = columns.map((_, i) => `commitOffset${this.pidx++}`);
         // [groupId, topic, partition, offset].forEach((value, idx) => {
@@ -669,7 +665,7 @@ export class UserConnection {
             throw e;
         }
         logger.debug(`got offsets: ${JSON.stringify(result)}`);
-        return Offsets.create(groupId, result);
+        return Offsets.create(result);
     }
     async saveRawData(data: string, request: sql.Request): Promise<void> {
         const placeholder = `p${this.pidx++}`;
@@ -687,13 +683,13 @@ export class UserConnection {
             throw e;
         }
     }
-    async getTransactions(userId: number, dateRange?: {from: number, to: number}): Promise<Transaction[]> {
+    async getTransactions(p: StatementParameters): Promise<Transaction[]> {
         const request = this.pool.request();
         try {
-            setQueryInput(request, procGetTransactions.userId, userId);
-            if (dateRange !== undefined) {
-                setQueryInput(request, procGetTransactions.dateFrom, new Date(dateRange.from).toISOString());
-                setQueryInput(request, procGetTransactions.dateTo, new Date(dateRange.to).toISOString());
+            setQueryInput(request, procGetTransactions.userId, p.userId);
+            if (p.dates !== undefined) {
+                setQueryInput(request, procGetTransactions.dateFrom, new Date(p.dates.from).toISOString());
+                setQueryInput(request, procGetTransactions.dateTo, new Date(p.dates.to).toISOString());
             } else {
                 setQueryInput(request, procGetTransactions.dateFrom, new Date(0).toISOString());
                 setQueryInput(request, procGetTransactions.dateTo, new Date("9999-12-31T23:59:59.997Z").toISOString());
@@ -709,7 +705,7 @@ export class UserConnection {
         try {
             request.input(getRawDataRecordsProc.lastCountArg, sql.BigInt, count);
             const result = await request.execute(getRawDataRecordsProc.name);
-            return result.recordset.map(r => r.data);
+            return result.recordset.map((r : any) => r.data);
         } catch (e) {
             logger.error(`Error getting raw data: ${e}`);
             throw e;
@@ -721,7 +717,7 @@ export class UserConnection {
             await new Promise<void>((resolve, reject) => {
                 const request = this.pool.request();
                 request.stream = true; // Enable streaming
-                request.on('row', row => {
+                request.on('row', (row : any) => {
                     if (table.name == transactionsTable.name) {
                         processor(MetadataValidator.parse(JSON.parse(row.metadata)), row.userIdFrom);
                     } else if (table.name == transactionResultsTable.name) {
@@ -730,7 +726,7 @@ export class UserConnection {
                         processor(MetadataValidator.parse(JSON.parse(JSON.parse(row.data).metadata)));
                     }
                 })
-                request.on('done', row => {
+                request.on('done', (row : any) => {
                     logger.debug(`Pausing stream: ${JSON.stringify(row)}`);
                     resolve();
                 })
@@ -755,5 +751,5 @@ function transactions(sqlRes: sql.IResult<any>): Transaction[] {
     if (!sqlRes || !sqlRes.recordset || sqlRes.recordset.length === 0) {
         return [];
     }
-    return sqlRes.recordset.map(r => transaction(r));
+    return sqlRes.recordset.map((r : any) => transaction(r));
 }

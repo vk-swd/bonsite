@@ -3,9 +3,8 @@ import { GenerationState, GenParameters, ProgressReport } from "./common/generat
 import { KClient } from "./common/kafka_client.js";
 import { Generator, TransactionEvent } from "./generator.js";
 
-import fs from 'fs';
-import { clear } from "console";
 import { logger } from "./common/logger.js";
+import { KProducer } from "./kafka_producer.js";
 
 export class SenderStats {
     public maxSendIntervalMs: number = 0
@@ -13,17 +12,13 @@ export class SenderStats {
 }
 
 export class Sender {
-    public producer = new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}).getProducer()
+    public producer = new KProducer(new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}))
     private generator = new Generator();
     private timeout: NodeJS.Timeout | undefined = undefined;
     public stats = new SenderStats()
 
-    private stream;
     private lastEvent: {time: number, event?: TransactionEvent} = {time: 0, event: undefined};
-    constructor() {
-        // console.log(`initial stats ${JSON.stringify(this.stats)}`);
-        this.stream = fs.createWriteStream('output.txt', { flags: 'a' }); // 'a' = append
-    }
+
     progress(): ProgressReport {
         return {
             totalSent: this.generator.generatedCount(),

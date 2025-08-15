@@ -39,3 +39,20 @@ export const MetadataWrapperValidator = z.object({
 export type InKafkaMessage = z.infer<typeof MetadataWrapperValidator>;
 export type Metadata = z.infer<typeof MetadataValidator>;
 export type TransactionMessages = { type: "t", r: InKafkaMessage[] } | { type: "r", r: InKafkaMessage[] } | { type: "e", r: string[] }
+
+export const OffsetValidator = z.object({
+    groupId: z.string(),
+    topic: z.string(),
+    partition: z.number(),
+    offset: z.string()
+})
+export type Offset = z.infer<typeof OffsetValidator>;
+
+export const StatementParametersValidator = z.object({
+    userId: z.number(),
+    dates: z.object({
+        from: z.number(),
+        to: z.number(),
+    }).optional()
+});
+export type StatementParameters = z.infer<typeof StatementParametersValidator>;

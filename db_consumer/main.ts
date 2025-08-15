@@ -10,12 +10,11 @@ import * as mtrx from "./monitoring_local.js";
 
 
 
-
 const MAGIC_CRUSH_NUMBER = 42;
 let exiting = false;
 async function crash(error: any): Promise<Error>{
     exiting = true;
-    mtrx.crashCount?.inc(1)
+    mtrx.metrics?.crashCount?.inc(1)
     await mtrx.dumpRegistry();
     logger.log("Pre-crash wrap up done, exiting...");
     throw error
@@ -80,7 +79,7 @@ export async function getOffsetsWhenPartitionsAssigned(
         return await db_connection.getOffsets(groupId, partitions);
     }
     catch (e) {
-        mtrx.dbDisconnectCount?.inc(1);
+        mtrx.metrics?.dbDisconnectCount?.inc(1);
         logger.error(`Failed to get offsets for ${JSON.stringify(partitions)}: ${e}`);
     }
     return Offsets.empty();
@@ -101,7 +100,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         return;
     }
     let msgs: TransactionMessages;
-    mtrx.kafkaIncomingMessageCount?.inc(messages.length);
+    mtrx.metrics?.kafkaIncomingMessageCount?.inc(messages.length);
     try {
         const kMsgs = parseMsgs<InKafkaMessage>(messages, MetadataWrapperValidator)
         msgs = { type: topic == topic_transactions ? "t" : "r", r: kMsgs };
@@ -110,7 +109,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
             Don't block service, save for later inspection.
         */
         msgs = { type: "e", r: messages };
-        mtrx.kafkaParseFailure?.inc(msgs.r.length);
+        mtrx.metrics?.kafkaParseFailure?.inc(msgs.r.length);
         logger.error(`Failed to parse messages: ${msgs.r} for topic ${topic} partition ${partition}: ${e}`);
     }
     let resend = true;
@@ -123,19 +122,19 @@ export async function processConsumedBatch(topic: string, partition: number, mes
                 partition,
                 topic)
             if (res.rolledBack) {
-                mtrx.dbRollbackCount?.inc(1);
+                mtrx.metrics?.dbRollbackCount?.inc(1);
                 if (msgs!.type == "e") {
                     const msg = `Failed to write raw data for topic ${topic} partition ${partition} with offset ${lastOffset}`
                     logger.error(msg);
                     throw await crash(msg);
                 } else {
-                    mtrx.dbRollbackCount?.inc(1);
+                    mtrx.metrics?.dbRollbackCount?.inc(1);
                     msgs = { type: "e", r: messages };
                     logger.error(`Transaction rolled back for topic ${topic} partition ${partition} with offset ${lastOffset}`);   
                 }
             } else {
-                mtrx.dbKnownMessageWritten?.inc(res.duds);
-                mtrx.dbUnknownMessageWritten?.inc(res.newCount);
+                mtrx.metrics?.dbKnownMessageWritten?.inc(res.duds);
+                mtrx.metrics?.dbUnknownMessageWritten?.inc(res.newCount);
                 resend = false;
                 logger.log(`Successfully wrote ${messages.length} messages to topic ${topic} partition ${partition} with offset ${lastOffset}`);
             }
@@ -145,12 +144,12 @@ export async function processConsumedBatch(topic: string, partition: number, mes
                 logger.error(`Unknown exception when writing (${msg}) to database: ${JSON.stringify(e)}`);
                 throw await crash(e);
             } else if (e.type === ConnectionErrorType.TRANSACRION_ERROR) {
-                mtrx.dbDisconnectCount?.inc(1);
+                mtrx.metrics?.dbDisconnectCount?.inc(1);
                 logger.error(`Lost connection to database while writing (${msg}): ${e.message}`);
                 throw await crash(e);
             } else {
                 logger.error(`Failed to write (${msg}) of type ${msgs!.type} : ${e.message}`);
-                mtrx.dbQueryFailure?.inc(messages.length);
+                mtrx.metrics?.dbQueryFailure?.inc(messages.length);
                 throw await crash(e);
             }
         }
@@ -180,7 +179,7 @@ async function connectToDb(): Promise<UserConnection> {
     try {
         return await UserConnection.create()
     } catch (e) {
-        mtrx.dbConnectionFailure?.inc(1);
+        mtrx.metrics?.dbConnectionFailure?.inc(1);
         logger.error(`Failed to connect to database: ${e}`);
         throw await crash(e);
     }
@@ -220,12 +219,12 @@ async function connectToKafka(db_connection: UserConnection): Promise<kf.Consume
     consumer.on(`consumer.disconnect`, () => {
         if (!exiting) {
             logger.log(`Consumer lost connection`);
-            mtrx.kafkaDisconnectCount?.inc(1);
+            mtrx.metrics?.kafkaDisconnectCount?.inc(1);
         }
     });
     consumer.on(`consumer.network.request_timeout`, () => {
         logger.log(`consumer.network.request_timeout`);
-        mtrx.kafkaRequestTimeout?.inc(1);
+        mtrx.metrics?.kafkaRequestTimeout?.inc(1);
     });
     consumer.on('consumer.group_join', async (event: kf.ConsumerGroupJoinEvent) => {
         const offsetInfo = partitionInfoFromGroupJoinEvent(event);
@@ -235,7 +234,7 @@ async function connectToKafka(db_connection: UserConnection): Promise<kf.Consume
     try {
         await consumer.connect()
     } catch (e) {
-        mtrx.kafkaConnectFailure?.inc(1);
+        mtrx.metrics?.kafkaConnectFailure?.inc(1);
         logger.error(`Failed to connect to kafka with config: `
             + `${kafka_connect_conf}; gropuId: ${groupId};`
             + `error: ${e}`);
@@ -268,21 +267,17 @@ async function subscribeToKafka(consumer: kf.Consumer, db_connection: UserConnec
         })
         console.log(`Consumer run successful`);
     } catch (e) {
-        mtrx.kafkaSubscribeFailure?.inc(1);
+        mtrx.metrics?.kafkaSubscribeFailure?.inc(1);
         logger.error(`Failed to subscribe to topics: ${topics.join(',')};`
             + `error: ${e}`);
         throw await crash(e);
     }
 }
-
-let monitoring: mtrx.MonitoringServer | undefined = undefined
 async function runConsumption() {
-    monitoring = new mtrx.MonitoringServer(async () => {
-    }, await mtrx.localReg);
+    await mtrx.startMonitoring()
     const db_connection: UserConnection = await connectToDb();
     const consumer: kf.Consumer = await connectToKafka(db_connection);
     await subscribeToKafka(consumer, db_connection);
 }
 
-
-// runConsumption();
+runConsumption();

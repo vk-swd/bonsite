@@ -6,6 +6,7 @@ networks:
 
 volumes:
   frontend_deploy_folder:
+  statement_folder:
 
 x-environment: &mssql_env
   MSSQL_HOSTNAME: ${MSSQL_HOSTNAME}
@@ -14,9 +15,14 @@ x-environment: &mssql_env
   MSSQL_CONSUMER_USERNAME: ${MSSQL_CONSUMER_USERNAME}
   MSSQL_STATEMENT_CREATOR_USERNAME: ${MSSQL_STATEMENT_CREATOR_USERNAME}
 
-
 # Environment variables are read from .env file automatically
 services:
+  node_img_builder:
+    build:
+      dockerfile_inline: |
+        FROM node:20-slim
+        RUN apt update; apt install -y procps net-tools iputils-ping
+    image: my-backend
   frontend_builder:
       extends: 
         file: base_services.yaml
@@ -28,6 +34,7 @@ services:
         - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
       container_name: frontend_builder
+      restart: no
       tty: false
       stdin_open: false
 
@@ -44,11 +51,18 @@ services:
       - GRAPH_QL_HOSTNAME=${GRAPH_QL_APP_NAME}
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
+    - statement_folder:${STATEMENT_FOLDER}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:81:81"
+    depends_on:
+      frontend_builder:
+        condition: service_completed_successfully
+      gql:
+        condition: service_healthy
     networks: 
       - backend_net
+  
   gql:
       extends: 
         file: base_services.yaml
@@ -62,6 +76,11 @@ services:
         - GENERATOR_PORT=${GENERATOR_PORT}
         - GENERATOR_HOST=${GENERATOR_NAME}
         - GRAPH_QL_PORT=${GRAPH_QL_PORT}
+      depends_on:
+        generator:
+          condition: service_healthy
+        statement_generator:
+          condition: service_healthy        
 
   generator:
       extends: 
@@ -72,6 +91,9 @@ services:
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
+      depends_on:
+        kafka1:
+          condition: service_started
 
 
   prometheus:
@@ -84,7 +106,7 @@ services:
     environment:
       - GRAPH_QL_APP_NAME=${GRAPH_QL_APP_NAME}
       - GENERATOR_NAME=${GENERATOR_NAME}
-      - MONITORING_PORT=${PROM_PORT}
+      - MONITORING_PORT=${MONITORING_PORT}
       - DB_CONSUMER_NAME=${DB_CONSUMER_NAME}
     entrypoint: ["sh", "-c"]
     tty: true
@@ -105,7 +127,7 @@ services:
       - ./${GRAPHANA_NAME}/dash1.json:/${GRAPHANA_DASHBOARD_FOLDER}/dash1.json
     environment:
       - PROMETHEUS_HOST=${PROMETHEUS_NAME}
-      - PROMETHEUS_PORT=9090
+      - PROMETHEUS_PORT=${PROMETHEUS_PORT}
       - GRAPHANA_DASHBOARD_FOLDER=${GRAPHANA_DASHBOARD_FOLDER}
     ports:
       - "127.0.0.1:${GRAPHANA_PORT_HOST}:3000"
@@ -126,6 +148,7 @@ services:
     volumes:
       - "${WORKDIR}"
     working_dir: ${WORKDIR}
+    # Uncomment ports to connect to the database from outside
     ports:
     - "127.0.0.1:1433:1433"
     environment:
@@ -148,18 +171,48 @@ services:
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
       tty: false
       stdin_open: false
+      restart: no
+      depends_on:
+        sqldb:
+          condition: service_started
 
   db_consumer:
       extends: 
         file: base_services.yaml
-        service: node_monitored_app
+        service: node_kafka_app
       hostname: "${DB_CONSUMER_NAME}"
       volumes:
         - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/event_types.ts:/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
       environment:
         << : [*mssql_env]
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
+      tty: false
+      stdin_open: false
+      depends_on:
+        sqldb:
+          condition: service_started
+        kafka1:
+          condition: service_started
+        db_initializer:
+          condition: service_completed_successfully
 
-
+  statement_generator:
+      extends: 
+        file: base_services.yaml
+        service: node_monitored_app
+      volumes:
+        - ./${STATEMENT_GENERATOR_NAME}:${SOURCEDIR}
+        - statement_folder:${STATEMENT_FOLDER}
+        - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
+        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+      hostname: "${STATEMENT_GENERATOR_NAME}"
+      environment:
+        << : [*mssql_env]
+        STATEMENT_GENERATOR_PORT: ${STATEMENT_GENERATOR_PORT}
+        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
+      depends_on:
+        sqldb:
+          condition: service_started
+        db_initializer:
+          condition: service_completed_successfully

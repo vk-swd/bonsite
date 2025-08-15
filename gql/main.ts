@@ -7,6 +7,7 @@ import { logger } from "./common/logger.js";
 import { GenParametersValidator, RequestStatus } from "./common/generator_parameters.js";
 import * as mtx from "./monitoring_local.js";
 import { ZodObject, ZodRawShape, ZodType } from "zod";
+import { HealthCheckSever } from "./common/healthcheck.js";
  
 
 const schema: GraphQLSchema = buildSchema(`
@@ -124,6 +125,7 @@ try {
 }
 
 
+const healthCheckServer = new HealthCheckSever();
 
 
 
