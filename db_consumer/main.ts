@@ -2,7 +2,7 @@ import { getEnv, KConsumerOffsetInfo, last } from "./common/utils.js";
 
 import * as kf from "kafkajs";
 
-import { ConnectionError, ConnectionErrorType, Offsets, UserConnection } from "./common/db_defines.js";
+import { ConnectionError, ConnectionErrorType, Offsets, UserConnection } from "./common/db/db_defines.js";
 import { InKafkaMessage, MetadataWrapperValidator, Transaction, TransactionMessages, TransactionResult, TransactionResultValidator, TransactionValidator } from "./common/event_types.js";
 import { logger } from "./common/logger.js";
 import { ZodSchema } from "zod";
@@ -280,4 +280,10 @@ async function runConsumption() {
     await subscribeToKafka(consumer, db_connection);
 }
 
-runConsumption();
+
+const timeiout = setInterval(() => {
+    // if (exiting) {
+    //     clearInterval(timeiout);
+        logger.log(`Exiting...`);
+    // }
+}, 10000);

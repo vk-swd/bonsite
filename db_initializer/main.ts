@@ -1,4 +1,4 @@
-import { createSchema } from "./common/db_defines.js";
+import { createSchema } from "./common/db/init.js";
 import { logger } from "./common/logger.js";
 
 const now = Date.now();

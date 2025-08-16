@@ -29,7 +29,7 @@ export class Sender {
     }
     start(params: GenParameters) {
         // console.log(`starting generator with params ${JSON.stringify(params)} stats ${JSON.stringify(this.stats)}`);
-        this.generator.start(params, Date.now());
+        this.generator.start(params);
         if (this.timeout != undefined) {
             return;
         }

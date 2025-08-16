@@ -79,7 +79,7 @@ export class Generator {
     generatedNow = 0;
     anomalyCounter = 0;
     lastUserCount = 0;
-    start(params: GenParameters, now: number) {
+    start(params: GenParameters) {
         // Generation is done under assumption that every second represents 1 day
         // Convert the params.requestIntervalMs to dayTimeMs
         this.currentParams = params;

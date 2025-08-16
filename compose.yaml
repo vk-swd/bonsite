@@ -165,7 +165,7 @@ services:
       volumes:
         - ./${DB_INITIALIZER_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
-        - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
+        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
         << : [*mssql_env]
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
@@ -183,7 +183,7 @@ services:
       hostname: "${DB_CONSUMER_NAME}"
       volumes:
         - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
+        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
         << : [*mssql_env]
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
@@ -204,13 +204,32 @@ services:
       volumes:
         - ./${STATEMENT_GENERATOR_NAME}:${SOURCEDIR}
         - statement_folder:${STATEMENT_FOLDER}
-        - ./${COMMON_DIR_NAME}/db_defines.ts:${WORKDIR}/${COMMON_DIR_NAME}/db_defines.ts
+        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
       hostname: "${STATEMENT_GENERATOR_NAME}"
       environment:
         << : [*mssql_env]
         STATEMENT_GENERATOR_PORT: ${STATEMENT_GENERATOR_PORT}
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
+      depends_on:
+        sqldb:
+          condition: service_started
+        db_initializer:
+          condition: service_completed_successfully
+
+  tester:
+      extends: 
+        file: base_services.yaml
+        service: node_app
+      volumes:
+        - ./${TESTER_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
+      environment:
+        << : [*mssql_env]
+        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
+      tty: false
+      stdin_open: false
+      restart: no
       depends_on:
         sqldb:
           condition: service_started

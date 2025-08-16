@@ -1,4 +1,5 @@
-import { createSchema, UserConnection } from './common/db_defines.js';
+import { UserConnection } from './common/db/db_defines.js';
+import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
 import { getEnv, last, RangeSet, testRangeSet } from './common/utils.js';
 import { processConsumedBatch } from './main.js';
@@ -9,6 +10,7 @@ import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
 import { logger } from './common/logger.js';
 import { error } from 'console';
+import { setUpTempTransactionsTable } from './common/db/procedures.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
@@ -102,8 +104,10 @@ describe('Kafka Consumer Tests', function () {
             logger.error(`Failed to create database connection: ${e}`);
             exit(1);
         }
-    }); 
-    it(`Simple functional test`, async () => {
+    });
+    it.only(`Simple functional test`, async () => {
+
+        // await setUpTempTransactionsTable.batch(db_connection?. pool.request())
         let tIdx = 1;
         let rIdx = 1;
         const batches: Batch[] = [
@@ -184,7 +188,7 @@ describe('Kafka Consumer Tests', function () {
     });
 });
 
-describe.only(`Audit tables`, function () {
+describe(`Audit tables`, function () {
     this.timeout(10000000); // Set timeout for the tests
     it(`Audit tables`, async () => {
         // expect(testRangeSet()).not.to.throw;
