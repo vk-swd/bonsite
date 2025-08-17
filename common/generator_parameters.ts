@@ -2,10 +2,10 @@ import { z } from "zod";
 
 export const GenParametersValidator = z.object({
     userCount: z.number(),
-    maxTransactionsPerSec: z.number(),
-    generationIntervalMs: z.number(),
+    dateFromISO: z.string(),
+    dateToISO: z.string(),
+    transactionCount: z.number(),
     maxDelayMs: z.number().optional(),
-    transactionCount: z.number().optional(),
 });
 
 export type GenParameters = z.infer<typeof GenParametersValidator>;
@@ -32,7 +32,6 @@ export enum GenerationState {
 
 export const ProgressReportValidator = z.object({
     totalSent: z.number(),
-    totalUsers: z.number(),
     isRunning: z.nativeEnum(GenerationState),
     percentComplete: z.number()
 });

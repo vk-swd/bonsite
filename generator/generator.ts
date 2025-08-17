@@ -31,23 +31,17 @@ export type TransactionEvent = {topic: string, event: InKafkaMessage, seqNumbere
 
 class TransactionEventsQueue {
     private events = new PriorityQ<TransactionEvent>((a,b) => a.event.payload.dateTime < b.event.payload.dateTime);
-    private lastTransactionTime: number | undefined = undefined;
-    getLastTransactionTime(): number | undefined {
-        return this.lastTransactionTime;
-    }
     enqueEvent(event: TransactionEvent) {
-        if (event.topic === KAFKA_TOPICS_TRANSACTIONS) {
-            this.lastTransactionTime = event.event.payload.dateTime;
-        }
         this.events.push(event);
     }
     size(): number {
         return this.events.size();
     }
-    dequeEvents(now: number): Array<TransactionEvent> {
+    dequeEvents(count: number): Array<TransactionEvent> {
         const res = new Array<TransactionEvent>();
-        while (!this.events.isEmpty() && this.events.peek()!.event.payload.dateTime < now) {
+        while (!this.events.isEmpty() && count > 0) {
             res.push(this.events.pop()!);
+            count--;
         }
         return res;        
     }
@@ -72,100 +66,79 @@ export class Generator {
     static transactionId = 0;
     static resultTransactionId = 0;
     private queue = new TransactionEventsQueue();
-    private currentParams: GenParameters | undefined = undefined;
     private delayGenerator = new DelayGenerator(100);
 
-    msgMetaDataPerUser = new Map<number, Counters>();
-    generatedNow = 0;
-    anomalyCounter = 0;
-    lastUserCount = 0;
+    private msgMetaDataPerUser = new Map<number, Counters>();
+    private startTime: number = 0;
+    private timeIncrement: number = 0;
+    private eventsToGenerate: number = 0;
+    private eventsGenerated: number = 0;
+    private eventsEnqueued: number = 0;
+    private userCount: number = 0;
     start(params: GenParameters) {
-        // Generation is done under assumption that every second represents 1 day
-        // Convert the params.requestIntervalMs to dayTimeMs
-        this.currentParams = params;
+        this.startTime = new Date(params.dateFromISO).getMilliseconds();
+        const endTime = Math.max(new Date(params.dateToISO).getMilliseconds(), this.startTime);
+        this.timeIncrement = (endTime - this.startTime) / Math.max(params.transactionCount, 1);
         this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
         this.queue = new TransactionEventsQueue();
-        this.generatedNow = 0;
-        this.lastUserCount = this.msgMetaDataPerUser.size;
+        this.eventsEnqueued = 0;
+        this.eventsGenerated = 0;
+        this.eventsToGenerate = params.transactionCount;
+        this.msgMetaDataPerUser = new Map<number, Counters>();
     }
-    eventsPerInterval() {
-        if (this.currentParams === undefined) {
-            throw new Error(`Generator parameters are not set`);
-        }
-        return this.currentParams.maxTransactionsPerSec * this.currentParams.userCount * this.currentParams.generationIntervalMs / MS_PER_SECOND;
+    stop() {
+        this.queue = new TransactionEventsQueue();
+        this.eventsEnqueued = 0;
+        this.eventsGenerated = 0;
+        this.eventsToGenerate = 0;
+        this.msgMetaDataPerUser = new Map<number, Counters>();
     }
-    getEvents(now: number): Array<TransactionEvent> | undefined {
+    getEvents(count: number): Array<TransactionEvent> | undefined {
         //TODO now to Date type
         /* high latency might cause overinflated generated sets
         * so chunks of defined generation intervals will be produced.
         */
-        if (this.currentParams?.transactionCount !== undefined && this.currentParams?.transactionCount == 0) {
-            console.log(`Reached transaction count limit ${this.currentParams.transactionCount}, stopping generation`);
+        if (this.eventsEnqueued < count) {
+            // generate count * 2 events
+            /**How will generation go?
+             * 1. take current time
+             * 2. al events are going to be generated at time increments so for every event its time will be known
+             * 3. generate event at this time + some random delay
+             */
+            const toGenerate = Math.min(count * 2, this.eventsToGenerate - this.eventsGenerated);
+            this.generate(toGenerate);
+        }
+        if (this.eventsToGenerate == this.eventsGenerated && this.queue.size() == 0) {
+            console.log(`Reached transaction count limit ${this.eventsToGenerate}, stopping generation`);
             return undefined;
         }
-        const intervalMs: number = this.currentParams?.generationIntervalMs!;
-        const lastTransactionTime = this.queue.getLastTransactionTime();
-        if (lastTransactionTime == undefined || lastTransactionTime < now) {
-            // Generate in seconds to better preserve the "transactionPerSecond" ratio
-            const startGenerationTime = Math.max(lastTransactionTime??0, now - intervalMs);
-            this.generate(Math.ceil(intervalMs / MS_PER_SECOND) * MS_PER_SECOND, startGenerationTime);
-        }
-        const events = this.queue.dequeEvents(now);
+        const events = this.queue.dequeEvents(count);
         for (const e of events) {
             if (e.seqNumberer !== undefined) {
                 e.event.metadata.seqNumber = e.seqNumberer();
             }
-        }
-        if (this.currentParams?.transactionCount !== undefined) { 
-            if (this.currentParams.transactionCount > events.length) {
-                this.currentParams.transactionCount -= events.length;
-                this.generatedNow += events.length;
-            } else {
-                const res = events.slice(0, this.currentParams.transactionCount);
-                this.currentParams.transactionCount = 0;
-                this.generatedNow += res.length;
-                return res;
+            if (e.topic === KAFKA_TOPICS_TRANSACTIONS) {
+                this.eventsEnqueued--;
             }
         }
         return events;
     }
     percentComplete(): number {
-        if (this.currentParams === undefined) {
-            return 0;
-        }
-        if (this.currentParams.transactionCount == undefined) {            
-            return -1; // Not defined, so not complete
-        }
-        if (this.currentParams.transactionCount === 0) {
-            return 100; // Already completed
-        }
-        const totalEvents = this.generatedNow + this.currentParams.transactionCount;
-        return this.generatedNow * 100 / totalEvents;
+        return this.eventsGenerated * 100 / Math.max(this.eventsToGenerate,1);
     }
     generatedCount(): number {
-        return this.generatedNow;
+        return this.eventsGenerated;
     }
-    userCount(): number {
-        return this.msgMetaDataPerUser.size - this.lastUserCount;
-    }
-    generate(interval: number, now: number) {
-        if (this.currentParams == undefined) {
-            throw new Error(`Inset generator parameters`)
-        }
+    generate(count: number) {
         /*  Not going for much realism, where consumers rarely have transactions with other consumers
             Also transaction latency is not emulating any thread contention, so 
                 transaction result delay will be random.
         */
-        const maxTotalEventsPerSec = this.currentParams.maxTransactionsPerSec * this.currentParams.userCount;
-        const maxEventsPerInterval = maxTotalEventsPerSec * interval / MS_PER_SECOND ;
-        const eventCount = Math.round(Math.random() * maxEventsPerInterval);
-        const timeIncrement = interval / Math.max(1, eventCount);
-        // console.log(`Generating ${eventCount} events with time increment ${timeIncrement} ms`);
-        for (let i = 0; i < eventCount; i++) {
-            now += timeIncrement;
+        for (let i = this.eventsGenerated; i < this.eventsGenerated + count; i++) {
+            const transactionTime = this.startTime + i * this.timeIncrement;
             // Can make internal transfers too (same id to and from)
-            const userIdFrom = Math.floor(Math.random() * this.currentParams.userCount);
-            const userIdTo = Math.floor(Math.random() * this.currentParams.userCount);
+            const userIdFrom = Math.floor(Math.random() * this.userCount);
+            const userIdTo = Math.floor(Math.random() * this.userCount);
             if (this.msgMetaDataPerUser.get(userIdFrom) === undefined) {
                 this.msgMetaDataPerUser.set(userIdFrom, new Counters());
             }
@@ -176,13 +149,13 @@ export class Generator {
                 id: Generator.transactionId++,
                 userIdFrom,
                 userIdTo,
-                dateTime: Math.floor(now),
+                dateTime: Math.floor(transactionTime),
                 amount: Math.random() * 1000
             }
             const result: TransactionResult = {
-                dateTime: this.delayGenerator.delay(now),
+                dateTime: this.delayGenerator.delay(transactionTime),
                 id: transaction.id,
-                state: generateTransactionResult()
+                state: TResult.CONFIRMED,
             }
             const tEvent: InKafkaMessage = { payload: transaction, metadata: 
                 { seqNumber: this.msgMetaDataPerUser.get(userIdFrom)!.transactionCounter++, 
@@ -195,6 +168,8 @@ export class Generator {
                 return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultCounter++;
             }});
         }
+        this.eventsGenerated += count;
+        this.eventsEnqueued += count;
     }
     queueSize(): number {
         return this.queue.size();
@@ -202,45 +177,29 @@ export class Generator {
 }
 
 export function testGeneratorContinuous() {
-    const gen = new Generator();
-    const generationIntervalMs = 100;
-    let now = Date.now();
-    const params: GenParameters = { userCount: 1000, maxTransactionsPerSec: 5, generationIntervalMs, maxDelayMs: 300 };
-    gen.start(params, now);
-    const maxEventsPerSec = params.userCount * params.maxTransactionsPerSec * params.generationIntervalMs
-    let maxQS = 0;
-    let maxConsumed = 0;
-    const maxEventsToReserve = Math.ceil(MS_PER_SECOND / generationIntervalMs) * maxEventsPerSec;
-    const inter = setInterval(() => {
-        const newNow = Date.now();
-        console.log(`current pending events ${gen.queueSize()} at ${newNow} ms maxConsumed ${maxConsumed} maxQueueSize ${maxQS}`);
-    }, 1000);
-
-    const to1: NodeJS.Timeout = setTimeout(() => {
-        const newNow = Date.now();
-        if (newNow - now > generationIntervalMs + 200) {
-            throw new Error(`Something hangs: ${newNow - now} ms`);
-        }
-        const maxLeftoverTransactions = generationIntervalMs * maxEventsPerSec / MS_PER_SECOND;
-        const maxTransactionResultCountOfOccurredTransactions = Math.ceil(maxEventsPerSec * params.maxDelayMs! / MS_PER_SECOND);
-        const maxLeftoverTransacionResults = maxLeftoverTransactions + maxTransactionResultCountOfOccurredTransactions
-        const maxLeftoverEventsBeforeMaybeGeneration = maxLeftoverTransacionResults + maxLeftoverTransactions;
-        const maxEventsToConsume = Math.ceil((newNow - now) * maxEventsPerSec * 2 / generationIntervalMs);
-        const maxQueueSize = maxEventsToConsume + maxLeftoverEventsBeforeMaybeGeneration;
-        if (gen.queueSize() >  maxQueueSize) {
-            throw new Error(`Queue leaked: ${gen.queueSize()} > ${maxQueueSize}`);
-        }
-        maxQS = Math.max(maxQS, gen.queueSize());
-        const events = gen.getEvents(newNow)!;
-        maxConsumed = Math.max(maxConsumed, events.length);
-        let lastEventTime = 0;
+    const cycles = 100;
+    for (let i = 0; i < cycles; i++) {
+        const gen = new Generator();
+        const eventCount = 100000;
+        const startTime = 100;
+        const params: GenParameters = { 
+            userCount: 1000, 
+            dateFromISO: (new Date(startTime)).toISOString(),
+            dateToISO: (new Date(startTime + Math.random() * eventCount)).toISOString(),
+            transactionCount: eventCount, 
+            maxDelayMs: 500};
+        gen.start(params);
+        const events = gen.getEvents(eventCount * 2)!; // get all events
+        let lastEventTime = startTime - 1;
         for (const e of events) {
             if (e.event.payload.dateTime < lastEventTime) {
                 throw new Error(`Events are not ordered: ${e.event.payload.dateTime} < ${lastEventTime}`);
             }
             lastEventTime = e.event.payload.dateTime;
         }
-        now = newNow;
-        to1.refresh()
-    }, generationIntervalMs);
+        process.stdout.clearLine(0);   // clear current line
+        process.stdout.cursorTo(0);    // move cursor to beginning of line
+        process.stdout.write(`Progress: ${i * 100 / cycles}%`);
+    }
+    console.log("Generator test passed");
 }

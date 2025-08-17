@@ -1,11 +1,12 @@
 import { KClient } from './common/kafka_client.js';
 import { logger } from './common/logger.js';
 import { metrics } from './monitoring_local.js';
+import EventEmitter from 'events';
 import * as kf from 'kafkajs';
 
 
 
-export class KProducer {
+export class KProducer extends EventEmitter {
     public static event = {
       requestMessages: 'requestMessages',
     }
@@ -26,6 +27,7 @@ export class KProducer {
           parameters like Kafka does.
     */
     constructor(private client: KClient) {
+        super();
         this.producer = this.client.getProducer();
         this.producer.on('producer.connect', () => {
         this.isConnected = true;
@@ -70,10 +72,10 @@ export class KProducer {
       this.producer.disconnect();
     }
     getInFlight() {
-      return this.inFlight;
+      return this.inFlight + this.outbox.length;
     }
     attemptDelivery() {
-      if (!this.isConnected) {
+      if (!this.isConnected || this.retryTimer != undefined) {
         return;
       }
       /* Decided not to overcomplicate things and not to do manual batching,
@@ -94,6 +96,7 @@ export class KProducer {
         })
           .then(_ => {
             this.inFlight--;
+            this.emit(KProducer.event.requestMessages);
           })
           .catch(e => {
             this.inFlight--;

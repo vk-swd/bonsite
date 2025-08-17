@@ -72,15 +72,13 @@ function parseMsgs<T>(msgs: string[], validator: ZodSchema<T>): T[] {
  * but this will not be handled in this demo.
  */
 export async function getOffsetsWhenPartitionsAssigned(
-    partitions: KConsumerOffsetInfo[], 
     db_connection: UserConnection): Promise<Offsets>
 {
     try {
-        return await db_connection.getOffsets(groupId, partitions);
+        return await db_connection.getOffsets();
     }
     catch (e) {
         mtrx.metrics?.dbDisconnectCount?.inc(1);
-        logger.error(`Failed to get offsets for ${JSON.stringify(partitions)}: ${e}`);
     }
     return Offsets.empty();
 }
@@ -228,7 +226,7 @@ async function connectToKafka(db_connection: UserConnection): Promise<kf.Consume
     });
     consumer.on('consumer.group_join', async (event: kf.ConsumerGroupJoinEvent) => {
         const offsetInfo = partitionInfoFromGroupJoinEvent(event);
-        const offsets = await getOffsetsWhenPartitionsAssigned(offsetInfo, db_connection)
+        const offsets = await getOffsetsWhenPartitionsAssigned(db_connection)
         assignOffsets(offsetInfo, offsets, consumer)
     });
     try {

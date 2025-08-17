@@ -181,4 +181,4 @@ genButton.addEventListener('click', () => {
 
 
 
-loadMetrics();
+// loadMetrics();

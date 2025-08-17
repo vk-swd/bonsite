@@ -48,11 +48,20 @@
         </tr>
       </thead>
       <tbody></tbody>
+      <button id="b_download">Download as TXT</button>
     </table>
-    <button id="b_download">Download as TXT</button>
 
     <title>Inline Inputs</title>
+   
+    <br>
+    <br>
     <div class="input-row" style="width: 800px; display: flex; flex-wrap: wrap; gap: 10px;">
+      <h2>Generator Parameters</h2>
+      <div class="input-row" style="width: 800px; display: flex; flex-wrap: wrap; gap: 10px;">
+        <label>From: <input type="date" id="startDateGen" /></label>
+        <label>To: <input type="date" id="endDateGen" /></label>
+      </div>
+      <br>
       <div style="display: flex; flex-direction: column;">
         <label for="input1">Trans. per second</label>
         <input id="tPerSecInput" type="number" value="1">

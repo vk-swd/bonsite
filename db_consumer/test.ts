@@ -30,6 +30,11 @@ function getIgnored<T>(batch: Batch): T[] {
 }
 
 function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[]): Transaction[] {
+    /** The following conditions for a transaction to be included in the statement:
+     * 1. The transaction has its record in Transactions table of the database
+     * 2. The transaction has its result record in TransactionResults table of the database
+     * 3. The transaction result is "CONFIRMED"
+     */
     const res: Transaction[] = [];
     for (const tBatch of tBatches) {
         for (const tRecord of tBatch) {
@@ -71,7 +76,7 @@ const partitionsPerTOpic = [
 ];
 
 async function testOffsets(topic: string, val: string, connection: UserConnection) {
-    const offsets = await connection.getOffsets(groupId, partitionsPerTOpic);
+    const offsets = await connection.getOffsets();
     chai.expect(offsets.getOffset(topic, 0)??'0', `expected ${val} from ${topic}`).to.equal(val);
 }
 
@@ -145,6 +150,7 @@ describe('Kafka Consumer Tests', function () {
                 { status: RecordStatus.PROCESSED,   t: {id: 5, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
             ]
         ].map(b => b.map(t => {
+            // Dud metadata records as completeness is not tested
             return { status: t.status, 
                 t: { metadata: { seqNumber: 0, isIgnored: false }, payload: t.t } as InKafkaMessage,
                 o: t.o };

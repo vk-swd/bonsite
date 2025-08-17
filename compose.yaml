@@ -223,15 +223,9 @@ services:
         service: node_app
       volumes:
         - ./${TESTER_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
-      environment:
-        << : [*mssql_env]
-        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
       tty: false
       stdin_open: false
       restart: no
       depends_on:
-        sqldb:
+        gql:
           condition: service_started
-        db_initializer:
-          condition: service_completed_successfully

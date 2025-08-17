@@ -200,20 +200,13 @@ export class UserConnection {
         await request!.batch(`exec ${addKafkaOffsetProcedure.name} ${columns
             .map((_, i) => `${param(i)} = @${placeholders[i]}`).join(', ')};`);
     }
-    async getOffsets(groupId: string, topics: KConsumerOffsetInfo[]): Promise<Offsets> {
-        const request = this.pool.request()
-        request.input(kafkaOffsetTable.columns.groupId.name, sql.NVarChar(18), groupId)
-        const placeholders = topics.map((t, idx) => `topic${idx}`);
-        placeholders.forEach((p, idx) => {
-            request.input(p, sql.NVarChar(100), topics[idx].topic);
-        })       
-        const query = `SELECT * FROM ${kafkaOffsetTable.name} where ${columtEqArg(kafkaOffsetTable.columns.groupId)}
-            AND ${kafkaOffsetTable.columns.topic.name} IN (${placeholders.map(p => `@${p}`).join(', ')})`;
+    async getOffsets(): Promise<Offsets> {
+        const request = this.pool.request()      
         let result;
         try {
-            result = await request.query(query);
+            result = await request.query(`SELECT * FROM ${kafkaOffsetTable.name}`);
         } catch (e) {
-            logger.error(`Error running query ${query} for ${JSON.stringify(topics)}: ${e}`);
+            logger.error(`Error getting offsets: ${e}`);
             throw e;
         }
         logger.debug(`got offsets: ${JSON.stringify(result)}`);

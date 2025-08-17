@@ -19,8 +19,6 @@ export class GenApiServer extends EventEmitter {
                     req.on('end', () => {
                         console.log(`RECEIVING SOME REQUEST data ${data}`)
                         try {
-                            const ddd: GenParameters = JSON.parse(data)
-                            console.log(`parsing data ${ddd.maxTransactionsPerSec}`);
                             const params: GenParameters = GenParametersValidator.parse(JSON.parse(data) as GenParameters);
                             console.log(`Received parameters: ${JSON.stringify(params)}`);
                             this.emit('start', params);

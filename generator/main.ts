@@ -5,7 +5,6 @@ import { Sender } from "./sender.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
 
 await startMonitoring();
-
 const sender = new Sender();
 
 const api = new GenApiServer(() => sender.progress());

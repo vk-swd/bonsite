@@ -28,7 +28,7 @@ services:
         timeout: 10s
         retries: 3
         start_period: 40s
-        start_interval: 5s
+        start_interval: 1s
 
   node_monitored_app:
     extends: 
