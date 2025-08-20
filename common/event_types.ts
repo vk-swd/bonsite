@@ -48,11 +48,11 @@ export const OffsetValidator = z.object({
 })
 export type Offset = z.infer<typeof OffsetValidator>;
 
+
+export const reqStatementUrl = "statements"
 export const StatementParametersValidator = z.object({
     userId: z.number(),
-    dates: z.object({
-        from: z.number(),
-        to: z.number(),
-    }).optional()
+    from: z.number().optional(),
+    to: z.number().optional(),
 });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;

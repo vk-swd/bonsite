@@ -1,4 +1,4 @@
-import { Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from '../event_types.js'
+import { InKafkaMessage, Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from '../event_types.js'
 import { getEnv, KConsumerOffsetInfo, last } from '../utils.js'
 
 import sql from 'mssql'
@@ -228,13 +228,13 @@ export class UserConnection {
             throw e;
         }
     }
-    async getTransactions(p: StatementParameters): Promise<Transaction[]> {
+    async getTransactions(p: StatementParameters): Promise<InKafkaMessage[]> {
         const request = this.pool.request();
         try {
             setQueryInput(request, procGetTransactions.userId, p.userId);
-            if (p.dates !== undefined) {
-                setQueryInput(request, procGetTransactions.dateFrom, new Date(p.dates.from).toISOString());
-                setQueryInput(request, procGetTransactions.dateTo, new Date(p.dates.to).toISOString());
+            if (p.from !== undefined && p.to !== undefined) {
+                setQueryInput(request, procGetTransactions.dateFrom, new Date(p.from).toISOString());
+                setQueryInput(request, procGetTransactions.dateTo, new Date(p.to).toISOString());
             } else {
                 setQueryInput(request, procGetTransactions.dateFrom, new Date(0).toISOString());
                 setQueryInput(request, procGetTransactions.dateTo, new Date("9999-12-31T23:59:59.997Z").toISOString());
@@ -287,9 +287,12 @@ function transaction(row: any) {
         userIdTo: parseInt(row.userIdTo)
     });
  }
-function transactions(sqlRes: sql.IResult<any>): Transaction[] {
+function transactions(sqlRes: sql.IResult<any>): InKafkaMessage[] {
     if (!sqlRes || !sqlRes.recordset || sqlRes.recordset.length === 0) {
         return [];
     }
-    return sqlRes.recordset.map((r : any) => transaction(r));
+    return sqlRes.recordset.map((r : any) => { return { 
+            payload: transaction(r), metadata: MetadataValidator.parse(JSON.parse(r.metadata)) 
+        } as InKafkaMessage;
+    }) 
 }

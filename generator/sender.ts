@@ -6,8 +6,8 @@ import { Generator, TransactionEvent } from "./generator.js";
 import { KProducer } from "./kafka_producer.js";
 
 export class Sender {
-    public producer = new KProducer(new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}))
-    private generator = new Generator();
+    producer = new KProducer(new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}))
+    generator = new Generator();
     constructor() {
         this.producer.on(KProducer.event.requestMessages, () => this.sendEvents());
     }
@@ -36,7 +36,7 @@ export class Sender {
         this.generator.stop();
     }
     isStopped(): boolean {
-        return this.producer.getInFlight() == 0 && this.generator.percentComplete() === 100;
+        return this.producer.getInFlight() === 0 && this.generator.percentComplete() === 100;
     }
 }
 

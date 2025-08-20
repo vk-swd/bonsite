@@ -1,5 +1,3 @@
-
-
 /* To handle something as heavy as bank statement requests from many users 
 (if we are talking about demoing a real life), 
 then a single threaded app does not sound realistic thing to use.
@@ -17,19 +15,28 @@ import { logger } from "./common/logger.js";
 import { StatementGenApiServer } from "./api.js";
 import { StatementParameters } from "./common/event_types.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
+import { getEnv } from "./common/utils.js";
+import * as fs from 'fs';
 
-
+let requestCount = 0;
+const SHARED_DIR = getEnv('SHARED_DIR');
 
 const db_connection: UserConnection = await UserConnection.create()
 
 const api = new StatementGenApiServer(async (p: StatementParameters) => {
-    try {
-        const statement = await db_connection.getTransactions(p);
-        return JSON.stringify(statement);
-    } catch (error) {
-        logger.error(`Error fetching progress: ${error}`);
-        throw error;
-    }
+    const statement = await db_connection.getTransactions(p);
+    console.log(`Statement for user ${p.userId} with params ${JSON.stringify(statement)}:`);
+    const fileName = `statement-${requestCount++}-${Date.now()}.json`;
+    return new Promise((resolve, reject) => {
+        fs.writeFile(SHARED_DIR + "/" + fileName, JSON.stringify(statement), (err) => {
+            if (err) {
+                console.error(`Error writing stats to file ${fileName}:`, err);
+                reject(err);
+                return;
+            }
+            resolve(fileName);
+        })
+    })
 });
 
 

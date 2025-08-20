@@ -1,18 +1,15 @@
 
-import { getEnv } from "./build/common/utils.js";
-import { logger } from "./build/common/logger.js";
-logger.log("Starting healthcheck server...");
-const port = getEnv("HEALTHCHECK_PORT");
-fetch(`http://localhost:${port}/`)
+const args = process.argv.slice(2); // everything after `node healthcheck.js`
+const port = args[0];
+await fetch(`http://localhost:${port}/`)
             .then(res => {
-                logger.log("Healthcheck response:" + JSON.stringify(res));
+                console.log("Healthcheck response:" + JSON.stringify(res));
                 if (!res.ok) {
-                    logger.error("Healthcheck not ok:" + JSON.stringify(err));
-                    exit(1);
+                    console.error("Healthcheck not ok:" + JSON.stringify(err));
+                    process.exit(1);
                 }
             })
             .catch(err => {
-                logger.error("Healthcheck error:" + JSON.stringify(err));
-                exit(1);
+                console.error("Healthcheck error:" + JSON.stringify(err));
+                process.exit(1);
             });
-    

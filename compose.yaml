@@ -6,8 +6,11 @@ networks:
 
 volumes:
   frontend_deploy_folder:
-  statement_folder:
+  shared_dir:
 
+x-gql-env: &gql_env
+  GRAPH_QL_PORT: ${GRAPH_QL_PORT}
+  GRAPH_QL_HOSTNAME: ${GRAPH_QL_APP_NAME}
 x-environment: &mssql_env
   MSSQL_HOSTNAME: ${MSSQL_HOSTNAME}
   MSSQL_PASSWORD: ${MSSQL_PASSWORD}
@@ -15,13 +18,23 @@ x-environment: &mssql_env
   MSSQL_CONSUMER_USERNAME: ${MSSQL_CONSUMER_USERNAME}
   MSSQL_STATEMENT_CREATOR_USERNAME: ${MSSQL_STATEMENT_CREATOR_USERNAME}
 
+x-healthcheck-params: &healthcheck_params
+  interval: 20s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+  start_interval: 1s
+
 # Environment variables are read from .env file automatically
 services:
   node_img_builder:
     build:
       dockerfile_inline: |
         FROM node:20-slim
-        RUN apt update; apt install -y procps net-tools iputils-ping
+        VOLUME [${WORKDIR}]
+        WORKDIR ${WORKDIR}
+        COPY ./package.json ${WORKDIR}/package.json
+        RUN apt update; apt install -y procps net-tools iputils-ping curl wget; npm install; rm package*.json
     image: my-backend
   frontend_builder:
       extends: 
@@ -43,15 +56,14 @@ services:
     container_name: frontend_server
     dns_search: backend_net
     environment:
-      - NGINX_ENVSUBST_TEMPLATE_DIR=${NGINX_TEMPLATE_FOLDER}
-      - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
-      - NGINX_PORT=${NGINX_PORT}
-      - NGINX_FOLDER=${NGINX_FOLDER}
-      - GRAPH_QL_PORT=${GRAPH_QL_PORT}
-      - GRAPH_QL_HOSTNAME=${GRAPH_QL_APP_NAME}
+      NGINX_ENVSUBST_TEMPLATE_DIR: ${NGINX_TEMPLATE_FOLDER}
+      NGINX_ENVSUBST_TEMPLATE_SUFFIX: .template
+      NGINX_PORT: ${NGINX_PORT}
+      NGINX_FOLDER: ${NGINX_FOLDER}
+      <<: [*gql_env]
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
-    - statement_folder:${STATEMENT_FOLDER}
+    - shared_dir:${SHARED_DIR}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:81:81"
@@ -69,12 +81,15 @@ services:
         service: node_monitored_app
       volumes: 
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
         - GENERATOR_HOST=${GENERATOR_NAME}
+        - STATEMENT_GENERATOR_PORT=${STATEMENT_GENERATOR_PORT}
+        - STATEMENT_GENERATOR_HOST=${STATEMENT_GENERATOR_NAME}
         - GRAPH_QL_PORT=${GRAPH_QL_PORT}
       depends_on:
         generator:
@@ -88,9 +103,11 @@ services:
         service: node_kafka_app
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
+        - shared_dir:${SHARED_DIR}
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
+        - SHARED_DIR=${SHARED_DIR}
       depends_on:
         kafka1:
           condition: service_started
@@ -141,7 +158,7 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
-    hostname: "${KAFKA_HOST}"
+    hostname: "${KAFKA_HOST}"      
 
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -157,6 +174,10 @@ services:
     hostname: "${MSSQL_HOSTNAME}"
     networks: 
         - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd  -S localhost -U ${MSSQL_SA_USERNAME} -P ${MSSQL_PASSWORD} -C -Q exit"]
+      <<: [*healthcheck_params]
+      
 
   db_initializer:
       extends: 
@@ -174,7 +195,7 @@ services:
       restart: no
       depends_on:
         sqldb:
-          condition: service_started
+          condition: service_healthy
 
   db_consumer:
       extends: 
@@ -191,7 +212,7 @@ services:
       stdin_open: false
       depends_on:
         sqldb:
-          condition: service_started
+          condition: service_healthy
         kafka1:
           condition: service_started
         db_initializer:
@@ -203,19 +224,22 @@ services:
         service: node_monitored_app
       volumes:
         - ./${STATEMENT_GENERATOR_NAME}:${SOURCEDIR}
-        - statement_folder:${STATEMENT_FOLDER}
+        - shared_dir:${SHARED_DIR}
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
       hostname: "${STATEMENT_GENERATOR_NAME}"
       environment:
         << : [*mssql_env]
+        SHARED_DIR: ${SHARED_DIR}
         STATEMENT_GENERATOR_PORT: ${STATEMENT_GENERATOR_PORT}
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
       depends_on:
         sqldb:
-          condition: service_started
+          condition: service_healthy
         db_initializer:
           condition: service_completed_successfully
+        db_consumer:
+          condition: service_healthy
 
   tester:
       extends: 
@@ -223,9 +247,21 @@ services:
         service: node_app
       volumes:
         - ./${TESTER_NAME}:${SOURCEDIR}
-      tty: false
-      stdin_open: false
+        - shared_dir:${SHARED_DIR}
+        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+      environment:
+        SHARED_DIR: ${SHARED_DIR}
+        <<: [*gql_env]
+        TESTER_PORT: ${TESTER_PORT}
+        TESTER_HOST: ${TESTER_NAME}
+      # tty: false
+      # stdin_open: false
       restart: no
       depends_on:
         gql:
+          condition: service_healthy
+        graphana:
+          condition: service_started
+        prometheus:
           condition: service_started

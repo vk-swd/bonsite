@@ -4,7 +4,6 @@ services:
   node_app:
       image: my-backend
       volumes:
-        - "${WORKDIR}"
         - ./tsconfig.json:${WORKDIR}/tsconfig.json
         - ./healthcheck.js:${WORKDIR}/healthcheck.js
         - ${WORKDIR}/${COMMON_DIR_NAME}
@@ -23,8 +22,8 @@ services:
       stdin_open: true
       restart: always
       healthcheck:
-        test: ["CMD-SHELL", "node ./healthcheck.js >> ./healthcheck.log"]
-        interval: 1m30s
+        test: ["CMD-SHELL", "node ./healthcheck.js ${HEALTHCHECK_PORT} >> ./healthcheck.log"]
+        interval: 20s
         timeout: 10s
         retries: 3
         start_period: 40s

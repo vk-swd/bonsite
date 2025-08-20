@@ -7,6 +7,7 @@ import { InKafkaMessage, MetadataWrapperValidator, Transaction, TransactionMessa
 import { logger } from "./common/logger.js";
 import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
+import { HealthCheckSever } from "./common/healthcheck.js";
 
 
 
@@ -79,8 +80,9 @@ export async function getOffsetsWhenPartitionsAssigned(
     }
     catch (e) {
         mtrx.metrics?.dbDisconnectCount?.inc(1);
+        logger.error(`Failed to get offsets from database: ${e}`);
+        throw await crash(e);
     }
-    return Offsets.empty();
 }
 
 /**
@@ -200,7 +202,7 @@ async function assignOffsets(offsetInfo: KConsumerOffsetInfo[]
         });
     })   
 }
-async function connectToKafka(db_connection: UserConnection): Promise<kf.Consumer> {
+async function connectToKafka(db_connection: UserConnection, readyCb: () => void): Promise<kf.Consumer> {
     const kafka_connect_conf = {
         clientId: `C0_${getEnv("HOSTNAME")}`,
         brokers: [getEnv("KAFKA_BROKERS")]
@@ -213,6 +215,12 @@ async function connectToKafka(db_connection: UserConnection): Promise<kf.Consume
         sessionTimeout: 7000,
         heartbeatInterval: 2000
     };
+    {
+        const ad: kf.Admin = kafka_client.admin();
+        await ad.connect();
+        await ad.createTopics({ topics: topics.map(t => ({ topic: t })) });
+        await ad.disconnect();
+    }
     const consumer = kafka_client.consumer(consumer_config);
     consumer.on(`consumer.disconnect`, () => {
         if (!exiting) {
@@ -225,9 +233,11 @@ async function connectToKafka(db_connection: UserConnection): Promise<kf.Consume
         mtrx.metrics?.kafkaRequestTimeout?.inc(1);
     });
     consumer.on('consumer.group_join', async (event: kf.ConsumerGroupJoinEvent) => {
+        console.log(`Consumer group join event: ${JSON.stringify(event)}`);
         const offsetInfo = partitionInfoFromGroupJoinEvent(event);
         const offsets = await getOffsetsWhenPartitionsAssigned(db_connection)
         assignOffsets(offsetInfo, offsets, consumer)
+        readyCb();
     });
     try {
         await consumer.connect()
@@ -238,6 +248,7 @@ async function connectToKafka(db_connection: UserConnection): Promise<kf.Consume
             + `error: ${e}`);
         throw await crash(e);
     }
+
     logger.log(`Connected to kafka with config: ${JSON.stringify(kafka_connect_conf)}; groupId ${groupId}`);
     return consumer;
 }
@@ -272,16 +283,14 @@ async function subscribeToKafka(consumer: kf.Consumer, db_connection: UserConnec
     }
 }
 async function runConsumption() {
+    const healthServer = new HealthCheckSever(false);
     await mtrx.startMonitoring()
     const db_connection: UserConnection = await connectToDb();
-    const consumer: kf.Consumer = await connectToKafka(db_connection);
+    const consumer: kf.Consumer = await connectToKafka(db_connection, () => {
+        healthServer.isHealthy = true;
+        logger.log(`Consumer is ready to process messages`);
+    });
     await subscribeToKafka(consumer, db_connection);
 }
 
-
-const timeiout = setInterval(() => {
-    // if (exiting) {
-    //     clearInterval(timeiout);
-        logger.log(`Exiting...`);
-    // }
-}, 10000);
+runConsumption();

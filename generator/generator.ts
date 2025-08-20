@@ -3,6 +3,8 @@ import { getEnv } from './common/utils.js';
 import { GenParameters } from './common/generator_parameters.js';
 import { last, PriorityQ } from './common/utils.js'
 import { InKafkaMessage, Transaction, TransactionResult, TResult } from './common/event_types.js';
+import { Counters } from './common/generator_parameters.js';
+import { UserCounters } from './common/generator_parameters.js';
 
 
 
@@ -55,43 +57,41 @@ class DelayGenerator {
         return now + Math.random() * this.maxDelayMs;
     }
 }
-class Counters {
-    constructor(
-        public transactionCounter: number = 0,
-        public transactionResultCounter: number = 0,
-    ) {}
-}
 
 export class Generator {
     static transactionId = 0;
     static resultTransactionId = 0;
     private queue = new TransactionEventsQueue();
     private delayGenerator = new DelayGenerator(100);
-
-    private msgMetaDataPerUser = new Map<number, Counters>();
+    private msgMetaDataPerUser = new UserCounters();
     private startTime: number = 0;
     private timeIncrement: number = 0;
     private eventsToGenerate: number = 0;
     private eventsGenerated: number = 0;
     private eventsEnqueued: number = 0;
     private userCount: number = 0;
+    private minUserId: number = 0;
     start(params: GenParameters) {
-        this.startTime = new Date(params.dateFromISO).getMilliseconds();
-        const endTime = Math.max(new Date(params.dateToISO).getMilliseconds(), this.startTime);
+        this.startTime = params.dateFrom;
+        const endTime = Math.max(params.dateTo, this.startTime);
         this.timeIncrement = (endTime - this.startTime) / Math.max(params.transactionCount, 1);
         this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
         this.queue = new TransactionEventsQueue();
         this.eventsEnqueued = 0;
         this.eventsGenerated = 0;
         this.eventsToGenerate = params.transactionCount;
-        this.msgMetaDataPerUser = new Map<number, Counters>();
+        this.msgMetaDataPerUser.reset();
+        if (params.minUserId !== undefined) {
+            this.minUserId = params.minUserId;
+        }
     }
     stop() {
         this.queue = new TransactionEventsQueue();
         this.eventsEnqueued = 0;
         this.eventsGenerated = 0;
         this.eventsToGenerate = 0;
-        this.msgMetaDataPerUser = new Map<number, Counters>();
+        this.msgMetaDataPerUser.reset();
+        this.minUserId = 0;
     }
     getEvents(count: number): Array<TransactionEvent> | undefined {
         //TODO now to Date type
@@ -124,7 +124,7 @@ export class Generator {
         return events;
     }
     percentComplete(): number {
-        return this.eventsGenerated * 100 / Math.max(this.eventsToGenerate,1);
+        return Math.floor(this.eventsGenerated * 100 / Math.max(this.eventsToGenerate + this.queue.size(),1));
     }
     generatedCount(): number {
         return this.eventsGenerated;
@@ -137,14 +137,8 @@ export class Generator {
         for (let i = this.eventsGenerated; i < this.eventsGenerated + count; i++) {
             const transactionTime = this.startTime + i * this.timeIncrement;
             // Can make internal transfers too (same id to and from)
-            const userIdFrom = Math.floor(Math.random() * this.userCount);
-            const userIdTo = Math.floor(Math.random() * this.userCount);
-            if (this.msgMetaDataPerUser.get(userIdFrom) === undefined) {
-                this.msgMetaDataPerUser.set(userIdFrom, new Counters());
-            }
-            if (this.msgMetaDataPerUser.get(userIdTo) === undefined) {
-                this.msgMetaDataPerUser.set(userIdTo, new Counters());
-            }
+            const userIdFrom = this.minUserId + Math.floor(Math.random() * this.userCount);
+            const userIdTo = this.minUserId + Math.floor(Math.random() * this.userCount);
             const transaction: Transaction = {
                 id: Generator.transactionId++,
                 userIdFrom,
@@ -157,12 +151,22 @@ export class Generator {
                 id: transaction.id,
                 state: TResult.CONFIRMED,
             }
+
+            const userStatFrom = this.msgMetaDataPerUser.get(userIdFrom);
+            const userStatTo = this.msgMetaDataPerUser.get(userIdTo);
+
+            userStatFrom.transactionCount++;
+            if (userIdFrom !== userIdTo) {
+                userStatTo.transactionCount++;
+            }
+              
             const tEvent: InKafkaMessage = { payload: transaction, metadata: 
-                { seqNumber: this.msgMetaDataPerUser.get(userIdFrom)!.transactionCounter++, 
+                { seqNumber: userStatFrom.seqNumber++, 
                     isIgnored: false } };
             const rEvent: InKafkaMessage = { payload:result, metadata: 
-                { seqNumber: 0,
+                { seqNumber: 0, // Seq number is accounted only for outgoing transactions
                     isIgnored: false } };
+
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: tEvent });
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent, seqNumberer: () => {
                 return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultCounter++;
@@ -174,6 +178,9 @@ export class Generator {
     queueSize(): number {
         return this.queue.size();
     }
+    getStat(): UserCounters {
+        return this.msgMetaDataPerUser;
+    }
 }
 
 export function testGeneratorContinuous() {
@@ -184,8 +191,8 @@ export function testGeneratorContinuous() {
         const startTime = 100;
         const params: GenParameters = { 
             userCount: 1000, 
-            dateFromISO: (new Date(startTime)).toISOString(),
-            dateToISO: (new Date(startTime + Math.random() * eventCount)).toISOString(),
+            dateFrom: startTime,
+            dateTo: startTime + Math.random() * eventCount,
             transactionCount: eventCount, 
             maxDelayMs: 500};
         gen.start(params);
