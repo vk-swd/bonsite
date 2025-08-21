@@ -1,5 +1,4 @@
 import { InKafkaMessage, Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from '../event_types.js'
-import { getEnv, KConsumerOffsetInfo, last } from '../utils.js'
 
 import sql from 'mssql'
 import { logger } from '../logger.js'
@@ -7,15 +6,6 @@ import { ColumnDescription, kafkaOffsetTable, rawDataTable, TableDescription, tr
 import { connectToDatabase, database } from './common.js'
 import { addKafkaOffsetProcedure, commitRecordedTransacrionResultsProc, commitRecordedTransacrionsProc, fullColumnName, getRawDataRecordsProc, procGetTransactions, procParameterName, QueryRes, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './procedures.js'
 import { consumerUser } from './auth.js'
-import { log } from 'console'
-
-
-
-
-
-
-
-
 
 const typeToSqlFactoryType = new Map<string, sql.ISqlType>([
     ['BIGINT', { type: sql.BigInt }],
@@ -24,11 +14,6 @@ const typeToSqlFactoryType = new Map<string, sql.ISqlType>([
     ['NVARCHAR(100)', { type: sql.NVarChar(100) }],
     ['TINYINT', { type: sql.TinyInt }]
 ]);
-
-
-function columtEqArg(c: ColumnDescription) {
-    return `${c.name} = @${c.name}`;
-}
 
 function setQueryInput<T>(request: sql.Request, column: ColumnDescription, value: T, arg?: string): void {
     request.input(arg ? arg : column.name, typeToSqlFactoryType.get(column.type)!, value);
@@ -40,7 +25,7 @@ export class Offsets {
             queryResult.recordset.forEach(q => {
                 console.log(`Processing offset query result: ${JSON.stringify(q)}`);
                 const offset = OffsetValidator.parse(q)
-                mapping.set(`${offset.topic}-${offset.partition}`, offset.offset);
+                mapping.set(Offsets.key(offset.groupId, offset.topic, offset.partition), offset.offset);
             });
             return new Offsets(mapping);
         } catch (e) {
@@ -51,10 +36,13 @@ export class Offsets {
     static empty(): Offsets {
         return new Offsets(new Map<string, string>());
     }
+    static key(groupId: string, topic: string, partition: number = 0): string {
+        return `${groupId}-${topic}-${partition}`;
+    }
     private constructor(private mapping: Map<string, string>) {
     }
-    getOffset(topic: string, partition: number = 0): string | undefined {
-        return this.mapping.get(`${topic}-${partition}`);
+    getOffset(group: string, topic: string, partition: number = 0): string | undefined {
+        return this.mapping.get(Offsets.key(group, topic, partition));
     }
 }
 
@@ -81,80 +69,84 @@ export class UserConnection {
         return this.pool.connected;
     }
     pidx = 0;
-    async writeTransactionAndOffsetTransactionally(
-        record: TransactionMessages,
+    async writeDataTransactionally(
+        records: InKafkaMessage[],
+        writer: (record: InKafkaMessage[], request: sql.Request) => Promise<QueryRes>,
         groupId: string,
         offset: string,
         partition: number,
         topic: string
-    ): Promise<QueryRes> {
-
-        const transaction = new sql.Transaction(this.pool)
-        let request1: sql.Request | undefined = undefined;
+    ) {
+        const batchInfo = () => `${groupId}-${topic}-${partition}-${offset}`;
+        const transaction = new sql.Transaction(this.pool);
         try {
-            request1 = await (await transaction.begin()).request();
+            await transaction.begin();
         } catch (e) {
-            const error = new ConnectionError(`Failed to start transaction: ${e}`, ConnectionErrorType.TRANSACRION_ERROR);
-            logger.error(error.message);
-            throw error;
+            throw `Failed to start transaction for ${batchInfo()}: ${e}`;
         }
+        let request = transaction.request();
         let result = new QueryRes();
-        let error: ConnectionError | undefined = undefined;
+        /*  Making long non-atomic transactions is prone to race conditions, when multiple agents
+            are updating the same data.
+            Here it is assumed that Kafka partitions are sharded by user ID (or another unique key). 
+            This guarantees no key overlap, enabling safe parallel writes.
+            No locking is used.
+            And this assumption is enforced by Kafka, because only one consumer may
+            read from a single partition at a time.
+        */
         try {
-            /*  Making long non-atomic transactions is prone to race conditions, when multiple agents
-                are updating the same data.
-                Here it is assumed that Kafka partitions are sharded by user ID (or another unique key). 
-                This guarantees no key overlap, enabling safe parallel writes.
-                No locking is used.
-                And this assumption is enforced by Kafka, because only one consumer may
-                read from a single partition at a time.
-            */
-            if (record.type == "t") {
-                await setUpTempTransactionsTable.batch(request1!);
-                // const q = `create table ${setUpTempTransactionsTable.tableName} (iddx int identity(1,1) primary key, 
-                    // ${(Object.values(transactionsTable.columns) as ColumnDescription[]).map(c => `${c.name} ${c.type}`).join(', ')})`
-                // await request1!.batch(q);
-                for (let i = 0; i < record.r.length; i++) {
-                    const r = record.r[i];
-                    await this.addTransactionRecord(r.payload as Transaction, JSON.stringify(r.metadata),  request1!);
-                }
-                result = await commitRecordedTransacrionsProc.batch(request1!);
-                await setUpTempTransactionsTable.dropTable(request1!);
-            } else if (record.type == "r") {
-                await setUpTempTransactionResultsTable.batch(request1!);
-                for (const rec of record.r) {
-                    await this.addTransactionResult(rec.payload as TransactionResult, JSON.stringify(rec.metadata), request1);
-                }
-                result = await commitRecordedTransacrionResultsProc.batch(request1!);
-                await setUpTempTransactionResultsTable.dropTable(request1!);
-            } else if (record.type == "e") {
-                for (const rec of record.r) {
-                    await this.saveRawData(rec, request1!);
-                }
-                result.duds = record.r.length;
-            }
-            await this.commitOffset(groupId, offset, topic, partition, request1);
+            await writer(records, request)
+            await this.commitOffset(groupId, offset, topic, partition, request);
             await transaction.commit();
-        } catch (e) {
-            error = new ConnectionError(`Failed to commit transaction: ${e}`, ConnectionErrorType.QUERY_ERROR);
-            logger.error(error.message);
-        }
-        if (error === undefined) {
             return result;
+        } catch (e) {
+            logger.error(`Failed to commit ${batchInfo()}: ${e}`);
         }
         try {
-            await transaction.rollback()
+            await transaction.rollback();
             result.rolledBack = true;
         } catch (e) {
-            const rollbackError = `Failed to rollback transaction: ${e}`;
-            error.message += `\n${rollbackError}`;
-            error.type = ConnectionErrorType.TRANSACRION_ERROR;
-            logger.error(rollbackError);
-            throw error;
+            throw `Failed to rollback ${batchInfo()}: ${e}`
         }
         return result;
     }
-
+    async writeRawMessages(records: string[], groupId: string,
+        offset: string,
+        partition: number,
+        topic: string): Promise<QueryRes> {
+        const transaction = new sql.Transaction(this.pool);
+        await transaction.begin();
+        let request = transaction.request();
+        for (const r of records) {
+            await this.saveRawData(r, request);
+        }
+        await this.commitOffset(groupId, offset, topic, partition, request);
+        await transaction.commit();
+        // Not handling rollback, because raw table is a critical fallback storage
+        // and failure to write to it  means something is very wrong
+        return { duds: records.length, rolledBack: false, newCount: 0 };
+    }
+    async sendTransactions(records: InKafkaMessage[], request: sql.Request): Promise<QueryRes> {
+        await setUpTempTransactionsTable.batch(request);
+        for (const r of records) {
+            await this.addTransactionRecord(r.payload as Transaction, 
+                JSON.stringify(r.metadata), request);
+        }
+        const result = await commitRecordedTransacrionsProc.batch(request);
+        await setUpTempTransactionsTable.dropTable(request);
+        return result;
+    }
+    async sendTransactionResults(records: InKafkaMessage[], request: sql.Request): Promise<QueryRes> {
+        await setUpTempTransactionResultsTable.batch(request);
+        for (const r of records) {
+            await this.addTransactionResult(r.payload as TransactionResult, 
+                JSON.stringify(r.metadata), request);
+        }
+        const result = await commitRecordedTransacrionResultsProc.batch(request);
+        await setUpTempTransactionResultsTable.dropTable(request);
+        return result;
+    }
+    
     async addTransactionRecord(record: Transaction, metadata: string, request: sql.Request): Promise<void> {
         let quer
         try {

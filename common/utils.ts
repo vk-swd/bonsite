@@ -1,8 +1,4 @@
 
-export type KConsumerOffsetInfo = {
-  topic: string, 
-  partitions: number[]
-}
 
 export function last<T>(a: Array<T>): T | undefined {
     return a[a.length - 1];

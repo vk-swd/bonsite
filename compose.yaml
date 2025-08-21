@@ -124,7 +124,7 @@ services:
       - GRAPH_QL_APP_NAME=${GRAPH_QL_APP_NAME}
       - GENERATOR_NAME=${GENERATOR_NAME}
       - MONITORING_PORT=${MONITORING_PORT}
-      - DB_CONSUMER_NAME=${DB_CONSUMER_NAME}
+      - MESSAGE_SINK_NAME=${MESSAGE_SINK_NAME}
     entrypoint: ["sh", "-c"]
     tty: true
     command: ['${SOURCEDIR}/generateConfig.sh > /etc/prometheus/prometheus.yml;
@@ -197,13 +197,13 @@ services:
         sqldb:
           condition: service_healthy
 
-  db_consumer:
+  message_sink:
       extends: 
         file: base_services.yaml
         service: node_kafka_app
-      hostname: "${DB_CONSUMER_NAME}"
+      hostname: "${MESSAGE_SINK_NAME}"
       volumes:
-        - ./${DB_CONSUMER_NAME}:${SOURCEDIR}
+        - ./${MESSAGE_SINK_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
         << : [*mssql_env]
@@ -238,7 +238,7 @@ services:
           condition: service_healthy
         db_initializer:
           condition: service_completed_successfully
-        db_consumer:
+        message_sink:
           condition: service_healthy
 
   tester:

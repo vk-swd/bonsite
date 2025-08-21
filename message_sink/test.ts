@@ -2,7 +2,7 @@ import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
 import { getEnv, last, RangeSet, testRangeSet } from './common/utils.js';
-import { processConsumedBatch } from './main.js';
+import { groupId, processConsumedBatch } from './sink.js';
 import { describe, it } from 'mocha'
 // addint as promised
 import chai, { expect } from 'chai';
@@ -15,7 +15,6 @@ chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
 
-const groupId = getEnv("KAFKA_GROUP_ID");
 const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS_TRANSACTIONS")];
 const [topic_transaction_res, topic_transactions] = topics;
 
@@ -77,7 +76,7 @@ const partitionsPerTOpic = [
 
 async function testOffsets(topic: string, val: string, connection: UserConnection) {
     const offsets = await connection.getOffsets();
-    chai.expect(offsets.getOffset(topic, 0)??'0', `expected ${val} from ${topic}`).to.equal(val);
+    chai.expect(offsets.getOffset(groupId, topic, 0)??'0', `expected ${val} from ${topic}`).to.equal(val);
 }
 
 function dataToTransaction(data: string): Transaction {

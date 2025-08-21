@@ -1,4 +1,4 @@
-import { getEnv, KConsumerOffsetInfo, last } from '../utils.js'
+import { getEnv, last } from '../utils.js'
 
 
 const user_consumer = getEnv('MSSQL_CONSUMER_USERNAME')

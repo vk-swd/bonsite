@@ -1,6 +1,6 @@
 #!/bin/sh
 
-services="$DB_CONSUMER_NAME $GRAPH_QL_APP_NAME $GENERATOR_NAME"
+services="$MESSAGE_SINK_NAME $GRAPH_QL_APP_NAME $GENERATOR_NAME"
 
 job() {
     echo "  - job_name: '$1'"

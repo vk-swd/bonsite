@@ -78,10 +78,10 @@ export async function createSchema() {
                         setUpTempTransactionResultsTable.getInsertionProcedure(),
                         setUpTempTransactionsTable.getInsertionProcedure() ];
         for (const proc of procs) {
-            console.log(`Creating procedure ${proc.getProcedureQuery()}`);
+            // console.log(`Creating procedure ${proc.getProcedureQuery()}`);
             const cre = await runQuery(pool, proc.getProcedureQuery());
             const grant = await runQuery(pool, `GRANT EXECUTE ON ${proc.name} TO ${consumerRole};`);
-            console.log(`Creating procedure ${proc.name} - ${JSON.stringify(cre)} grant - ${JSON.stringify(grant)}`);
+            // console.log(`Creating procedure ${proc.name} - ${JSON.stringify(cre)} grant - ${JSON.stringify(grant)}`);
         }
         // await setUpTempTransactionsTable.batch(pool.request())
         await pool.close();
