@@ -3,7 +3,7 @@ import { connectToDatabase, database, runQuery } from "./common.js";
 import { addKafkaOffsetProcedure, commitRecordedTransacrionResultsProc, commitRecordedTransacrionsProc, getRawDataRecordsProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
 import { ColumnDescription, kafkaOffsetTable, rawDataTable, schema, transactionResultsTable, transactionsByUserTable, transactionsTable, usersTable } from "./tables.js";
 import { getEnv } from '../utils.js'
-
+import sql from 'mssql'
 
 const user_sa = getEnv('MSSQL_SA_USERNAME')
 const demo_password = getEnv('MSSQL_PASSWORD')
@@ -12,11 +12,11 @@ const demo_password = getEnv('MSSQL_PASSWORD')
 function columnsToString(columns: ColumnDescription[]): string {
     return columns.map(c => `${c.name} ${c.type}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
 }
-export async function createSchema() {
+export async function createSchema(pool: sql.ConnectionPool, databaseA: string = database) {
+    await runQuery(pool, `use master;`)
     try {
-        const pool = await connectToDatabase(user_sa);
-        await runQuery(pool, `IF DB_ID('${database}') IS not NULL
-                drop database [${database}];
+        await runQuery(pool, `IF DB_ID('${databaseA}') IS not NULL
+                drop database [${databaseA}];
         `)
 
         for (const user of users) {
@@ -33,8 +33,8 @@ export async function createSchema() {
             }
         }
         
-        await runQuery(pool, `create database [${database}]`)
-        await runQuery(pool, `use ${database};`)
+        await runQuery(pool, `create database [${databaseA}]`)
+        await runQuery(pool, `use ${databaseA};`)
         await runQuery(pool, `create schema [${schema}]`)
         for (const role of roles) {
             await runQuery(pool, `CREATE ROLE ${role}`);
@@ -84,7 +84,6 @@ export async function createSchema() {
             // console.log(`Creating procedure ${proc.name} - ${JSON.stringify(cre)} grant - ${JSON.stringify(grant)}`);
         }
         // await setUpTempTransactionsTable.batch(pool.request())
-        await pool.close();
     } catch (e) {
         console.error(`Error creating schema: ${e}`);
         throw e;

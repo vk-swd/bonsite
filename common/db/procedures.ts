@@ -163,7 +163,45 @@ class CommitTempRecordsProc implements SProc {
         private srcTableName:string, 
         private table: TableDescription<Transaction | TransactionResult>, 
         private extra1: string = "", 
-        private extra2: string = "") {
+        private extra2: string = "", 
+        private extra3: string = "") {
+            if (table.name == transactionsTable.name) {
+                const tc_uFrom = transactionsTable.columns.userIdFrom.name;
+                const tc_uTo = transactionsTable.columns.userIdTo.name;
+                const idLocal = `id`
+                this.extra1 = `with allUsers as (select distinct ${tc_uFrom} as ${idLocal}
+                                    from ${srcTableName}
+                                    union
+                                    select distinct ${tc_uTo} as ${idLocal}
+                                    from ${srcTableName}),
+                    usersFrom as (select distinct ${idLocal} from allUsers),
+                    namedUFrom as (select ${idLocal},
+                                        'User' + CAST(${idLocal} AS NVARCHAR) as Name
+                                    from usersFrom)
+
+                    insert into ${usersTable.name}
+                    select ${idLocal} as ${usersTable.columns.id.name}, Name as ${usersTable.columns.name.name}
+                    from namedUFrom
+                    where not exists (select 1 from ${usersTable.name}
+                                        where ${usersTable.columns.id.name} = namedUFrom.id);
+                ` 
+                const addToTransactionsByUser = (srcTableName: string): string => {
+                    const tIdColumn = transactionsTable.columns.id;
+                    const tc_date = transactionsTable.columns.dateTime.name;
+                    return `insert into ${transactionsByUserTable.name}
+                        select ${tc_uFrom}, ${tc_date}, ${tIdColumn.name} from ${srcTableName}
+                        union
+                        select ${tc_uTo}, ${tc_date}, ${tIdColumn.name} from ${srcTableName}
+                        where ${tc_uFrom} != ${tc_uTo}`;
+                }
+                this.extra2 += addToTransactionsByUser(`#distinctNew`);
+                this.extra3 += `
+                IF @handled =0
+                BEGIN
+                    ${addToTransactionsByUser(this.srcTableName)}
+                END;
+                `;
+            }
     }
     async batch(request: sql.Request): Promise<QueryRes> {
         const r = await request.batch(`EXEC ${this.name}`);
@@ -179,6 +217,8 @@ class CommitTempRecordsProc implements SProc {
         declare @${newCount} int;
         declare @${duds} int;
         set @${duds} = 0;
+        declare @handled int;
+        set @handled = 0;
         BEGIN TRY
             INSERT INTO ${this.table.name}
             SELECT ${(Object.values(this.table.columns)).map(c  => c.name).join(',')} FROM ${this.srcTableName};
@@ -221,49 +261,17 @@ class CommitTempRecordsProc implements SProc {
 
             set @${duds} = @@ROWCOUNT;
             ${this.extra2}
+
+            set @handled = 1;
             END CATCH;
+            ${this.extra3}
             select @${duds} as ${duds}, @${newCount} as ${newCount};`);
     }
-}
-function addNewUserIfNotExists(): string {
-    const tt = setUpTempTransactionsTable.tableName;
-    const tc_uFrom = transactionsTable.columns.userIdFrom.name;
-    const tc_uTo = transactionsTable.columns.userIdTo.name;
-    return `with allUsers as (select distinct ${tc_uFrom} as id
-                        from ${tt}
-                        union
-                        select distinct ${tc_uTo} as id
-                        from ${tt}),
-        usersFrom as (select distinct id from allUsers),
-        namedUFrom as (select id,
-                            'User' + CAST(id AS NVARCHAR) as Name
-                        from usersFrom)
-
-        insert into ${usersTable.name}
-        select id as ${usersTable.columns.id.name}, Name as ${usersTable.columns.name.name}
-        from namedUFrom
-        where not exists (select 1 from ${usersTable.name}
-                            where ${usersTable.columns.id.name} = namedUFrom.id);
-    ` 
-}
-function addToTransactionsByUser(): string {
-    const tIdColumn = transactionsTable.columns.id;
-    const tc_uFrom = transactionsTable.columns.userIdFrom.name;
-    const tc_uTo = transactionsTable.columns.userIdTo.name;
-    const tc_date = transactionsTable.columns.dateTime.name;
-    return `insert into ${transactionsByUserTable.name}
-        select ${tc_uFrom}, ${tc_date}, ${tIdColumn.name} from #distinctNew
-        union
-        select ${tc_uTo}, ${tc_date}, ${tIdColumn.name} from #distinctNew
-        where ${tc_uFrom} != ${tc_uTo};
-    `;
 }
 export const commitRecordedTransacrionsProc = 
         new CommitTempRecordsProc(`${schema}.CommitRecordedTransactions`,
                                 setUpTempTransactionsTable.tableName, 
-                                transactionsTable,
-                                addNewUserIfNotExists(), 
-                                addToTransactionsByUser());
+                                transactionsTable);
 export const commitRecordedTransacrionResultsProc = 
         new CommitTempRecordsProc(`${schema}.CommitRecordedTransactionResults`,
                                 setUpTempTransactionResultsTable.tableName, 

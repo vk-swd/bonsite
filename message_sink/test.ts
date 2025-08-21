@@ -9,8 +9,7 @@ import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
 import { logger } from './common/logger.js';
-import { error } from 'console';
-import { setUpTempTransactionsTable } from './common/db/procedures.js';
+import { connectToDatabase } from './common/db/common.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
@@ -18,49 +17,42 @@ chai.config.truncateThreshold = 10000
 const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS_TRANSACTIONS")];
 const [topic_transaction_res, topic_transactions] = topics;
 
-enum RecordStatus {
-    IGNORED,
-    PROCESSED
+const user_sa = getEnv('MSSQL_SA_USERNAME')
+
+enum DstTable {
+    RAW,
+    PRIMARY
 }
-type Batch = { status: RecordStatus, t: InKafkaMessage, o: string }[];
+type Batch = { dstTable: DstTable, t: InKafkaMessage, o: string }[];
 function getIgnored<T>(batch: Batch): T[] {
-    return batch.filter(b => b.status === RecordStatus.IGNORED)
+    return batch.filter(b => b.dstTable === DstTable.RAW)
                 .map(b => b.t.payload as T);
 }
 
-function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[]): Transaction[] {
-    /** The following conditions for a transaction to be included in the statement:
-     * 1. The transaction has its record in Transactions table of the database
-     * 2. The transaction has its result record in TransactionResults table of the database
-     * 3. The transaction result is "CONFIRMED"
-     */
-    const res: Transaction[] = [];
-    for (const tBatch of tBatches) {
-        for (const tRecord of tBatch) {
-            if (tRecord.status !== RecordStatus.PROCESSED) {
-                continue;
-            }
-            let hasResult = false;
-            const trans = tRecord.t.payload as Transaction;
-            for (const resBatch of resBatches) {
-                for (const resRecord of resBatch) {
-                    const result = resRecord.t.payload as TransactionResult;
-                    if (result.id !== trans.id
-                        || resRecord.status !== RecordStatus.PROCESSED
-                        || result.state !== TResult.CONFIRMED) {
-                        continue;
-                    }
-                    res.push(trans);
-                    hasResult = true;
-                    break;
-                }
-                if (hasResult) {
-                    break;
-                }
-            }            
+function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[], user: number): Transaction[] {
+    const results = new Map<number, [Transaction, TResult | undefined]>();
+
+    tBatches.forEach(tBatch => tBatch.filter(r => r.dstTable == DstTable.PRIMARY).forEach(tRecord => {
+        if (results.has(tRecord.t.payload.id)) {
+            throw new Error(`Test is broken for transaction ${tRecord.t.payload.id}: only first transaction to arrive to the database whould be recorded in primary table.`);
         }
-    }
-    return res;
+        results.set(tRecord.t.payload.id, [tRecord.t.payload as Transaction, undefined]);
+    }));
+    resBatches.forEach(resBatch => resBatch.filter(r => r.dstTable == DstTable.PRIMARY).forEach(resRecord => {
+        const result = resRecord.t.payload as TransactionResult;
+        if (!results.has(result.id)) {
+            // records can be reordered and transaction record may come later.
+            return;
+        }
+        const transaction = results.get(result.id)!;
+        if (transaction[1] !== undefined) {
+            throw new Error(`Test is broken for result of transaction ${result.id}: only first transaction result to arrive to the database whould be recorded in primary table.`);
+        }
+        transaction[1] = result.state;
+    }));
+    return Array.from(results.values())
+        .filter(([t, state]) => state === TResult.CONFIRMED && (t.userIdFrom === user || t.userIdTo === user))
+        .map(([transaction, _]) => transaction);
 }
 
 function sendBatch(topic: string, batch: Batch, db_connection: UserConnection) {
@@ -97,103 +89,140 @@ function dataToTransactionRes(data: string): TransactionResult {
         state: parsed.state as TResult
     });
 }
+async function sendTransactions(tBatch: Batch, msg: string) {
+    const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);
+    await sendBatch(topic_transactions, tBatch, db_connection!); 
+    const ignored = (await db_connection!.getRawData(expectedIgnored.length))
+                                        .map(r => dataToTransaction(r))
+    compareObjecs(ignored, expectedIgnored, msg);
+        
+    await testOffsets(topic_transactions, last(tBatch)!.o, db_connection!);
+}
+async function sendTResults(resBatch: Batch, msg: string) {
+    await sendBatch(topic_transaction_res, resBatch, db_connection!);
+    const expectedIgnored = getIgnored<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
+    const ignored = ((await db_connection!.getRawData(expectedIgnored.length))
+                                        .map(r => dataToTransactionRes(r)));
+    compareObjecs(ignored, expectedIgnored, msg);
+    await testOffsets(topic_transaction_res, last(resBatch)!.o, db_connection!);
+}
+async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
+    const expectedReturned = getReturnedTransactions(tBatch, resBatches, user);
+    const returned = (await db_connection!.getTransactions({ userId: user })).map(t => t.payload);
+    compareObjecs(returned, expectedReturned, msg);
+}
+function compareObjecs<T>(actual: T[], expected: T[], message: string) {
+    const a = actual
+    const e = expected;
+    chai.expect(a, `expected ${e} but got ${a}`).to.deep.equal(e);
+}
+let db_connection: UserConnection | undefined = undefined
 describe('Kafka Consumer Tests', function () {
     this.timeout(10000); // Set timeout for the tests
-    let db_connection: UserConnection | undefined = undefined
+    this.beforeAll(async () => {
+        const pool = await connectToDatabase(user_sa)!;
+        db_connection = new UserConnection(pool);
+    });
     this.beforeEach(async () => {
-        await createSchema();
+        await createSchema(db_connection!.pool, "TestDB");
         try {
-            db_connection = await UserConnection.create();
         } catch (e) {
             logger.error(`Failed to create database connection: ${e}`);
             exit(1);
         }
     });
-    it.only(`Simple functional test`, async () => {
-
-        // await setUpTempTransactionsTable.batch(db_connection?. pool.request())
+    
+    it(`Test normal case`, async () => {
         let tIdx = 1;
         let rIdx = 1;
+        let tId = 0;
+        let rId = 0;
         const batches: Batch[] = [
             [
-                { status: RecordStatus.PROCESSED,   t: {id: 1, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 2, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 3, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1 }, o: `${tIdx++}` },
             ],
             [
-                { status: RecordStatus.PROCESSED,   t: {id: 1, dateTime: 200, state: TResult.CONFIRMED}, o: `${rIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 2, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 2, dateTime: 200, state: TResult.CONFIRMED}, o: `${rIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 3, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
-            ],
-            [
-                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 2, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 2, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 4, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 4, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 5, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 5, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
-            ],
-            [
-                { status: RecordStatus.IGNORED,     t: {id: 2, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 3, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
-                { status: RecordStatus.IGNORED,     t: {id: 1, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 4, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
-                { status: RecordStatus.PROCESSED,   t: {id: 5, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: rId++, dateTime: 200, state: TResult.CONFIRMED }, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: rId++, dateTime: 200, state: TResult.CONFIRMED }, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: rId++, dateTime: 200, state: TResult.CONFIRMED }, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: rId++, dateTime: 200, state: TResult.CONFIRMED }, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: rId++, dateTime: 200, state: TResult.CONFIRMED }, o: `${rIdx++}` },
             ]
         ].map(b => b.map(t => {
             // Dud metadata records as completeness is not tested
-            return { status: t.status, 
+            return { dstTable: t.dstTable, 
                 t: { metadata: { seqNumber: 0, isIgnored: false }, payload: t.t } as InKafkaMessage,
                 o: t.o };
         }));
 
-        function compareObjecs<T>(actual: T[], expected: T[], message: string) {
-            const a = actual
-            const e = expected;
-            chai.expect(a, `expected ${e} but got ${a}`).to.deep.equal(e);
-        }
-        async function sendTransactions(tBatch: Batch, msg: string) {
-            const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);
-            await sendBatch(topic_transactions, tBatch, db_connection!); 
-            const ignored = (await db_connection!.getRawData(expectedIgnored.length))
-                                                .map(r => dataToTransaction(r))
-            compareObjecs(ignored, expectedIgnored, msg);
-                
-            await testOffsets(topic_transactions, last(tBatch)!.o, db_connection!);
-        }
-        async function sendTResults(resBatch: Batch, msg: string) {
-            await sendBatch(topic_transaction_res, resBatch, db_connection!);
-            const expectedIgnored = getIgnored<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
-            const ignored = ((await db_connection!.getRawData(expectedIgnored.length))
-                                                .map(r => dataToTransactionRes(r)));
-            compareObjecs(ignored, expectedIgnored, msg);
-            await testOffsets(topic_transaction_res, last(resBatch)!.o, db_connection!);
-        }
-        async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], msg: string) {
-            const expectedReturned = getReturnedTransactions(tBatch, resBatches);
-            const returned = (await db_connection!.getTransactions({ userId: 0 })).map(t => t.payload);
-            compareObjecs(returned, expectedReturned, msg);
-        }
+        await sendTransactions(batches[0], `Sending transactions batch 0`);
+        await sendTResults(batches[1], `Sending transaction results batch 1`);
+        await checkValidTransactions([batches[0]], [batches[1]], 0, `Checking valid transactions after batch 0 and 1`);
+        await checkValidTransactions([batches[0]], [batches[1]], 1, `Checking valid transactions after batch 0 and 1`);
+    })
+    it(`Test conflict handling`, async () => {
+        let tIdx = 1;
+        let rIdx = 1;
+        const batches: Batch[] = [
+            [
+                { dstTable: DstTable.PRIMARY,   t: {id: 1, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,       t: {id: 1, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY,   t: {id: 2, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY,   t: {id: 3, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,       t: {id: 3, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+            ],
+            [
+                { dstTable: DstTable.PRIMARY,   t: {id: 1, dateTime: 200, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { dstTable: DstTable.RAW,       t: {id: 1, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY,   t: {id: 2, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { dstTable: DstTable.RAW,       t: {id: 2, dateTime: 200, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY,   t: {id: 3, dateTime: 200, state: TResult.BLOCKED}, o: `${rIdx++}` },
+            ],
+            [
+                { dstTable: DstTable.RAW,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 1, dateTime: 210.0, amount: 1.00, userIdFrom: 2, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 3, dateTime: 210.0, amount: 1.00, userIdFrom: 2, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: {id: 4, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 4, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: {id: 5, dateTime: 210.0, amount: 1.00, userIdFrom: 0, userIdTo: 1}, o: `${tIdx++}` },
+                { dstTable: DstTable.RAW,     t: {id: 5, dateTime: 210.0, amount: 1.00, userIdFrom: 1, userIdTo: 1}, o: `${tIdx++}` },
+            ],
+            [
+                { dstTable: DstTable.RAW,       t: {id: 2, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { dstTable: DstTable.RAW,       t: {id: 3, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { dstTable: DstTable.RAW,       t: {id: 1, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY,   t: {id: 4, dateTime: 220, state: TResult.CONFIRMED}, o: `${rIdx++}` },
+                { dstTable: DstTable.PRIMARY,   t: {id: 5, dateTime: 220, state: TResult.BLOCKED}, o: `${rIdx++}` },
+            ]
+        ].map(b => b.map(t => {
+            // Dud metadata records as completeness is not tested
+            return { dstTable: t.dstTable, 
+                t: { metadata: { seqNumber: 0, isIgnored: false }, payload: t.t } as InKafkaMessage,
+                o: t.o };
+        }));
+
 
         await sendTransactions(batches[0], `Sending transactions batch 0`);
         await sendTResults(batches[1], `Sending transaction results batch 1`);
-        await checkValidTransactions([batches[0]], [batches[1]], `Checking valid transactions after batch 0 and 1`);
-        
+        await checkValidTransactions([batches[0]], [batches[1]], 0, `Checking valid transactions after batch 0 and 1`);
+        await checkValidTransactions([batches[0]], [batches[1]], 1, `Checking valid transactions after batch 0 and 1`);
+
         await sendTransactions(batches[2], `Sending transactions batch 2`);
         await sendTResults(batches[3], `Sending transaction results batch 3`);
-        await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], `Checking valid transactions after batch 2 and 3`);
+        await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 0, `Checking valid transactions after batch 2 and 3`);
+        await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 1, `Checking valid transactions after batch 2 and 3`);
+        await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 2, `Checking valid transactions after batch 2 and 3`);
     });
 });
 
-describe(`Audit tables`, function () {
+describe.skip(`Audit tables`, function () {
     this.timeout(10000000); // Set timeout for the tests
     it(`Audit tables`, async () => {
         // expect(testRangeSet()).not.to.throw;

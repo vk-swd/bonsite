@@ -63,7 +63,7 @@ export class UserConnection {
         const pool = await connectToDatabase(consumerUser.login, database);
         return new UserConnection(pool);
     }
-    private constructor(public pool: sql.ConnectionPool) {
+    constructor(public pool: sql.ConnectionPool) {
     }
     isConnectionAlive(): boolean {
         return this.pool.connected;

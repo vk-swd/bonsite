@@ -111,7 +111,7 @@ describe('Kafka Consumer Tests', function () {
             
         }
 
-        while (userIds.length>0) {
+        while (userIds.length > 0) {
             const sFiles = await Promise.all(userIds.map(async userId => {
                 const statFile = await getStatement({ userId: userId[0] })
                 const readStats = JSON.parse(await fs.readFileSync(SHARED_DIR + "/" + statFile.data).toString());
