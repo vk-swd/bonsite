@@ -248,6 +248,40 @@ export class UserConnection {
             throw e;
         }
     }
+    async streamSelectTransactions(p: StatementParameters, 
+            processor: (transaction: string) => Promise<void>,
+            completioner: () => Promise<void>): Promise<void> {
+        const request = this.pool.request();
+        request.stream = true; // Enable streaming
+        request.input(procGetTransactions.userId.name, sql.BigInt, p.userId);
+        if (p.from !== undefined && p.to !== undefined) {
+            setQueryInput(request, procGetTransactions.dateFrom, new Date(p.from).toISOString());
+            setQueryInput(request, procGetTransactions.dateTo, new Date(p.to).toISOString());
+        } else {
+            setQueryInput(request, procGetTransactions.dateFrom, new Date(0).toISOString());
+            setQueryInput(request, procGetTransactions.dateTo, new Date("9999-12-31T23:59:59.997Z").toISOString());
+        }
+        request.on('row', async (row: any) => {
+            try {
+                await processor(JSON.stringify(row));
+            } catch (e) {
+                logger.error(`Error processing row ${JSON.stringify(row)} for user ${p.userId}: ${e}`);
+                request.cancel();
+            }
+        });
+        let orderChecker = 0;  
+        request.on('done', async (result: any) => {
+            logger.debug(`${orderChecker++}: Stream done for ${JSON.stringify(p)}: ${JSON.stringify(result)}`);
+            await completioner()
+        });
+        try {
+            await request.execute(procGetTransactions.name);
+            logger.debug(`${orderChecker++}: Stream execute completed for ${JSON.stringify(p)}`);
+        } catch (e) {
+            logger.error(`Error streaming transactions for ${JSON.stringify(p)}: ${e}`);
+            throw e;
+        }
+    }
     async streamTransactions(processor: (metadata: Metadata, userId?: number) => void): Promise<void> {
         const tables:[TableDescription<any>, (row: any) => void][] = [
             [transactionsTable,(row: any) => processor(MetadataValidator.parse(JSON.parse(row.metadata)), row.userIdFrom)], 
@@ -286,5 +320,7 @@ function transactions(sqlRes: sql.IResult<any>): InKafkaMessage[] {
     return sqlRes.recordset.map((r : any) => { return { 
             payload: transaction(r), metadata: MetadataValidator.parse(JSON.parse(r.metadata)) 
         } as InKafkaMessage;
-    }) 
+    })
 }
+
+

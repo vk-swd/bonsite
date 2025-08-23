@@ -6,7 +6,7 @@ import { Sink } from "./sink.js";
 async function crash(error: any): Promise<Error>{
     mtrx.metrics?.crashCount?.inc(1)
     await mtrx.dumpRegistry();
-    logger.log("Pre-crash wrap up done, exiting...");
+    logger.log(`Pre-crash wrap up done, exiting...${error}`);
     throw error
 }
 

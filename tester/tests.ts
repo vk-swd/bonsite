@@ -68,7 +68,7 @@ describe('Kafka Consumer Tests', function () {
             dateTo: 1000,
             transactionCount: 5,
             maxDelayMs: 200,
-            minUserId: 15
+            minUserId: 18
         };
         const results = await startGen(params) as RequestResult;
         expect(results.status, `bad status in ${JSON.stringify(results)}`).to.equal(RequestStatus.OK);
@@ -103,7 +103,7 @@ describe('Kafka Consumer Tests', function () {
         its processing so that tester and generator don't block each other.
         */
         
-        const userIds = Array.from(stats.data.entries());
+        let userIds = Array.from(stats.data.entries());
         
         for (const data of stats.data) {
             const userId = data[0]
@@ -112,14 +112,16 @@ describe('Kafka Consumer Tests', function () {
         }
 
         while (userIds.length > 0) {
-            const sFiles = await Promise.all(userIds.map(async userId => {
+            userIds = (await Promise.all(userIds.map(async userId => {
                 const statFile = await getStatement({ userId: userId[0] })
-                const readStats = JSON.parse(await fs.readFileSync(SHARED_DIR + "/" + statFile.data).toString());
+                const readStats: Object[] = JSON.parse(await fs.readFileSync(SHARED_DIR + "/" + statFile.data).toString());
                 console.log(`readStats: ${readStats} for user ${userId[0]} with counters: ${
                     JSON.stringify(userId[1])}`);
-                return userId[1].transactionCount != readStats.length;
-            }));
-            if (sFiles.length === 0) {
+                console.log(`readStats.length: ${readStats.length}, userId[1].transactionCount: ${userId[1].transactionCount}`);
+                return { stats : readStats, userId };
+            }))).filter((u) => u.stats.length < u.userId[1].transactionCount).map((u) => u.userId);
+            console.log(`Remaining users: ${userIds.map(u => u[0]).join(", ")}`);
+            if (userIds.length === 0) {
                 console.log("No more users to process.");
                 break;
             }
