@@ -102,12 +102,13 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         logger.error(`Failed to parse ${batchInfo()}: ${e}`);
     }
     const sendAsRaw = async () => {
+        // Not handling sendAsRaw exceptions, because raw table is a critical 
+        // fallback storage and failure to write to it means something is very wrong
         try {
             await db_connection.writeRawMessages(messages,
-                groupId,
-                lastOffset,
+            {groupId, offset:lastOffset,
                 partition,
-                topic);
+                topic});
             mtrx.metrics?.dbUnknownMessageWritten?.inc(messages.length);
         } catch (e) {
             mtrx.metrics?.dbQueryFailure?.inc(messages.length);
@@ -124,12 +125,9 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         const res = await db_connection.writeDataTransactionally(
             msgs!,
             writer,
-            groupId,
-            lastOffset,
-            partition,
-            topic)
+            {groupId, offset: lastOffset, partition, topic})
         if (res.rolledBack) {
-            // loss of connection will reveal itself during raw data write
+            // Loss of connection will reveal itself during raw data write
             sendRaw = true;
             mtrx.metrics?.dbRollbackCount?.inc(1);
         } else {

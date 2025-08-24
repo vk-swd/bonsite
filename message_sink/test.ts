@@ -10,6 +10,7 @@ import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
 import { logger } from './common/logger.js';
 import { connectToDatabase } from './common/db/common.js';
+import { transactionResultsTable, transactionsTable } from './common/db/tables.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
@@ -61,33 +62,32 @@ function sendBatch(topic: string, batch: Batch, db_connection: UserConnection) {
     return processConsumedBatch(topic, 0, messages, offset, db_connection);
 }
 
-const partitionsPerTOpic = [
-    { topic: topic_transaction_res, partitions: [0] },
-    { topic: topic_transactions, partitions: [0] }
-];
-
 async function testOffsets(topic: string, val: string, connection: UserConnection) {
     const offsets = await connection.getOffsets();
     chai.expect(offsets.getOffset(groupId, topic, 0)??'0', `expected ${val} from ${topic}`).to.equal(val);
 }
 
 function dataToTransaction(data: string): Transaction {
-    const parsed = JSON.parse(data);
-    return TransactionValidator.parse({
-        id: parsed.id,
-        dateTime: new Date(parsed.dateTime).getMilliseconds(),
-        amount: parsed.amount,
-        userIdFrom: parsed.userIdFrom,
-        userIdTo: parsed.userIdTo
-    });
+    const parsed = JSON.parse(data, (key, value) => {
+        if (key == "") {
+            return value;
+        }    
+        return Object(transactionsTable.columns)[key]?.parse(value)
+    })
+    return TransactionValidator.parse(parsed);
 }
+
 function dataToTransactionRes(data: string): TransactionResult {
-    const parsed = JSON.parse(data);
-    return TransactionResultValidator.parse({
-        id: parsed.transactionID,
-        dateTime: new Date(parsed.dateTime).getMilliseconds(),
-        state: parsed.state as TResult
-    });
+    try {
+        return TransactionResultValidator.parse(JSON.parse(data, (key, value) => {
+            if (key == "") {
+                return value;
+            }    
+            return Object(transactionResultsTable.columns)[key]?.parse(value)
+        }))
+    } catch(e) {
+        throw `Failed to parse ${data}: ${e}`;
+    }
 }
 async function sendTransactions(tBatch: Batch, msg: string) {
     const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);

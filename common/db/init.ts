@@ -1,16 +1,14 @@
 import { consumerRole, consumerUser, roles, statementCreatorRole, statementUser, users } from "./auth.js";
-import { connectToDatabase, database, runQuery } from "./common.js";
-import { addKafkaOffsetProcedure, commitRecordedTransacrionResultsProc, commitRecordedTransacrionsProc, getRawDataRecordsProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
-import { ColumnDescription, kafkaOffsetTable, rawDataTable, schema, transactionResultsTable, transactionsByUserTable, transactionsTable, usersTable } from "./tables.js";
+import { database, runQuery } from "./common.js";
+import { addKafkaOffsetProcedure, getRawDataRecordsProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
+import { Column, kafkaOffsetTable, rawDataTable, schema, transactionResultsTable, transactionsByUserTable, transactionsTable, usersTable } from "./tables.js";
 import { getEnv } from '../utils.js'
 import sql from 'mssql'
 
-const user_sa = getEnv('MSSQL_SA_USERNAME')
 const demo_password = getEnv('MSSQL_PASSWORD')
 
-
-function columnsToString(columns: ColumnDescription[]): string {
-    return columns.map(c => `${c.name} ${c.type}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
+function columnsToString<T, K extends keyof T>(columns: Column<T,K>[]): string {
+    return columns.map(c => `${c.name} ${c.type.name}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
 }
 export async function createSchema(pool: sql.ConnectionPool, databaseA: string = database) {
     await runQuery(pool, `use master;`)
@@ -72,10 +70,11 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
         await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser.name};`);
         await runQuery(pool,`ALTER ROLE ${consumerRole} ADD MEMBER ${consumerUser.name};`);
         
-        const procs = [ addKafkaOffsetProcedure, commitRecordedTransacrionsProc, 
-                        commitRecordedTransacrionResultsProc, procGetTransactions, 
+        const procs = [ addKafkaOffsetProcedure, procGetTransactions, 
                         getRawDataRecordsProc,
                         setUpTempTransactionResultsTable.getInsertionProcedure(),
+                        setUpTempTransactionResultsTable.getCommitProcedure(),
+                        setUpTempTransactionsTable.getCommitProcedure(),
                         setUpTempTransactionsTable.getInsertionProcedure() ];
         for (const proc of procs) {
             // console.log(`Creating procedure ${proc.getProcedureQuery()}`);

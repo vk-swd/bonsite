@@ -208,8 +208,8 @@ services:
       environment:
         << : [*mssql_env]
         MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
-      tty: false
-      stdin_open: false
+      # tty: false
+      # stdin_open: false
       depends_on:
         sqldb:
           condition: service_healthy
@@ -236,10 +236,10 @@ services:
       depends_on:
         sqldb:
           condition: service_healthy
-        db_initializer:
-          condition: service_completed_successfully
-        message_sink:
-          condition: service_healthy
+        # db_initializer:
+        #   condition: service_completed_successfully
+        # message_sink:
+        #   condition: service_healthy
 
   tester:
       extends: 
