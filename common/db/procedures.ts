@@ -1,71 +1,88 @@
-import { StatementParameters, TResult } from "../event_types.js";
-import { Column, Columns, kafkaOffsetTable, makeCol, rawDataTable, schema, TableDescription, transactionResultsTable, TransactionResultStored, transactionsByUserTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
-import * as sql from 'mssql'
+import { MAX_DATE, MIN_DATE, StatementParameters, TResult } from "../event_types.js";
+import { Column, Columns, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
+import sql from 'mssql'
 
 
 
 interface SProc<T> {
-    name: string;
+    procName: string;
     columns?: Column<T, keyof T>[];
     getProcedureQuery(): string;
 }
 
-const resultStruct = ["duds", "newCount"];
-const [duds, newCount] = resultStruct;
-
-
 const tResT = transactionResultsTable;
-const tPerUserT = transactionsByUserTable;
 
-
-const StatmentParamPseudoColumns: Columns<StatementParameters> = {
-    userId: makeCol("userId", transactionsByUserTable.columns.userId.type),
-    from: makeCol("from", transactionsByUserTable.columns.date.type, undefined, (c) => new Date(c.from ?? "1970-01-01T00:00:00.000Z").toISOString()),
-    to: makeCol("to", transactionsByUserTable.columns.date.type, undefined, (c) => new Date(c.to ?? "9999-12-31T23:59:59.997Z").toISOString())
+export type CommitResults = { duds: number; newCount: number };
+export const CommitResultsC: Columns<CommitResults> = {
+    duds: makeCol("duds", sqlTypes.int),
+    newCount: makeCol("newCount", sqlTypes.int)
 };
-class GetTransactionsProc implements SProc<StatementParameters> {
-    public name = `${schema}.getTransactions`;
-    columns: Column<StatementParameters, keyof StatementParameters>[];
-    query: string
+
+export const StatmentParamTable: TableDescription<{ idx: number } & StatementParameters> = {
+    name: `#tempParamTable`,
+    columns: {
+        idx: makeCol("idx", sqlTypes.int, "identity(1,1) primary key"),
+        userId: makeCol("userId", usersTable.columns.id.type),
+        fromm: makeCol("fromm", transactionsTable.columns.dateTime.type, undefined, (c) => new Date(c.fromm ?? MIN_DATE).toISOString()),
+        too: makeCol("too", transactionsTable.columns.dateTime.type, undefined, (c) => new Date(c.too ?? MAX_DATE).toISOString())
+    },
+    permissions: []
+};
+class GetTransactionsProc implements SProc<{ idx: number } & StatementParameters> {
+    public procName = `${schema}.getTransactions`;
+    columns = Object.values(StatmentParamTable.columns);
+    query: string  = ""
     constructor() {
-        const cInfo = StatmentParamPseudoColumns;
-        this.columns = Object.values(cInfo);
-        this.query = `
-            CREATE PROCEDURE ${this.name}
-            ${this.columns.map(t => `${t.parameterName} ${t.type.name}`).join(',\n')}
+        const selectUsers = (srcColumn: string) => {
+            const from = StatmentParamTable.columns.fromm!.name;
+            const to = StatmentParamTable.columns.too!.name;
+            const id = StatmentParamTable.columns.userId.name;
+            return `select p.${id} as pid, t.*
+            from ${StatmentParamTable.name} as p
+            left join
+            ${transactionsTable.name} as t
+            on t.${srcColumn} = p.${id}
+            left join
+            ${transactionResultsTable.name} as r
+            on r.${transactionResultsTable.columns.id.name} = t.${transactionsTable.columns.id.name}
+            where t.${transactionsTable.columns.dateTime.name} between p.${from} and p.${to}
+            and r.${transactionResultsTable.columns.state.name} = ${TResult.CONFIRMED}`;
+        }
+        this.query =
+        `
+        CREATE PROCEDURE ${this.procName}
             AS
             SET NOCOUNT ON;
-            with selectedIds as (SELECT tByUser.${tPerUserT.columns.transId.name}
-                                    FROM ${tPerUserT.name} as tByUser
-                                left join ${tResT.name} as tr
-                                    on tByUser.${tPerUserT.columns.transId.name} = tr.${tResT.columns.id.name}
-                                WHERE ${tPerUserT.columns.userId.name} = ${cInfo.userId.parameterName} 
-                                    AND ${tPerUserT.columns.date.name} BETWEEN ${cInfo.from!.parameterName} AND ${cInfo.to!.parameterName}
-                                    and tr.${tResT.columns.state.name} = ${TResult.CONFIRMED})
-                SELECT * FROM ${transactionsTable.name} 
-                WHERE ${transactionsTable.columns.id.name} IN (
-                SELECT ${tPerUserT.columns.transId.name} FROM selectedIds);
+        with unioned as (
+        ${selectUsers(transactionsTable.columns.userIdFrom.name)}
+        union all
+        ${selectUsers(transactionsTable.columns.userIdTo.name)}
+        and t.${transactionsTable.columns.userIdTo.name} != t.${transactionsTable.columns.userIdFrom.name}
+        )
+        select * from unioned order by pid, ${transactionsTable.columns.dateTime.name}
         `
+        ;
     }
+
     getProcedureQuery(): string {
         return this.query;
     }
 }
 export const procGetTransactions = new GetTransactionsProc();
 
-class GetRawDataRecordsProc {
+class GetRawDataRecordsProc implements SProc<{}> {
     public lastCountArg = "lastCount";
-    public name = `${schema}.getRawDataRecords`;
+    public procName = `${schema}.getRawDataRecords`;
     getProcedureQuery(): string {
         return `
-            CREATE PROCEDURE ${this.name}
+            CREATE PROCEDURE ${this.procName}
             @${this.lastCountArg} BIGINT
             AS
             SET NOCOUNT ON;
-            with topItems as (SELECT top (@${this.lastCountArg}) * 
-                            FROM ${rawDataTable.name} 
+            with topItems as (SELECT top (@${this.lastCountArg}) *
+                            FROM ${rawDataTable.name}
                             order by ${rawDataTable.columns.idx.name} DESC)
-            SELECT ${rawDataTable.columns.data.name} as data from topItems 
+            SELECT ${rawDataTable.columns.data.name} as data from topItems
                     order by ${rawDataTable.columns.idx.name} ASC;
         `;
     }
@@ -100,13 +117,13 @@ function insertQuery<T, K extends keyof T>(name: string, columns: Column<T,K>[])
     return `INSERT INTO ${name} (${columnsToValues(columns)})
             VALUES (${columns.map(c => `@${c.name}`).join(',')});`
 }
-class AddKafkaOffsetProcedure {
-    public name = `${schema}.addKafkaOffset`;
+class AddKafkaOffsetProcedure implements SProc<{}> {
+    public procName = `${schema}.addKafkaOffset`;
     getProcedureQuery(): string {
-        return procedureQuery(this.name, Object.values(kafkaOffsetTable.columns), `
+        return procedureQuery(this.procName, Object.values(kafkaOffsetTable.columns), `
                 if ${ifExistsQuery(kafkaOffsetTable.name, Object.values(kafkaOffsetTable.columns).slice(0,-1))}
                     ${updateQuery(kafkaOffsetTable.name, [kafkaOffsetTable.columns.offset], Object.values(kafkaOffsetTable.columns).slice(0,-1))}
-                else 
+                else
                     ${insertQuery(kafkaOffsetTable.name, Object.values(kafkaOffsetTable.columns))}
             `)
     }
@@ -115,18 +132,15 @@ export const addKafkaOffsetProcedure = new AddKafkaOffsetProcedure();
 
 class CommitTempRecordsProc<T extends TransactionStored | TransactionResultStored> implements SProc<T> {
     procQuery: string;
-    async batch(request: sql.Request): Promise<QueryRes> {
-        const r = await request.batch(`EXEC ${this.name}`);
-        const result = new QueryRes();   
-        result.duds = r.recordset[0][duds];
-        result.newCount = r.recordset[0][newCount];
-        return result;
+    async batch(request: sql.Request): Promise<CommitResults> {
+        const r = await request.batch(`EXEC ${this.procName};`);
+        return parseQueryRes<CommitResults>(r.recordset[0], CommitResultsC);
     }
     getProcedureQuery(): string {
         return this.procQuery;
     }
-    constructor(public name: string, tmpTable: TableDescription<T>, dstTable: TableDescription<T>) {
-        let extra1: string = "", extra2: string = "", extra3: string = "";
+    constructor(public procName: string, tmpTable: TableDescription<T>, dstTable: TableDescription<T>, dumpTable: TableDescription<T>) {
+        let extra1: string = "";
 
         const distinctNew = "distinctNew";
         const tmpDistinctNew = `#${distinctNew}`
@@ -135,7 +149,8 @@ class CommitTempRecordsProc<T extends TransactionStored | TransactionResultStore
             const tc_uFrom = transactionsTable.columns.userIdFrom.name;
             const tc_uTo = transactionsTable.columns.userIdTo.name;
             const idLocal = `id`
-            extra1 = `with allUsers as (select distinct ${tc_uFrom} as ${idLocal}
+            extra1 = `
+            with allUsers as (select distinct ${tc_uFrom} as ${idLocal}
                                 from ${tmpTable.name}
                                 union
                                 select distinct ${tc_uTo} as ${idLocal}
@@ -150,23 +165,8 @@ class CommitTempRecordsProc<T extends TransactionStored | TransactionResultStore
                 from namedUFrom
                 where not exists (select 1 from ${usersTable.name}
                                     where ${usersTable.columns.id.name} = namedUFrom.id);
-            ` 
-            const addToTransactionsByUser = (srcTableName: string): string => {
-                const tIdColumn = transactionsTable.columns.id;
-                const tc_date = transactionsTable.columns.dateTime.name;
-                return `insert into ${transactionsByUserTable.name}
-                    select ${tc_uFrom}, ${tc_date}, ${tIdColumn.name} from ${srcTableName}
-                    union
-                    select ${tc_uTo}, ${tc_date}, ${tIdColumn.name} from ${srcTableName}
-                    where ${tc_uFrom} != ${tc_uTo}`;
-            }
-            extra2 += addToTransactionsByUser(tmpDistinctNew);
-            extra3 += `
-            IF @handled =0
-            BEGIN
-                ${addToTransactionsByUser(tmpTable.name)}
-            END;
-            `;
+            `
+            ;
         }
         const tIdColumn = tmpTable.columns.id;
         const tIdxColumn = tmpTable.columns.idx;
@@ -174,98 +174,131 @@ class CommitTempRecordsProc<T extends TransactionStored | TransactionResultStore
         const rowNumColumn = `rowNum`;
         const existingId = "EXISTS_ID";
         const markedTab = `marked`;
-        const tmpMarkedTab = `#${markedTab}`;
         const dataColumns = Object.values(dstTable.columns).slice(1).map(c => c.name).join(', ');
-       
-        this.procQuery = procedureQuery(this.name, [], `
+
+
+        const labels: string[] = ["@l1"];
+        const measureTime = (label: string): string => {
+            if (labels.length == 1) {
+                labels.push("@l2");
+                return `declare ${labels[0]} datetime2(3);
+                    declare ${labels[1]} datetime2(3);
+                    SET ${labels[0]} = SYSDATETIME();`
+            } else {
+                const res = `SET ${labels[1]} = SYSDATETIME();
+                insert into ${statTable.name} (${statTable.columns.name.name},
+                                            ${statTable.columns.value.name})
+                            values ('${label}',
+                            DATEDIFF(millisecond, ${labels[0]}, ${labels[1]}));`
+                const tmp = labels[0];
+                labels.shift();
+                labels.push(tmp);
+                return res;
+            }
+        }
+        this.procQuery = procedureQuery(this.procName, [], `
+
+        ${Object.values(CommitResultsC).map(c => `declare ${c.parameterName} ${c.type.name};`).join('\n')}
+        ${Object.values(CommitResultsC).map(c => `set ${c.parameterName} = 0;`).join('\n')}
+
+        ${measureTime("")}
         ${extra1}
-        declare @${newCount} int;
-        declare @${duds} int;
-        set @${duds} = 0;
+
         declare @handled int;
         set @handled = 0;
+
+        ${measureTime("checked users")}
         BEGIN TRY
             INSERT INTO ${dstTable.name}
             SELECT ${dataColumns} FROM ${tmpTable.name};
-            set @${newCount} = @@ROWCOUNT;
+            set ${CommitResultsC.newCount.parameterName} = @@ROWCOUNT;
+            set @handled = 1;
         END TRY
         BEGIN CATCH
-            CREATE NONCLUSTERED INDEX temp_idx ON ${tmpTable.name}(${tIdColumn.name}, ${tIdxColumn.name});
-            with  ${tmpTabNumbered} as (select *, 
+            ${measureTime("shat pants")}
+            CREATE NONCLUSTERED INDEX someindex ON ${tmpTable.name} (${tIdColumn.name})
+            ${measureTime("made culstered index")}
+
+            with  ${tmpTabNumbered} as (select *,
                                 ROW_NUMBER() over (partition by ${tIdColumn.name} order by ${tIdxColumn.name}) as ${rowNumColumn}
                                 from ${tmpTable.name}),
-            ${markedTab} as (select t2.${tIdColumn.name} as ${existingId}, t3.*
-                        from  ${tmpTabNumbered} as t3
-                        left join ${dstTable.name} as t2
-                        on t2.${tIdColumn.name} = t3.${tIdColumn.name})
-                select * into ${tmpMarkedTab} from ${markedTab};
-        
-            CREATE NONCLUSTERED INDEX temp_idx2 ON ${tmpMarkedTab}(${existingId}, ${rowNumColumn}, ${tIdxColumn.name});
-            CREATE NONCLUSTERED INDEX temp_idx3 ON ${tmpMarkedTab}(${rowNumColumn});
+            ${markedTab} as (select tDst.${tIdColumn.name} as ${existingId}, tNumbered.*
+                        from  ${tmpTabNumbered} as tNumbered
+                        left join ${dstTable.name} as tDst
+                        on tDst.${tIdColumn.name} = tNumbered.${tIdColumn.name}),
+            ${distinctNew} as (select * from ${markedTab}
+                               where ${existingId} is not null or ${rowNumColumn} > 1)
+            insert into ${dumpTable.name}
+                             select ${dataColumns}
+                              from ${distinctNew}
 
-            with ${distinctNew} as (select * from ${tmpMarkedTab}
-                                where ${existingId} is null and ${rowNumColumn} = 1)
-                select * into ${tmpDistinctNew} from ${distinctNew};
-                
-            insert into ${dstTable.name} 
-                select ${dataColumns}
-                from ${tmpDistinctNew};
+            set ${CommitResultsC.duds.parameterName} = @@ROWCOUNT;
 
-            set @${newCount} = @@ROWCOUNT;
+
+            ${measureTime("saved raw data of duds")}
+
+
+            with  ${tmpTabNumbered} as (select *,
+                                ROW_NUMBER() over (partition by ${tIdColumn.name} order by ${tIdxColumn.name}) as ${rowNumColumn}
+                                from ${tmpTable.name}),
+            ${markedTab} as (select tDst.${tIdColumn.name} as ${existingId}, tNumbered.*
+                        from  ${tmpTabNumbered} as tNumbered
+                        left join ${dstTable.name} as tDst
+                        on tDst.${tIdColumn.name} = tNumbered.${tIdColumn.name}),
+            ${distinctNew} as (select * from ${markedTab}
+                               where ${existingId} is null and ${rowNumColumn} = 1)
+             insert into ${dstTable.name}
+                             select ${dataColumns}
+                              from ${distinctNew}
+            set ${CommitResultsC.newCount.parameterName} = @@ROWCOUNT;
+
+            ${measureTime("selected unique ores and inserted in dst")}
 
             --save conflicted and duplicate records to raw data table for further analysis
-            with nonDistinct as (select * from ${tmpMarkedTab}
-                                where ${existingId} is not null or ${rowNumColumn} > 1
-                                ),
-            jsonned as (SELECT data
-                        FROM nonDistinct AS t
-                        CROSS APPLY (
-                            SELECT ${(Object.values(dstTable.columns)).map(c  => `t.${c.name} as ${c.name}`).join(',')}
-                            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
-                        ) AS derived(data))
-                insert into ${rawDataTable.name} select * from jsonned;
-
-            set @${duds} = @@ROWCOUNT;
-            ${extra2}
 
             set @handled = 1;
             END CATCH;
-            ${extra3}
-            select @${duds} as ${duds}, @${newCount} as ${newCount};`);
+
+            ${measureTime("end")}
+            select ${Object.values(CommitResultsC).map(c => `${c.parameterName} as ${c.name}`).join(', ')};
+            `
+        );
     }
 }
 
-class SetUpTempTableProc<T extends TransactionResultStored | TransactionStored> implements SProc<T> {
-    public name: string
+export class SetUpTempTableProc<T extends TransactionResultStored | TransactionStored> implements SProc<T> {
+    public procName: string
     public tableName: string
     public dstTable: TableDescription<T>
     private insertionProc: SProc<T>
     private pr: CommitTempRecordsProc<T>
-    
- 
-    constructor(private srcTable: TableDescription<T>) {
+
+    constructor(public srcTable: TableDescription<T>, private dumpTable: TableDescription<T>) {
         const tName = srcTable.name.replace(/\./g, '');
-        this.tableName = `#${tName}`;
-        this.name = `${schema}.create${tName}`;
+        // this.tableName = `#${tName}`;
+        this.tableName = `${srcTable.name}temp`;
+        this.procName = `${schema}.create${tName}`;
         this.dstTable = {...srcTable, name: this.tableName};
 
         const insertionProcName = `${schema}.insertTo${tName}`;
-        const unsertProcQuery = procedureQuery(insertionProcName, 
-            Object.values(this.dstTable.columns).slice(1), 
+        const unsertProcQuery = procedureQuery(insertionProcName,
+            Object.values(this.dstTable.columns).slice(1),
         insertQuery(this.dstTable.name, Object.values(this.dstTable.columns).slice(1)))
         this.insertionProc = {
-            name: insertionProcName,
+            procName: insertionProcName,
             columns: Object.values(this.dstTable.columns).slice(1),
             getProcedureQuery: () => unsertProcQuery
         }
-        this.pr = new CommitTempRecordsProc(`${schema}.CommitRecorded${tName}`, this.dstTable as TableDescription<any>, this.srcTable as TableDescription<any>);
+        this.pr = new CommitTempRecordsProc<T>(`${schema}.CommitRecorded${tName}`, this.dstTable, this.srcTable, dumpTable);
     }
     getProcedureQuery(): string {
         return ""
     }
     async batch(request: sql.Request): Promise<void> {
         // Rely on the fact that original table has first column as identity primary key
-        await request.batch(`create table ${this.dstTable.name} ( 
+
+
+        await request.batch(`create table ${this.dstTable.name} (
                     ${(Object.values(this.dstTable.columns))
                         .map((c, idx) => `${c.name} ${c.type.name} ${idx == 0 ? c.extra : ""}`).join(', ')})`)
     }
@@ -280,8 +313,8 @@ class SetUpTempTableProc<T extends TransactionResultStored | TransactionStored> 
         // return new CommitTempRecordsProc(`${schema}.CommitRecorded${this.srcTable.name.replace(/\./g, '')}`, this.dstTable, this.srcTable);
     }
 }
-export const setUpTempTransactionsTable = new SetUpTempTableProc(transactionsTable);
-export const setUpTempTransactionResultsTable = new SetUpTempTableProc(transactionResultsTable);
+export const setUpTempTransactionsTable = new SetUpTempTableProc(transactionsTable, transactionsDumpTable);
+export const setUpTempTransactionResultsTable = new SetUpTempTableProc(transactionResultsTable, transactionResultsDumpTable);
 
 export class QueryRes {
     duds: number = 0;

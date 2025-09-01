@@ -1,7 +1,7 @@
-import { consumerRole, consumerUser, roles, statementCreatorRole, statementUser, users } from "./auth.js";
+import { roles } from "./auth.js";
 import { database, runQuery } from "./common.js";
 import { addKafkaOffsetProcedure, getRawDataRecordsProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
-import { Column, kafkaOffsetTable, rawDataTable, schema, transactionResultsTable, transactionsByUserTable, transactionsTable, usersTable } from "./tables.js";
+import { Column, kafkaOffsetTable, rawDataTable, schema, statTable, transactionResultsDumpTable, transactionResultsTable, transactionsDumpTable, transactionsTable, usersTable } from "./tables.js";
 import { getEnv } from '../utils.js'
 import sql from 'mssql'
 
@@ -10,26 +10,26 @@ const demo_password = getEnv('MSSQL_PASSWORD')
 function columnsToString<T, K extends keyof T>(columns: Column<T,K>[]): string {
     return columns.map(c => `${c.name} ${c.type.name}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
 }
-export async function createSchema(pool: sql.ConnectionPool, databaseA: string = database) {
+export async function createSchema(pool: sql.ConnectionPool, databaseA: string = database, users: any[] = []) {
     await runQuery(pool, `use master;`)
     try {
         await runQuery(pool, `IF DB_ID('${databaseA}') IS not NULL
                 drop database [${databaseA}];
         `)
 
-        for (const user of users) {
-            for (const u of [`user [${user.name}]`, `login [${user.login}]`]) {
-                await runQuery(pool, 
-                `BEGIN TRY
-                    BEGIN
-                        drop ${u};
-                    END
-                END TRY
-                begin catch
-                end catch
-                `)
-            }
-        }
+        // for (const user of users) {
+        //     for (const u of [`user [${user.name}]`, `login [${user.login}]`]) {
+        //         await runQuery(pool, 
+        //         `BEGIN TRY
+        //             BEGIN
+        //                 drop ${u};
+        //             END
+        //         END TRY
+        //         begin catch
+        //         end catch
+        //         `)
+        //     }
+        // }
         
         await runQuery(pool, `create database [${databaseA}]`)
         await runQuery(pool, `use ${databaseA};`)
@@ -42,8 +42,10 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
             transactionResultsTable,
             usersTable,
             kafkaOffsetTable,
-            transactionsByUserTable,
-            rawDataTable]) {
+            rawDataTable,
+            statTable,
+            transactionsDumpTable,
+            transactionResultsDumpTable]) {
             await runQuery(pool, `CREATE TABLE ${table.name} (
                 ${columnsToString(Object.values(table.columns))}
                 ${table.foreignKeys?.forEach(fk => `FOREIGN KEY (${fk.column}) REFERENCES ${fk.references}`) || ''}
@@ -62,13 +64,13 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
             }
         }
         
-        for (const user of users) {
-            await runQuery(pool, `CREATE LOGIN ${user.login} WITH PASSWORD = '${demo_password}'`)
-            await runQuery(pool, `CREATE USER ${user.name} FOR LOGIN ${user.login}`);
-        }
+        // for (const user of users) {
+        //     await runQuery(pool, `CREATE LOGIN ${user.login} WITH PASSWORD = '${demo_password}'`)
+        //     await runQuery(pool, `CREATE USER ${user.name} FOR LOGIN ${user.login}`);
+        // }
 
-        await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser.name};`);
-        await runQuery(pool,`ALTER ROLE ${consumerRole} ADD MEMBER ${consumerUser.name};`);
+        // await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser.name};`);
+        // await runQuery(pool,`ALTER ROLE ${consumerRole} ADD MEMBER ${consumerUser.name};`);
         
         const procs = [ addKafkaOffsetProcedure, procGetTransactions, 
                         getRawDataRecordsProc,
@@ -79,7 +81,7 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
         for (const proc of procs) {
             // console.log(`Creating procedure ${proc.getProcedureQuery()}`);
             const cre = await runQuery(pool, proc.getProcedureQuery());
-            const grant = await runQuery(pool, `GRANT EXECUTE ON ${proc.name} TO ${consumerRole};`);
+            // const grant = await runQuery(pool, `GRANT EXECUTE ON ${proc.procName} TO ${consumerRole};`);
             // console.log(`Creating procedure ${proc.name} - ${JSON.stringify(cre)} grant - ${JSON.stringify(grant)}`);
         }
         // await setUpTempTransactionsTable.batch(pool.request())

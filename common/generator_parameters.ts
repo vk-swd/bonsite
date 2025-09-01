@@ -42,8 +42,10 @@ export type ProgressReport = z.infer<typeof ProgressReportValidator>;
 export class Counters {
     constructor(
         public transactionCount: number = 0,
-        public seqNumber: number = 0,
-        public transactionResultCounter: number = 0,
+        public transactionSeqNumber: number = 0,
+        public transactionResultSeqNumber: number = 0,
+        public minDate: number = Number.MAX_SAFE_INTEGER,
+        public maxDate: number = 0
     ) {}
 }
 export class UserCounters {

@@ -2,13 +2,15 @@ import { getEnv } from "./common/utils.js";
 
 import * as kf from "kafkajs";
 
-import { ConnectionError, ConnectionErrorType, Offsets, UserConnection } from "./common/db/db_defines.js";
-import { InKafkaMessage, MetadataWrapperValidator, Transaction, TransactionMessages, TransactionResult, TransactionResultValidator, TransactionValidator } from "./common/event_types.js";
+import { Offsets, UserConnection } from "./common/db/db_defines.js";
+import { InKafkaMessage, MetadataWrapperValidator } from "./common/event_types.js";
 import { logger } from "./common/logger.js";
 import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
 import { connectToKafka, subscribeToKafka, topic_transactions } from "./kafka_consumer.js";
+import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./common/db/procedures.js";
+import { TransactionResultStored, TransactionStored } from "./common/db/tables.js";
 
 
 
@@ -119,12 +121,12 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         await sendAsRaw();
         return;
     }
-    const writer = topic === topic_transactions ? db_connection.sendTransactions.bind(db_connection)
-        : db_connection.sendTransactionResults.bind(db_connection);
+    const writer  = (topic === topic_transactions ? setUpTempTransactionsTable
+        : setUpTempTransactionResultsTable) as SetUpTempTableProc<TransactionStored|TransactionResultStored>;
     try {
         const res = await db_connection.writeDataTransactionally(
-            msgs!,
             writer,
+            msgs!,
             {groupId, offset: lastOffset, partition, topic})
         if (res.rolledBack) {
             // Loss of connection will reveal itself during raw data write

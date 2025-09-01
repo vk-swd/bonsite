@@ -7,7 +7,7 @@ import { StatementParameters, StatementParametersValidator, reqStatementUrl } fr
 const STATEMENT_GENERATOR_PORT = getEnv("STATEMENT_GENERATOR_PORT");
 export class StatementGenApiServer extends EventEmitter {
     private server: Server;
-    constructor(statementWriter: (p: StatementParameters, success: (res: string) => void, fail: (err:string) => void) => void) {
+    constructor(statementWriter: (p: StatementParameters) => Promise<string>) {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.url}`)
@@ -18,11 +18,11 @@ export class StatementGenApiServer extends EventEmitter {
                     req.on('data', chunk => data += chunk);
                     req.on('end', () => {
                         const p = StatementParametersValidator.parse(JSON.parse(data))
-                        statementWriter(p, rr => {
+                        statementWriter(p).then(rr => {
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             res.end(rr);
                             // mt.metrics?.successfulApiCallCount.inc();
-                        }, err => {
+                        }).catch(err => {
                             console.error('Error in progressReporter:', err);
                             // mt.metrics?.failedApiCallCount.inc();
                             res.writeHead(500);

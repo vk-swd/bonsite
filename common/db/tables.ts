@@ -1,5 +1,5 @@
 import { Offset, Transaction, TransactionResult } from "../event_types.js";
-import sql from "mssql";
+import sql, { Table } from "mssql";
 import { consumerRole, statementCreatorRole } from "./auth.js";
 import { parse } from "path";
 import { exit } from "process";
@@ -12,18 +12,20 @@ type MetadataSerialized = {
 export type TransactionStored = MetadataSerialized & Transaction & { idx: number };
 export type TransactionResultStored = MetadataSerialized & TransactionResult & { idx: number };
 
-type SqlType = { name: string, type: sql.ISqlType, defaultParse: (s: string) => any };
+type SqlType<T> = { name: string, type: () => T, defaultParse: (s: string) => any };
+function makeSqlType<T>(name: string, type: () => T, defaultParse: (s: string) => any): SqlType<T> {
+    return { name, type, defaultParse };
+}
 
-
-const sqlTypes = {
-    bigInt:         { name: 'BIGINT',          type: { type: sql.BigInt }, defaultParse: (s: string) => Number.parseInt(s) },
-    dateTime:       { name: 'DATETIME',        type: { type: sql.DateTime }, defaultParse: (s: string) => new Date(s) },
-    decimal:        { name: 'DECIMAL(18,2)',   type: { type: sql.Decimal(18, 2).type }, defaultParse: (s: string) => Number.parseFloat(s) },
-    nvarchar:       { name: 'NVARCHAR(100)',   type: { type: sql.NVarChar(100).type }, defaultParse: (s: string) => s },
-    nvarcharSmall:  { name: 'NVARCHAR(18)',    type: { type: sql.NVarChar(18).type }, defaultParse: (s: string) => s },
-    nvarcharBig:    { name: 'NVARCHAR(max)',   type: { type: sql.NVarChar(sql.MAX).type }, defaultParse: (s: string) => s },
-    int:            { name: 'INT',             type: { type: sql.Int }, defaultParse: (s: string) => Number.parseInt(s) },
-    tinyint:        { name: 'TINYINT',         type: { type: sql.TinyInt }, defaultParse: (s: string) => Number.parseInt(s) }
+export const sqlTypes = {
+    bigInt:         makeSqlType('BIGINT',        () => sql.BigInt,            (s: string) => Number.parseInt(s)),
+    dateTime:       makeSqlType('DATETIME2(3)',  () => sql.DateTime2(3),      (s: string) => new Date(s)),
+    decimal:        makeSqlType('DECIMAL(18,2)', () => sql.Decimal(18, 2),    (s: string) => Number.parseFloat(s)),
+    nvarchar:       makeSqlType('NVARCHAR(100)', () => sql.NVarChar(100),     (s: string) => s),
+    nvarcharSmall:  makeSqlType('NVARCHAR(18)',  () => sql.NVarChar(18),      (s: string) => s),
+    nvarcharBig:    makeSqlType('NVARCHAR(max)', () => sql.NVarChar(sql.MAX), (s: string) => s),
+    int:            makeSqlType('INT',           () => sql.Int,               (s: string) => Number.parseInt(s)),
+    tinyint:        makeSqlType('TINYINT',       () => sql.TinyInt,           (s: string) => Number.parseInt(s))
 }
 
 export type TableDescription<T> = {
@@ -38,14 +40,14 @@ export type TableDescription<T> = {
 // function getTP(t: string)
 export type Column<T, K extends keyof T> = {
     name: string,
-    type: SqlType, 
+    type: SqlType<any>,
     value: (c: T) => T[K] | string, 
     parse: (s: string) => T[K],
     parameterName?: string, // optional, used to batch stored procedures
     inputName?: string,// optional, used to exec stored procedures
     extra?: string
 };
-export function makeCol<T, K extends keyof T>(nameA: K, type: SqlType, extra?: string, value: Column<T,K>["value"] = (c:T) => Object(c)[nameA], parse: Column<T,K>["parse"] = type.defaultParse): Column<T, K> {
+export function makeCol<T, K extends keyof T, S>(nameA: K, type: SqlType<S>, extra?: string, value: Column<T,K>["value"] = (c:T) => Object(c)[nameA], parse: Column<T,K>["parse"] = type.defaultParse): Column<T, K> {
     const name = nameA as string;
     return { name, type, extra, value, parse, parameterName: `@${name}`, inputName: name };
 }
@@ -62,7 +64,17 @@ export function parseQueryRes<T>(data: QueryRecordSet<T>, validator: Columns<T>)
     }
     return parsed as T;
 }
-
+export const statTable: TableDescription<{idx: number, name: string, value: string}> = {
+    name: `${schema}.stats`,
+    columns: {
+        idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key'),
+        name: makeCol('name', sqlTypes.nvarchar),
+        value: makeCol('value', sqlTypes.nvarchar)
+    },
+    permissions: [
+        { role: consumerRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
+    ]
+}
 
 type UserData = {id: string, name: string};
 export const usersTable: TableDescription<UserData> = {
@@ -85,7 +97,7 @@ export const transactionsTable: TableDescription<TransactionStored> = {
         userIdFrom: makeCol("userIdFrom", usersTable.columns.id.type),
         userIdTo: makeCol("userIdTo", usersTable.columns.id.type),
         amount: makeCol("amount", sqlTypes.decimal),
-        dateTime: makeCol("dateTime", sqlTypes.dateTime, undefined, (c) => new Date(c.dateTime).toISOString(), (s) => new Date(s).getMilliseconds()),
+        dateTime: makeCol("dateTime", sqlTypes.dateTime, undefined, (c) => new Date(c.dateTime).toISOString(), (s) => new Date(s).getTime()),
         metadata: makeCol("metadata", sqlTypes.nvarcharBig)
     },
     permissions: [
@@ -97,15 +109,28 @@ transactionsTable.foreignKeys = [
     { column: transactionsTable.columns.userIdFrom.name, references: `${usersTable.name}(${usersTable.columns.id.name})` },
     { column: transactionsTable.columns.userIdTo.name, references: `${usersTable.name}(${usersTable.columns.id.name})` }
 ]
-
+transactionsTable.nonClusteredIndexes = [
+    {
+        name: 'idx_c_transactions_userIdFrom_dateTime',
+        columns: [transactionsTable.columns.userIdFrom.name, transactionsTable.columns.dateTime.name]
+    },
+    {
+        name: 'idx_c_transactions_userIdTo_dateTime',
+        columns: [transactionsTable.columns.userIdTo.name, transactionsTable.columns.dateTime.name]
+    },
+    {
+        name: 'idx_c_transactions_id',
+        columns: [transactionsTable.columns.id.name]
+    }
+]
 export const transactionResultsTable: TableDescription<TransactionResultStored> ={
     name: `${schema}.transaction_results`, 
     columns: {
         idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key'),
         id: makeCol('id', transactionsTable.columns.id.type, 'UNIQUE', (c) => c.id.toString(), (s) => Number.parseInt(s)),
-        dateTime: makeCol('dateTime', sqlTypes.dateTime, 'NOT NULL', (c) => new Date(c.dateTime).toISOString(), parse => new Date(parse).getMilliseconds()),
+        dateTime: makeCol('dateTime', sqlTypes.dateTime, 'NOT NULL', (c) => new Date(c.dateTime).toISOString(), parse => new Date(parse).getTime()),
         state: makeCol('state', sqlTypes.tinyint, 'NOT NULL'),
-        metadata: makeCol('metadata', sqlTypes.nvarcharBig, 'NOT NULL')
+        metadata: makeCol('metadata', sqlTypes.nvarcharBig)
     },    
     permissions: [
         { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
@@ -113,33 +138,29 @@ export const transactionResultsTable: TableDescription<TransactionResultStored> 
     ]
     // Don't add id foreign key to transactionsTable, as arrival order is not guaranteed
 }
-
-type TransactionByUser = {idx:"", userId:"", date: "", transId: ""};
-export const transactionsByUserTable: TableDescription<TransactionByUser> = {
-    name: `${schema}.transactions_by_user`, 
-    columns: {
-        idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key'),
-        userId: makeCol('userId', usersTable.columns.id.type, 'NOT NULL'),
-        date: makeCol('date', sqlTypes.dateTime, 'NOT NULL'),
-        transId: makeCol('transId', transactionsTable.columns.id.type, 'NOT NULL')
-    }
-    , permissions: [
-        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
-        { role: statementCreatorRole, permissions: ['SELECT'] }
-    ]
-}
-transactionsByUserTable.foreignKeys = [
-    { column: transactionsByUserTable.columns.userId.name, references: `${usersTable.name}(${usersTable.columns.id.name})` },
-    { column: transactionsByUserTable.columns.transId.name, references: `${transactionsTable.name}(${transactionsTable.columns.id.name})` }
-]
-
-transactionsByUserTable.nonClusteredIndexes = [
+transactionResultsTable.nonClusteredIndexes = [
     {
-        name: 'idx_c_transactionsByUser',
-        columns: [transactionsByUserTable.columns.userId.name, transactionsByUserTable.columns.date.name],
-        include: [transactionsByUserTable.columns.transId.name]
+        name: 'idx_c_transactionResults_state',
+        columns: [transactionResultsTable.columns.state.name, transactionResultsTable.columns.dateTime.name],
+        include: [transactionResultsTable.columns.id.name]
+    },
+    {
+        name: 'idx_c_transactionResults_id',
+        columns: [transactionResultsTable.columns.id.name, transactionResultsTable.columns.dateTime.name]
     }
 ]
+
+function makeDumpTable<T extends TransactionStored | TransactionResultStored>(table: TableDescription<T>): TableDescription<T> {
+    const name = table.name + '_dump';
+    const columns: Columns<T> = {} as Columns<T>;
+    for (const [k, v] of Object.entries(table.columns)) {
+        const col = Object(table.columns)[k];
+        columns[k as keyof T] = makeCol(col.name, col.type, k === 'idx' ? 'identity(1,1) primary key' : undefined);
+    }
+    return { name, columns, permissions: table.permissions };
+}
+export const transactionsDumpTable = makeDumpTable(transactionsTable);
+export const transactionResultsDumpTable = makeDumpTable(transactionResultsTable);
 
 export const kafkaOffsetTable: TableDescription<Offset> = {
     name: `${schema}.kafka_offsets`, 

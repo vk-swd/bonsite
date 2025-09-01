@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { date, z } from "zod";
 
 export const TransactionValidator = z.object({
     id: z.number(),
@@ -27,9 +27,17 @@ export const TransactionResultValidator = z.object({
 });
 export type TransactionResult = z.infer<typeof TransactionResultValidator>;
 
+const DatePtrValidator = z.object({
+    userId: z.number(),
+dateBefore: z.number().optional(),
+dateAfter: z.number().optional()
+});
 export const MetadataValidator = z.object({
-    seqNumber: z.number(),
-    isIgnored: z.boolean()
+    seqNumber: z.number().optional(),
+    isIgnored: z.boolean().optional(),
+    dateTime: z.number().optional(),
+    userDatePtrs: z.array(DatePtrValidator).optional(),
+    state: z.nativeEnum(TResult).optional()
 })
 export const MetadataWrapperValidator = z.object({
     metadata: MetadataValidator,
@@ -50,9 +58,11 @@ export type Offset = z.infer<typeof OffsetValidator>;
 
 
 export const reqStatementUrl = "statements"
+export const MIN_DATE = "1970-01-01T00:00:00.000Z";
+export const MAX_DATE = "9999-12-31T23:59:59.997Z";
 export const StatementParametersValidator = z.object({
     userId: z.number(),
-    from: z.number().optional(),
-    to: z.number().optional(),
+    fromm: z.number().optional(),
+    too: z.number().optional(),
 });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;

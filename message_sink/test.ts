@@ -124,7 +124,7 @@ describe('Kafka Consumer Tests', function () {
         db_connection = new UserConnection(pool);
     });
     this.beforeEach(async () => {
-        await createSchema(db_connection!.pool, "TestDB");
+        await createSchema(db_connection!.pool, "TestDB", []);
         try {
         } catch (e) {
             logger.error(`Failed to create database connection: ${e}`);

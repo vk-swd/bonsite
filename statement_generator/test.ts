@@ -1,0 +1,338 @@
+
+
+import { UserConnection } from './common/db/db_defines.js';
+import { createSchema } from './common/db/init.js';
+import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MIN_DATE, StatementParameters, Transaction, TransactionResult, TResult } from './common/event_types.js';
+import { getEnv, last } from './common/utils.js';
+import { describe, it } from 'mocha'
+// addint as promised
+import chai, { expect } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import { exit } from 'process';
+import { logger } from './common/logger.js';
+import { connectToDatabase, runQuery } from './common/db/common.js';
+import { Counters, UserCounters } from './common/generator_parameters.js';
+import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
+import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
+
+
+chai.use(chaiAsPromised);
+chai.config.includeStack = true;
+chai.config.truncateThreshold = 10000
+
+const topics = ["trans", "res"];
+const [topic_transaction_res, topic_transactions] = topics;
+
+const user_sa = getEnv('MSSQL_SA_USERNAME')
+
+enum DstTable {
+    RAW,
+    PRIMARY
+}
+type Batch = { dstTable: DstTable, t: InKafkaMessage, o: string }[];
+
+
+
+let db_connection: UserConnection | undefined = undefined
+describe('Kafka Consumer Tests', function () {
+    this.timeout(1000000); // Set timeout for the tests
+    this.beforeAll(async () => {
+        const pool = await connectToDatabase(user_sa)!;
+        db_connection = new UserConnection(pool);
+    });
+    this.beforeEach(async () => {
+        // await createSchema(db_connection!.pool, "TestDBStatementGen");
+        try {
+        } catch (e) {
+            logger.error(`Failed to create database connection: ${e}`);
+            exit(1);
+        }
+    });
+
+    const userCount = 100000;
+    it(`Test normal case`, async () => {
+        if (!db_connection) {
+            throw new Error("db_connection is not initialized");
+        }
+
+        await createSchema(db_connection!.pool, "TestDBStatementGen");
+        const batchSize = 10000;
+
+        type MsgOffset = { msg: InKafkaMessage, offset: string };
+        
+
+        const sendBatch = async <T extends TransactionStored | TransactionResultStored>(
+            tempTableGen: SetUpTempTableProc<T>, messages: MsgOffset[], topic: string, addConflicts: boolean = false) => {
+            if (addConflicts) {
+                // add something that would trigger "catch" clause in message commit procedure
+                // duplicates should do
+                messages.push(...messages);
+                messages.sort((l,r) => l.msg.payload.dateTime - r.msg.payload.dateTime);
+            }
+            return await db_connection!.writeDataTransactionally(
+                tempTableGen,
+                messages.map(v => v.msg),
+                {
+                    groupId: '0',
+                    offset: last(messages)!.offset,
+                    partition: 0,
+                    topic
+                })
+        }
+        const transactions: MsgOffset[] = [];
+        
+        const cycles = 600000;
+        let time = Date.now();
+        let xpos = 0
+        let ypos = 0
+        let horizontal = true;
+        const maxSideSize = 4;
+        let remained = maxSideSize / 2;
+        const timeIncrement = 100;
+        for (let i = 1; i <= cycles; i++) {
+            const dateTime = i * timeIncrement;
+            const id = i;
+            const userIdFrom = xpos
+            const userIdTo = ypos
+            const state = i % 100 < 95 ? TResult.CONFIRMED : TResult.BLOCKED
+            const amount = i % 100;
+            const metadata: Metadata = {
+                state,
+                userDatePtrs: [{ userId: userIdFrom }, { userId: userIdTo }],
+                dateTime
+            }
+            transactions.push({ msg: { payload: { id, dateTime, amount, userIdFrom, userIdTo }, metadata }, offset: i.toString() });
+
+
+            if (horizontal) {
+                xpos = (xpos+1) % userCount;
+            } else {
+                ypos = (ypos+1) % userCount;
+            }
+            remained--;
+            if (remained == 0) {
+                horizontal = !horizontal;
+                remained = maxSideSize;
+            }
+        }
+        const lastTransactionMap = new Map<number, InKafkaMessage>();
+        const markMetadata = (metadata: Metadata, userId: number, date: number) => {
+            const lastRecord = lastTransactionMap.get(userId);
+            if (lastRecord !== undefined) {
+                const priorMeta = lastRecord.metadata.userDatePtrs!.find(d => d.userId == userId)!
+                priorMeta.dateAfter = date;
+                metadata.userDatePtrs!.find(d => d.userId == userId)!.dateBefore = lastRecord.payload.dateTime;
+            }
+        }
+        for (const t of transactions) {
+            const transaction = t.msg.payload as Transaction;
+            if (t.msg.metadata.state !== TResult.CONFIRMED) {
+                continue;
+            }
+            markMetadata(t.msg.metadata, transaction.userIdFrom, transaction.dateTime);
+            lastTransactionMap.set(transaction.userIdFrom, t.msg);
+            if (transaction.userIdTo != transaction.userIdFrom) {
+                markMetadata(t.msg.metadata, transaction.userIdTo, transaction.dateTime);
+                lastTransactionMap.set(transaction.userIdTo, t.msg);
+            }
+        }
+
+        let i = 0;
+        while (i < transactions.length) {
+            const batch = transactions.slice(i, i + batchSize);
+            i += batchSize
+            const transactionResults: MsgOffset[] = batch.map(t => {
+                const tr: TransactionResult = {
+                    id: t.msg.payload.id,
+                    dateTime: t.msg.payload.dateTime,
+                    state: t.msg.metadata.state!
+                }
+                return { msg: { payload: tr, metadata: { } }, offset: t.offset };
+            });
+            // for the last batch, commit everything, otherwise leave the last one in the buffer to maintain dateBefore/After integrity
+            const resT = await sendBatch(setUpTempTransactionsTable, batch, topic_transactions);
+            const resR = await sendBatch(setUpTempTransactionResultsTable, transactionResults, topic_transaction_res);
+            
+            
+            expect(resT.duds, `unexpected duds for transactions at batch ending with ${i}`).to.equal(0);
+            expect(resR.duds, `unexpected duds for transaction results at batch ending with ${i}` ).to.equal(0);
+            expect(resT.newCount, `unexpected newCount for transactions at batch ending with ${i}`).to.equal(batch.length);
+            expect(resR.newCount, `unexpected newCount for transaction results at batch ending with ${i}`).to.equal(transactionResults.length);
+            expect(resT.rolledBack, `unexpected rolledBack for transactions at batch ending with ${i}`).to.be.false;
+            expect(resR.rolledBack, `unexpected rolledBack for transaction results at batch ending with ${i}`).to.be.false;
+            process.stdout.clearLine(0);   // clear current line
+            process.stdout.cursorTo(0);    // move cursor to beginning of line
+            process.stdout.write(`Progress: ${i * 100 / cycles}%`);
+        }
+
+        const newTime = Date.now();
+        console.log(`\nwritten in ${newTime - time} ms`);
+    })
+
+    const analyzeUser = (transactions: InKafkaMessage[], params: StatementParameters) => {
+        const print = (i?: number) => {
+            return `User ${params.userId} ` + (i !== undefined ? `transaction  ${JSON.stringify(transactions![i])},` : ``) + ` params ${JSON.stringify(params)}`;
+        }
+        if (transactions.length == 0) {
+            expect(false, `${print()} no records received`).to.be.true;
+            return;
+        }
+        for (let i = 0; i < transactions!.length; i++) {
+            // completeness check - that records are within date bounds and thath
+            // no records were missed within those bounds (checked via metadata.dateBefore/After)
+            const line = transactions![i]
+            const userMeta = line.metadata.userDatePtrs!.find(d => d.userId == params.userId)!;
+            expect(line.payload.dateTime, `${print(i)} earlier then expected`).to.be.greaterThanOrEqual(params.fromm!);
+            expect(line.payload.dateTime, `${print(i)} later then requested`).to.be.lessThanOrEqual(params.too!);
+            if (i == 0 && userMeta.dateBefore !== undefined) {
+                expect(userMeta.dateBefore, `${print(i)} first item not first`).to.be.lessThan(params.fromm!);
+            }
+            if (i == transactions!.length - 1 && userMeta.dateAfter !== undefined) {
+                expect(userMeta.dateAfter, `${print(i)} last item not last`).to.be.greaterThan(params.too!);
+            }
+            if (i > 0) {
+                const prevTransMeta = transactions![i-1].metadata.userDatePtrs!.find(d => d.userId == params.userId)!;
+                expect(prevTransMeta.dateAfter, `${print(i)} no next date`).to.not.be.undefined;
+                expect(userMeta.dateBefore, `${print(i)} no previous date`).to.not.be.undefined;
+                expect(line.payload.dateTime, `${print(i)} out of order`).to.be.eq(prevTransMeta.dateAfter!);
+                expect(userMeta.dateBefore, `${print(i)} out of order`).to.be.eq(transactions![i-1].payload.dateTime);
+            }
+            expect(line.payload.id, `${print(i)} Wrong User id`).to.be.greaterThan(params.userId);
+        }
+    }
+    const testParameters = async (p: StatementParameters[]) => {
+        // Transactions must be sorted by userId so when the data for new user comes, the previous user is considered done
+        let currentUser: number | undefined = undefined;
+        let analyzedTransactions = 0;
+        const transactions: InKafkaMessage[] = []
+        let idx = -1;
+        const errors: string[] = [];
+        await db_connection!.getTransactions(p, async (user: number, line: InKafkaMessage) => {
+            try {
+                if (user !== currentUser) {
+                    if (currentUser !== undefined) {
+                        if (user < currentUser) {
+                            console.log(`Current user ${currentUser}, new user ${user}`);
+                        }
+                        if (p[idx] > p[idx + 1]) {
+                            console.log(`syja user ${p[idx]}, new user ${p[idx + 1]}`);
+                        }
+                        const oldParams = p[idx];
+                        analyzeUser(transactions, oldParams);
+                        // parameters are ordered by userId (if they don't, test will fail), so we can just move forward
+                        expect(user).to.be.greaterThan(currentUser ?? -1, `User ${user} came after ${currentUser}`);
+                    }
+                    idx++;
+                    while (idx < p.length - 1 && p[idx].userId != user) {
+                        idx++;
+                    }
+                    expect(p[idx].userId, `Unexpected user ${user}, expected ${p[idx].userId}`).to.equal(user);
+                    
+                    currentUser = user;
+                    transactions.length = 0;
+                }
+            } catch(e) {
+                if (errors.length < 10) {
+                    errors.push(e as string);
+                }
+            }
+            transactions!.push(line);
+            analyzedTransactions++;
+        })
+        if (currentUser !== undefined) {
+            analyzeUser(transactions, p[idx]);
+        }
+        expect(errors, `Got errors:\n${errors.join('\n')}`).to.be.empty;
+        return analyzedTransactions;
+    }
+    const generateParameters = (userCounter: [number, Counters][]): StatementParameters[] => {
+        const threshold = Math.random();
+        return userCounter.filter(() => Math.random() < threshold).map(c => {
+            const dateRange = c[1].maxDate - c[1].minDate;
+            const itemCount = c[1].transactionCount;
+            if (itemCount == 0) {
+                return { userId: c[0], fromm: new Date(MIN_DATE).getTime(), too: new Date(MAX_DATE).getTime()};
+            }
+            const minDateToGen = Math.floor(c[1].minDate - dateRange / itemCount);
+            const maxDateToGen = Math.ceil(c[1].maxDate + dateRange / itemCount);
+            // Add some room for the first and last item to make them more likely to be included
+            const dateRangeToGen = maxDateToGen - minDateToGen;
+
+            const fromm = Math.min(c[1].maxDate, minDateToGen + Math.floor(Math.random() * dateRangeToGen));
+            const too = Math.max(c[1].minDate, fromm + Math.floor(Math.random() * (maxDateToGen - fromm)));
+            return { userId: c[0], fromm, too };
+        });
+    }
+    const readStats = async () => {
+        const userCounterMap = new UserCounters();
+        let streamedLines = 0;
+        await db_connection?.streamTable(transactionsTable.name, (row, count) => {
+            const res = parseQueryRes(row, transactionsTable.columns);
+            const meta = MetadataValidator.parse(JSON.parse(res.metadata));
+            expect(meta.dateTime, `Loosing precision during ISO date conversion`).to.be.eq(res.dateTime);
+            expect(meta.state, `metadata.state for transaction id=${res.id} is undefined`).to.not.be.undefined
+            if (meta.state == TResult.CONFIRMED) {
+                const counterFrom = userCounterMap.get(res.userIdFrom);
+                counterFrom.transactionCount++;
+                counterFrom.minDate = Math.min(counterFrom.minDate, res.dateTime);
+                counterFrom.maxDate = Math.max(counterFrom.maxDate, res.dateTime);
+                if (res.userIdFrom != res.userIdTo) {
+                    const counterTo = userCounterMap.get(res.userIdTo);
+                    counterFrom.transactionCount++;
+                    counterTo.minDate = Math.min(counterTo.minDate, res.dateTime);
+                    counterTo.maxDate = Math.max(counterTo.maxDate, res.dateTime);
+                }
+            }
+            streamedLines++;
+            const interval = Math.floor(count / 100) + 1;
+            if (streamedLines % interval == 0 || streamedLines == count) {
+                process.stdout.clearLine(0);   // clear current line
+                process.stdout.cursorTo(0);    // move cursor to beginning of line
+                process.stdout.write(`Streamed ${Number(streamedLines * 100 / count).toFixed(0).padStart(4)}% of ${count} lines`);
+            }
+        });
+        const userCounter = Array.from(userCounterMap.data.entries()).map(e => [e[0], e[1]] as [number, Counters]);
+        userCounter.sort((l, r) => l[0] - r[0]);
+        return userCounter;
+    }
+    it(`try statements`, async () => {
+        // await createSchema(db_connection!.pool, "TestDBStatementGen");
+        await db_connection?.pool.query(`use TestDBStatementGen`);
+        await db_connection!.pool.query(`drop procedure if exists ${procGetTransactions.procName}`)
+        await runQuery(db_connection!.pool, procGetTransactions.getProcedureQuery());
+
+        const userCounter:[number, Counters][] = await readStats();
+        const interations = 20
+        let t1 = Date.now();
+        const speedStats: [number,number,number, number][] = [];
+        const printStat = (s: [number,number,number, number]) => {
+            return `${s[0]} t-s, ${s[1]} users, ${s[3]} ms, ${(s[0]/s[1]).toFixed(0)} t/user ${(s[0]/s[3]).toFixed(0)} t/ms`
+        }
+        let counter = 0;
+        for (let i = 0; i < interations; i++) {
+            const parameters = generateParameters(userCounter);
+            const newNow1 = Date.now();
+            const elapsed1 = newNow1 - t1;
+            t1 = newNow1;
+            if (parameters.length == 0) {
+                continue;
+            }
+            let transactions
+            try {
+                transactions = await testParameters(parameters);
+            } catch(e) {
+                console.log(`Failed at iteration ${i} with ${parameters.length} parameters error ${JSON.stringify(e).slice(-1000)}`);
+                throw "exception during test execution";             
+            }
+            const newNow = Date.now();
+            const elapsed = newNow - t1;
+            t1 = newNow;
+            speedStats.push([transactions!, parameters.length, elapsed1, elapsed]);
+            process.stdout.clearLine(0);   // clear current line
+            process.stdout.cursorTo(0);    // move cursor to beginning of line
+            process.stdout.write(`${new Date().toISOString()}: Processing ${printStat(last(speedStats)!)}. Progress ${i * 100 / interations}%`);
+            counter += parameters.length;
+        } 
+        console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)   
+    })
+});

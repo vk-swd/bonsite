@@ -1,14 +1,14 @@
-import { InKafkaMessage, Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters, Transaction, TransactionMessages, TransactionResult, TransactionValidator, TResult } from '../event_types.js'
+import { InKafkaMessage, Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters } from '../event_types.js'
 
 import sql from 'mssql'
 import { logger } from '../logger.js'
-import { Column, kafkaOffsetTable, parseQueryRes, QueryRecordSet, rawDataTable, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './tables.js'
-import { connectToDatabase, database } from './common.js'
-import { addKafkaOffsetProcedure, getRawDataRecordsProc, procGetTransactions, QueryRes, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './procedures.js'
+import { Column, kafkaOffsetTable, parseQueryRes, rawDataTable, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './tables.js'
+import { connectToDatabase, database, runQuery } from './common.js'
+import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, getRawDataRecordsProc, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable } from './procedures.js'
 import { consumerUser } from './auth.js'
 
 function setQueryInput<T, K extends keyof T>(request: sql.Request, column: Column<T, K>, value: T, arg?: string): void {
-    request.input(arg ? arg : column.inputName!, column.type.type, column.value(value));
+    request.input(arg ? arg : column.inputName!, column.type.type(), column.value(value));
 }
 export class Offsets {
     static create(queryResult: sql.IResult<any>): Offsets {
@@ -42,7 +42,7 @@ export enum ConnectionErrorType {
     QUERY_ERROR
 }
 export class ConnectionError extends Error {
-    constructor(public message: string, 
+    constructor(public message: string,
                 public type: ConnectionErrorType,
                 public readonly badCounter: number = 0) {
         super(message);
@@ -60,11 +60,12 @@ export class UserConnection {
         return this.pool.connected;
     }
     pidx = 0;
-    async writeDataTransactionally(
+    async writeDataTransactionally<T extends TransactionResultStored | TransactionStored>(
+        tempTable: SetUpTempTableProc<T>,
         records: InKafkaMessage[],
-        writer: (record: InKafkaMessage[], request: sql.Request) => Promise<QueryRes>,
         oInfo: Offset
-    ) {
+    ): Promise<CommitResults & {rolledBack: boolean}> {
+        this.pidx = 0;
         const batchInfo = () => `${oInfo.groupId}-${oInfo.topic}-${oInfo.partition}-${oInfo.offset}`;
         const transaction = new sql.Transaction(this.pool);
         try {
@@ -73,30 +74,30 @@ export class UserConnection {
             throw `Failed to start transaction for ${batchInfo()}: ${e}`;
         }
         let request = transaction.request();
-        let result = new QueryRes();
         /*  Making long non-atomic transactions is prone to race conditions, when multiple agents
             are updating the same data.
-            Here it is assumed that Kafka partitions are sharded by user ID (or another unique key). 
+            Here it is assumed that Kafka partitions are sharded by user ID (or another unique key).
             This guarantees no key overlap, enabling safe parallel writes.
             No locking is used.
             And this assumption is enforced by Kafka, because only one consumer may
             read from a single partition at a time.
         */
         try {
-            await writer(records, request)
+            const result = await this.sendDataTransactionally(tempTable, records, request);
+            // await this.getExecPlan(tempTable, request);
             await this.commitOffset(oInfo, request);
             await transaction.commit();
-            return result;
+            return {...result, rolledBack: false};
         } catch (e) {
-            logger.error(`Failed to commit ${batchInfo()}: ${e}`);
+            logger.error(`Failed to commit ${tempTable.procName}-${batchInfo()}: ${e}`);
         }
+
         try {
             await transaction.rollback();
-            result.rolledBack = true;
+            return Object.values(CommitResultsC).reduce<CommitResults & {rolledBack: boolean}>((res, c) => ({...res, [c.name]: 0}), {rolledBack: false} as CommitResults & {rolledBack: boolean});
         } catch (e) {
             throw `Failed to rollback ${batchInfo()}: ${e}`
         }
-        return result;
     }
     async writeRawMessages(records: string[], oInfo: Offset): Promise<QueryRes> {
         const transaction = new sql.Transaction(this.pool);
@@ -111,63 +112,38 @@ export class UserConnection {
         // and failure to write to it means something is very wrong
         return { duds: records.length, rolledBack: false, newCount: 0 };
     }
-    async sendTransactions(records: InKafkaMessage[], request: sql.Request): Promise<QueryRes> {
-        await setUpTempTransactionsTable.batch(request);
-        for (const r of records) {
-            await this.addTransactionRecord(
-                {...r.payload, metadata: JSON.stringify(r.metadata)} as TransactionStored, request);
+    async sendDataTransactionally<T extends TransactionResultStored | TransactionStored>(tempTable: SetUpTempTableProc<T>, records: InKafkaMessage[], request: sql.Request) {
+        await tempTable.dropTable(request);
+        await tempTable.batch(request);
+        const table = new sql.Table(tempTable.dstTable.name) // or temporary table, e.g. #temptable
+        table.create = true
+        const dataColumns = Object.values(tempTable.dstTable.columns).slice(1);
+        dataColumns.map((c) => table.columns.add(c.name, c.type.type()));
+        for (const record of records) {
+            let quer
+            try {
+                const input = {...record.payload, metadata: JSON.stringify(record.metadata)}
+                table.rows.add(...dataColumns.map(k => k.value(input)));
+            } catch (e) {
+                await tempTable.dropTable(request).catch((ee) => logger.error(`Error dropping temp table after failed insert: ${ee}`));
+                throw `Failed to add transaction record ${JSON.stringify(record)} query ${quer}: ${e}`
+            }
         }
-        const result = await setUpTempTransactionsTable.getCommitProcedure().batch(request);
-        await setUpTempTransactionsTable.dropTable(request);
-        return result;
+        await request.bulk(table);
+        const res = await tempTable.getCommitProcedure().batch(request);
+        await tempTable.dropTable(request);
+        return res;
     }
-    async sendTransactionResults(records: InKafkaMessage[], request: sql.Request): Promise<QueryRes> {
-        await setUpTempTransactionResultsTable.batch(request);
-        for (const r of records) {
-            await this.addTransactionResult(
-                {...r.payload, metadata: JSON.stringify(r.metadata)} as TransactionResultStored, request);
-        }
-        const result = await setUpTempTransactionResultsTable.getCommitProcedure().batch(request);
-        await setUpTempTransactionResultsTable.dropTable(request);
-        return result;
-    }
-    
-    async addTransactionRecord(record: TransactionStored, request: sql.Request): Promise<void> {
-        let quer
-        try {
-            const proc = setUpTempTransactionsTable.getInsertionProcedure();
-            const columns = proc.columns!;
-            const placeholders = columns.map(() => `p${this.pidx++}`);
-            columns.forEach((c, idx) => setQueryInput(request, c, record, placeholders[idx]))
-            quer = `exec ${proc.name} ${
-                columns.map((c, i) => `${c.parameterName} = @${placeholders[i]}`).join(', ')}`
-            await request.batch(quer)
-        } catch (e) {
-            throw `Failed to add transaction record ${JSON.stringify(record)} query ${quer}: ${e}`
-        }
-    }
-    async addTransactionResult(record: TransactionResultStored, request: sql.Request): Promise<void> {
-        let quer
-        try {
-            const columns = (Object.values(transactionResultsTable.columns).slice(1));
-            const placeholders = columns.map(() => `p${this.pidx++}`);
-            columns.forEach((c, idx) => setQueryInput(request, c, record, placeholders[idx]))  
-            quer = `exec ${setUpTempTransactionResultsTable.getInsertionProcedure().name} ${
-                columns.map((c, i) => `${c.parameterName} = @${placeholders[i]}`).join(', ')}`
-            await request.batch(quer)
-        } catch (e) {
-            throw `Failed to add transaction result record ${JSON.stringify(record)} query ${quer}: ${e}`
-        }
-    }
+
     async commitOffset(info: Offset, request: sql.Request): Promise<void> {
         const columns = (Object.values(kafkaOffsetTable.columns));
         const placeholders = columns.map((_, i) => `commitOffset${this.pidx++}`);
-        columns.forEach((c, idx) => setQueryInput(request, c, info, placeholders[idx])) 
-        await request!.batch(`exec ${addKafkaOffsetProcedure.name} ${columns
-            .map((c, i) => `${c.parameterName} = @${placeholders[i]}`).join(', ')};`); 
+        columns.forEach((c, idx) => setQueryInput(request, c, info, placeholders[idx]))
+        await request!.batch(`exec ${addKafkaOffsetProcedure.procName} ${columns
+            .map((c, i) => `${c.parameterName} = @${placeholders[i]}`).join(', ')};`);
     }
     async getOffsets(): Promise<Offsets> {
-        const request = this.pool.request()      
+        const request = this.pool.request()
         let result;
         try {
             result = await request.query(`SELECT * FROM ${kafkaOffsetTable.name}`);
@@ -178,65 +154,67 @@ export class UserConnection {
         return Offsets.create(result);
     }
     async saveRawData(data: string, request: sql.Request): Promise<void> {
+        // TODO: bukt it too
         const placeholder = `p${this.pidx++}`;
         request.input(placeholder, sql.NVarChar(sql.MAX), data);
-        await request.batch(`INSERT INTO ${rawDataTable.name} 
+        await request.batch(`INSERT INTO ${rawDataTable.name}
             (${rawDataTable.columns.data.name})
             VALUES (@${placeholder});`);
     }
-    async getTransactions(p: StatementParameters): Promise<InKafkaMessage[]> {
+    async getTransactions(p: StatementParameters[], processor: (user: number, line: InKafkaMessage) => Promise<void>): Promise<void> {
         const request = this.pool.request();
+        await request.query(`DROP TABLE IF EXISTS ${StatmentParamTable.name}`);
+        await request.batch(`create table ${StatmentParamTable.name} (
+            ${procGetTransactions.columns
+                .map((c, idx) => `${c.name} ${c.type.name} ${idx == 0 ? c.extra : ""}`).join(', ')})`)
+        const table = new sql.Table(StatmentParamTable.name);
+        const dataColumns = procGetTransactions.columns.slice(1); // skip idx
         try {
-            procGetTransactions.columns!.forEach(c => setQueryInput(request, c, p));
-            return await transactions(await request.execute(procGetTransactions.name));
+            dataColumns.forEach(c => table.columns.add(c.name, c.type.type()))
         } catch (e) {
-            logger.error(`Error getting transactions: ${e}`);
-            throw e;
+            throw `Failed to make table for getTransactions ${JSON.stringify(p)}: ${e}`
+        }
+        try {
+            for (const record of p) {
+                table.rows.add(...dataColumns.map(c => c.value(record as StatementParameters & {idx: number})));
+            }
+            await request.bulk(table);
+        } catch (e) {
+            throw `Failed to add statement parameter record ${JSON.stringify(p)}: ${e}`
+        }
+        request.stream = true; // Enable streaming
+        request.on('row', async (row: any) => {
+            const parsed = parseQueryRes(row, transactionsTable.columns);
+            const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;
+            await processor(Number.parseInt(row.pid), res);
+        })
+        try {
+            await request.batch(`EXEC ${procGetTransactions.procName}`);
+        } catch (e) {
+            throw `Failed to getTransactions ${JSON.stringify(p)}: ${e}`
         }
     }
     async getRawData(count: number): Promise<string[]> {
         const request = this.pool.request();
         try {
             request.input(getRawDataRecordsProc.lastCountArg, sql.BigInt, count);
-            const result = await request.execute(getRawDataRecordsProc.name);
+            const result = await request.execute(getRawDataRecordsProc.procName);
             return result.recordset.map((r : any) => r.data);
         } catch (e) {
             logger.error(`Error getting raw data: ${e}`);
             throw e;
         }
     }
-    async streamSelectTransactions(p: StatementParameters, 
-            processor: (transaction: string) => Promise<void>,
-            completioner: () => Promise<void>): Promise<void> {
+    async streamTable(name: string, processor: (row: any, total: number) => void): Promise<void> {
+        const count = (await runQuery(this.pool, `SELECT COUNT(*) as c FROM ${name}`)).recordset[0].c;
         const request = this.pool.request();
         request.stream = true; // Enable streaming
-  
-        procGetTransactions.columns!.forEach(c => setQueryInput(request, c, p));
-
-        request.on('row', async (row: any) => {
-            try {
-                await processor(JSON.stringify(row));
-            } catch (e) {
-                logger.error(`Error processing row ${JSON.stringify(row)} for user ${p.userId}: ${e}`);
-                request.cancel();
-            }
-        });
-        let orderChecker = 0;  
-        request.on('done', async (result: any) => {
-            logger.debug(`${orderChecker++}: Stream done for ${JSON.stringify(p)}: ${JSON.stringify(result)}`);
-            await completioner()
-        });
-        try {
-            await request.execute(procGetTransactions.name);
-            logger.debug(`${orderChecker++}: Stream execute completed for ${JSON.stringify(p)}`);
-        } catch (e) {
-            logger.error(`Error streaming transactions for ${JSON.stringify(p)}: ${e}`);
-            throw e;
-        }
+        request.on('row', (row : any) => processor(row, count))
+        await request.query(`SELECT * FROM ${name}`);
     }
     async streamTransactions(processor: (metadata: Metadata, userId?: number) => void): Promise<void> {
         const tables:[TableDescription<any>, (row: any) => void][] = [
-            [transactionsTable,(row: any) => processor(MetadataValidator.parse(JSON.parse(row.metadata)), row.userIdFrom)], 
+            [transactionsTable,(row: any) => processor(MetadataValidator.parse(JSON.parse(row.metadata)), row.userIdFrom)],
             [transactionResultsTable, (row:any) => processor(MetadataValidator.parse(JSON.parse(row.metadata)), -1)],
             [rawDataTable, (row: any) => processor(MetadataValidator.parse(JSON.parse(JSON.parse(row.data).metadata)))]];
         for (const table of tables) {
@@ -255,18 +233,6 @@ export class UserConnection {
     close(): Promise<void> {
         return this.pool.close();
     }
-}
-function transaction(row: QueryRecordSet<TransactionStored>) {
-    return TransactionValidator.parse(parseQueryRes(row, transactionsTable.columns))
- }
-function transactions(sqlRes: sql.IResult<any>): InKafkaMessage[] {
-    if (!sqlRes || !sqlRes.recordset || sqlRes.recordset.length === 0) {
-        return [];
-    }
-    return sqlRes.recordset.map((r : any) => { return { 
-            payload: transaction(r), metadata: MetadataValidator.parse(JSON.parse(r.metadata)) 
-        } as InKafkaMessage;
-    })
 }
 
 

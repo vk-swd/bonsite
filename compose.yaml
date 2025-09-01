@@ -227,6 +227,7 @@ services:
         - shared_dir:${SHARED_DIR}
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
       hostname: "${STATEMENT_GENERATOR_NAME}"
       environment:
         << : [*mssql_env]
