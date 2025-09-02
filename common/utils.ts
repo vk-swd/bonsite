@@ -239,3 +239,22 @@ export class UserIdPattern {
         }
     }
 }
+
+export class ProgressPrinter {
+    it = 0;
+    progressThreshold: number;
+    threshold: number;
+    constructor(private total: number, private msg: (pc: string) => string) {
+        this.progressThreshold = total / 50;
+        this.threshold = this.progressThreshold;
+    }
+    writeProgress() {
+        this.it++;
+        if (this.it > this.threshold || this.it == this.total) {
+            process.stdout.clearLine(0);   // clear current line
+            process.stdout.cursorTo(0);    // move cursor to beginning of line
+            process.stdout.write(this.msg((this.it * 100 / this.total).toFixed(0).padStart(3)));
+            this.threshold += this.progressThreshold;
+        }
+    }
+}

@@ -52,7 +52,7 @@ export class FileWriter extends BaseWorker<string[]> {
     }
     work(lines: InKafkaMessage[]): Promise<string[]> {
         lines.forEach(l => this.writer.addMessage(JSON.stringify(l)));
-        this.writer.deferred.promise.then(() => {
+        this.writer.flushAndStop().then(() => {
             this.deferred.resolve([this.fileName]);
         }).catch(e => {
             this.deferred.reject(e);
@@ -104,10 +104,8 @@ export class BundleHandler<O> {
             this.inFlightResuests += toProcess;
             let currentResult: InKafkaMessage[] = [];
             let listIdx: number | undefined = undefined;
-            let counter = 0
             try {
                 await this.db_connection!.getTransactions(params, async (user: number, line: InKafkaMessage) => {
-                    counter++;
                     if (listIdx === undefined) {
                         listIdx = 0;
                         for (; listIdx < params.length
@@ -119,9 +117,10 @@ export class BundleHandler<O> {
                         throw new Error(`Received transaction for user ${user} after all ${params.length} users were processed`);
                     } else if (user !== params[listIdx].userId) {
                         tasks[listIdx].work(currentResult);
+                        listIdx++;
                         currentResult = [];
                         // Some users may be skipped if dates didn't include any transactions
-                        for (;listIdx < params.length - 1 && params[listIdx].userId != user; listIdx++) {
+                        for (;listIdx < params.length && params[listIdx].userId != user; listIdx++) {
                             tasks[listIdx].work([]);
                         }
                     }

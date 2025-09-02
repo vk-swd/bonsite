@@ -3,24 +3,19 @@ import { BundleHandler, FileWriter, BaseWorker } from './preparer.js';
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult } from './common/event_types.js';
-import { Deferred, getEnv, last, UserIdPattern } from './common/utils.js';
+import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
 import {it, describe} from 'mocha'
 import fs from 'fs';
+import fsp from 'fs/promises';
 import { once } from 'events';
-// import { describe, it } from 'mocha'
-// addint as promised
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import { exit } from 'process';
 import { logger } from './common/logger.js';
 import { connectToDatabase, runQuery } from './common/db/common.js';
 import { Counters, UserCounters } from './common/generator_parameters.js';
 import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
 import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
 import { createInterface } from 'readline/promises';
-
-// import { BaseWorker, BundleHandler } from './preparer.js';
-
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -31,27 +26,40 @@ const [topic_transaction_res, topic_transactions] = topics;
 
 const user_sa = getEnv('MSSQL_SA_USERNAME')
 
-enum DstTable {
-    RAW,
-    PRIMARY
-}
-type Batch = { dstTable: DstTable, t: InKafkaMessage, o: string }[];
-
-
-
 let db_connection: UserConnection | undefined = undefined
-describe('Kafka Consumer Tests', function () {
+describe('Sanity check', function () {
     this.timeout(1000000); // Set timeout for the tests
     this.beforeAll(async () => {
         const pool = await connectToDatabase(user_sa)!;
         db_connection = new UserConnection(pool);
     });
-    it.only(`Just in case`, async () => {
+    it(`Sanity check`, async () => {
         const d = new Deferred<number>();
         d.resolve(5);
         expect(d.promise).to.eventually.equal(5);
         d.reject("some error");
         expect(d.promise).to.eventually.equal(5);
+        //fire-and-forget async tasks update shared state safely
+        async function f(numb: number) {
+            await sleep(300);
+            if (numb > 5) {
+                throw "promise throws";
+            }
+            return numb;
+        }
+
+        function caller(eb: (num: number) => Promise<number>,  v: number) {
+            return eb(v)
+        }
+        let nums: number[] = [];
+        for (let i = 0; i < 10; i++) {
+            caller(f, i).then(res => {
+                nums.push(res);
+            });
+        }
+        expect(nums).to.be.empty
+        await sleep(1000);
+        expect(nums.length).to.equal(6);
     });
     const userCount = 100000;
     type MsgOffset = { msg: InKafkaMessage, offset: string };
@@ -144,9 +152,9 @@ describe('Kafka Consumer Tests', function () {
             process.stdout.cursorTo(0);    // move cursor to beginning of line
             process.stdout.write(`Progress: ${i * 100 / cycles}%`);
         }
-
         const newTime = Date.now();
-        console.log(`\nwritten in ${newTime - time} ms`);
+        process.stdout.write(`\n`);
+        logger.log(`written in ${newTime - time} ms`);
     })
 
     const analyzeUser = (transactions: InKafkaMessage[], params: StatementParameters) => {
@@ -181,11 +189,11 @@ describe('Kafka Consumer Tests', function () {
         // Transactions must be sorted by userId so when the data for new user comes, the previous user is considered done
         let analyzedTransactions = 0;
         const errors: string[] = [];
+        const progressTracker = new ProgressPrinter(p.length, (pc) => `Processing statements: ${pc}%`);
         class WorkerLocal extends BaseWorker<number> {
             constructor(private params: StatementParameters) {
                 super();
             }
-            d = false;
             async work(lines: InKafkaMessage[]): Promise<number> {
                 try {
                     analyzeUser(lines, this.params);
@@ -201,6 +209,7 @@ describe('Kafka Consumer Tests', function () {
             return new WorkerLocal(p);
         });
         await Promise.all(p.map(par => preparer1.addTask(par).then(r => {
+            progressTracker.writeProgress();
             analyzedTransactions += r;
         })));
         expect(errors, `Got errors:\n${errors.join('\n')}`).to.be.empty;
@@ -209,7 +218,6 @@ describe('Kafka Consumer Tests', function () {
     const testParametersWrites = async (p: StatementParameters[]) => {
         // Transactions must be sorted by userId so when the data for new user comes, the previous user is considered done
         let analyzedTransactions = 0;
-        const errors: string[] = [];
         const preparer1 = new BundleHandler<string[]>(100000, db_connection!, (p: StatementParameters) => {
             const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
             return new FileWriter(fileName);
@@ -226,15 +234,11 @@ describe('Kafka Consumer Tests', function () {
                 processor(line);
             });
             await once(rl, 'close');
-            // console.log('File processed.');
             return lineCount;
         }
-        let it = 0;
+        const progressWrite = new ProgressPrinter(p.length, (pc) => `files written ${pc}%, files read 0%`); 
         const files = (await Promise.all(p.map(par => preparer1.addTask(par).then(r=> {
-            it++;
-            process.stdout.clearLine(0);   // clear current line
-            process.stdout.cursorTo(0);    // move cursor to beginning of line
-            process.stdout.write(`Completed files write ${it * 50 / p.length}%`);
+            progressWrite.writeProgress();
             return r;
         })))).map(r => r[0]);
 
@@ -245,14 +249,15 @@ describe('Kafka Consumer Tests', function () {
             });
             return messages;
         }
+        const progressRead = new ProgressPrinter(p.length, (pc) => `files written 100%, files read ${pc}%`); 
         for (let i = 0; i < files.length; i++) {
             const fileName = files[i];
             const messages = await getMessages(fileName);
             analyzedTransactions += messages.length;
             analyzeUser(messages, p[i]);
-            process.stdout.clearLine(0);   // clear current line
-            process.stdout.cursorTo(0);    // move cursor to beginning of line
-            process.stdout.write(`Completed statement test for progress ${50 + i * 50 / files.length}%`);
+            fsp.unlink(fileName).then(() => {
+                progressRead.writeProgress();
+            });
         }
         return analyzedTransactions;
     }
@@ -277,6 +282,7 @@ describe('Kafka Consumer Tests', function () {
     const readStats = async () => {
         const userCounterMap = new UserCounters();
         let streamedLines = 0;
+        let progressRead: ProgressPrinter | undefined = undefined; 
         await db_connection?.streamTable(transactionsTable.name, (row, count) => {
             const res = parseQueryRes(row, transactionsTable.columns);
             const meta = MetadataValidator.parse(JSON.parse(res.metadata));
@@ -294,19 +300,18 @@ describe('Kafka Consumer Tests', function () {
                     counterTo.maxDate = Math.max(counterTo.maxDate, res.dateTime);
                 }
             }
+            
             streamedLines++;
-            const interval = Math.floor(count / 100) + 1;
-            if (streamedLines % interval == 0 || streamedLines == count) {
-                process.stdout.clearLine(0);   // clear current line
-                process.stdout.cursorTo(0);    // move cursor to beginning of line
-                process.stdout.write(`Streamed ${Number(streamedLines * 100 / count).toFixed(0).padStart(4)}% of ${count} lines`);
+            if (progressRead == undefined) {
+                progressRead = new ProgressPrinter(count, (pc) => `Streaming files to read stats: ${pc}%`)
             }
+            progressRead.writeProgress();
         });
         const userCounter = Array.from(userCounterMap.data.entries()).map(e => [e[0], e[1]] as [number, Counters]);
         userCounter.sort((l, r) => l[0] - r[0]);
         return userCounter;
     }
-    it.only(`try statements`, async () => {
+    it.only(`Try read statements`, async () => {
         // Test checks that output records are within requested date range
         // It also checkes and that no records are missed IF at least one record was returned
 
@@ -322,7 +327,7 @@ describe('Kafka Consumer Tests', function () {
         const printStat = (s: [number,number,number, number]) => {
             return `${s[0]} t-s, ${s[1]} users, ${s[3]} ms, ${(s[0]/s[1]).toFixed(0)} t/user ${(s[0]/s[3]).toFixed(0)} t/ms`
         }
-        let counter = 0;
+        const progressTracker = new ProgressPrinter(interations, (pc) => `Processing stats: ${printStat(last(speedStats)!)}. Progress: ${pc}%`);
         for (let i = 0; i < interations; i++) {
             const parameters = generateParameters(userCounter);
             const newNow1 = Date.now();
@@ -333,19 +338,18 @@ describe('Kafka Consumer Tests', function () {
             }
             let transactions
             try {
+                process.stdout.write(`\n`); // for progress output
                 transactions = await testParametersWrites(parameters);
+                const rawLines = await testParameters(parameters);
+                expect(transactions, `Different number of transactions processed in write and read modes`).to.be.eq(rawLines);
             } catch(e) {
-                console.log(`Failed at iteration ${i} with ${parameters.length} parameters error ${JSON.stringify(e)}`);
-                throw "exception during test execution"; 
+                throw `Error ${JSON.stringify(e).slice(-5000)} at iteration ${i} of ${parameters.length}`;
             }
             const newNow = Date.now();
             const elapsed = newNow - t1;
             t1 = newNow;
             speedStats.push([transactions!, parameters.length, elapsed1, elapsed]);
-            process.stdout.clearLine(0);   // clear current line
-            process.stdout.cursorTo(0);    // move cursor to beginning of line
-            process.stdout.write(`${new Date().toISOString()}: Processing ${printStat(last(speedStats)!)}. Progress ${i * 100 / interations}%`);
-            counter += parameters.length;
+            progressTracker.writeProgress();
         }
         console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)
     })
