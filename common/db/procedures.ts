@@ -18,7 +18,8 @@ export const CommitResultsC: Columns<CommitResults> = {
     newCount: makeCol("newCount", sqlTypes.int)
 };
 
-export const StatmentParamTable: TableDescription<{ idx: number } & StatementParameters> = {
+type StatementReqParam = Omit<{ idx: number } & StatementParameters, "type">
+export const StatmentParamTable: TableDescription<StatementReqParam> = {
     name: `#tempParamTable`,
     columns: {
         idx: makeCol("idx", sqlTypes.int, "identity(1,1) primary key"),
@@ -28,7 +29,7 @@ export const StatmentParamTable: TableDescription<{ idx: number } & StatementPar
     },
     permissions: []
 };
-class GetTransactionsProc implements SProc<{ idx: number } & StatementParameters> {
+class GetTransactionsProc implements SProc<StatementReqParam> {
     public procName = `${schema}.getTransactions`;
     columns = Object.values(StatmentParamTable.columns);
     query: string  = ""

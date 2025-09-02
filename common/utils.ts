@@ -197,3 +197,45 @@ export function testRangeSet() {
     }
     console.log(`${new Date().toLocaleString()} ending test`)
 }
+
+export class Deferred<T> {
+    public promise: Promise<T>;
+    public resolve!: (value: T | PromiseLike<T>) => void;
+    public reject!: (reason?: any) => void;
+    constructor() {
+        this.promise = new Promise<T>((res, rej) => {
+            this.resolve = res;
+            this.reject = rej;
+        });
+    }
+}
+export function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export class UserIdPattern {
+    constructor(private userCount: number, private maxSideSize: number = 4) {
+    }
+    xpos = 0
+    ypos = 0
+    horizontal = true;
+    remained = this.maxSideSize / 2;
+    get from(): number { 
+        return this.xpos;
+    }
+    get to(): number {
+        return this.ypos;
+    }
+    next() {
+        if (this.horizontal) {
+            this.xpos = (this.xpos+1) % this.userCount;
+        } else {
+            this.ypos = (this.ypos+1) % this.userCount;
+        }
+        this.remained--;
+        if (this.remained == 0) {
+            this.horizontal = !this.horizontal;
+            this.remained = this.maxSideSize;
+        }
+    }
+}

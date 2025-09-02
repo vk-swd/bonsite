@@ -186,7 +186,12 @@ export class UserConnection {
         request.on('row', async (row: any) => {
             const parsed = parseQueryRes(row, transactionsTable.columns);
             const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;
-            await processor(Number.parseInt(row.pid), res);
+            try {
+                await processor(Number.parseInt(row.pid), res);
+            } catch (e) {
+                logger.error(`Error processing transaction for user ${row.pid} : ${e}`);
+                request.cancel();
+            }
         })
         try {
             await request.batch(`EXEC ${procGetTransactions.procName}`);

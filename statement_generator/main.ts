@@ -13,13 +13,13 @@ So looking at all that, using a nodejs orchestrator does not look to be all that
 import { UserConnection } from "./common/db/db_defines.js";
 import { StatementGenApiServer } from "./api.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
-import { prepareStatement } from "./preparer.js";
+import { Preparer } from "./preparer.js";
 import { StatementParameters } from "./common/event_types.js";
 
 
 
-const db_connection: UserConnection = await UserConnection.create()
-const api = new StatementGenApiServer((p: StatementParameters) => prepareStatement(p, db_connection));
+const praparer = new Preparer(await UserConnection.create());
+const api = new StatementGenApiServer((p: StatementParameters) => praparer.addTask(p));
 const healthCheckServer = new HealthCheckSever();
 
 

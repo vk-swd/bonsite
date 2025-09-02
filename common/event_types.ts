@@ -60,9 +60,14 @@ export type Offset = z.infer<typeof OffsetValidator>;
 export const reqStatementUrl = "statements"
 export const MIN_DATE = "1970-01-01T00:00:00.000Z";
 export const MAX_DATE = "9999-12-31T23:59:59.997Z";
+export enum StatementType {
+    FS = "FS", // full statement
+    DS = "DS"  // delta statement
+}
 export const StatementParametersValidator = z.object({
     userId: z.number(),
     fromm: z.number().optional(),
     too: z.number().optional(),
+    type: z.nativeEnum(StatementType).optional()
 });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;

@@ -1,10 +1,13 @@
 
-
+import { BundleHandler, FileWriter, BaseWorker } from './preparer.js';
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
-import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MIN_DATE, StatementParameters, Transaction, TransactionResult, TResult } from './common/event_types.js';
-import { getEnv, last } from './common/utils.js';
-import { describe, it } from 'mocha'
+import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult } from './common/event_types.js';
+import { Deferred, getEnv, last, UserIdPattern } from './common/utils.js';
+import {it, describe} from 'mocha'
+import fs from 'fs';
+import { once } from 'events';
+// import { describe, it } from 'mocha'
 // addint as promised
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -14,6 +17,9 @@ import { connectToDatabase, runQuery } from './common/db/common.js';
 import { Counters, UserCounters } from './common/generator_parameters.js';
 import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
 import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
+import { createInterface } from 'readline/promises';
+
+// import { BaseWorker, BundleHandler } from './preparer.js';
 
 
 chai.use(chaiAsPromised);
@@ -40,60 +46,47 @@ describe('Kafka Consumer Tests', function () {
         const pool = await connectToDatabase(user_sa)!;
         db_connection = new UserConnection(pool);
     });
-    this.beforeEach(async () => {
-        // await createSchema(db_connection!.pool, "TestDBStatementGen");
-        try {
-        } catch (e) {
-            logger.error(`Failed to create database connection: ${e}`);
-            exit(1);
-        }
+    it.only(`Just in case`, async () => {
+        const d = new Deferred<number>();
+        d.resolve(5);
+        expect(d.promise).to.eventually.equal(5);
+        d.reject("some error");
+        expect(d.promise).to.eventually.equal(5);
     });
-
     const userCount = 100000;
-    it(`Test normal case`, async () => {
-        if (!db_connection) {
-            throw new Error("db_connection is not initialized");
+    type MsgOffset = { msg: InKafkaMessage, offset: string };
+    const sendBatch = async <T extends TransactionStored | TransactionResultStored>(
+        tempTableGen: SetUpTempTableProc<T>, messages: MsgOffset[], topic: string, addConflicts: boolean = false) => {
+        if (addConflicts) {
+            // add something that would trigger "catch" clause in message commit procedure
+            // duplicates should do
+            messages.push(...messages);
+            messages.sort((l,r) => l.msg.payload.dateTime - r.msg.payload.dateTime);
         }
+        return await db_connection!.writeDataTransactionally(
+            tempTableGen,
+            messages.map(v => v.msg),
+            {
+                groupId: '0',
+                offset: last(messages)!.offset,
+                partition: 0,
+                topic
+            })
+    }
 
+    it(`Test normal case`, async () => {
         await createSchema(db_connection!.pool, "TestDBStatementGen");
         const batchSize = 10000;
-
-        type MsgOffset = { msg: InKafkaMessage, offset: string };
-        
-
-        const sendBatch = async <T extends TransactionStored | TransactionResultStored>(
-            tempTableGen: SetUpTempTableProc<T>, messages: MsgOffset[], topic: string, addConflicts: boolean = false) => {
-            if (addConflicts) {
-                // add something that would trigger "catch" clause in message commit procedure
-                // duplicates should do
-                messages.push(...messages);
-                messages.sort((l,r) => l.msg.payload.dateTime - r.msg.payload.dateTime);
-            }
-            return await db_connection!.writeDataTransactionally(
-                tempTableGen,
-                messages.map(v => v.msg),
-                {
-                    groupId: '0',
-                    offset: last(messages)!.offset,
-                    partition: 0,
-                    topic
-                })
-        }
         const transactions: MsgOffset[] = [];
-        
         const cycles = 600000;
-        let time = Date.now();
-        let xpos = 0
-        let ypos = 0
-        let horizontal = true;
-        const maxSideSize = 4;
-        let remained = maxSideSize / 2;
+        const time = Date.now();
+        const userIdPattern = new UserIdPattern(userCount);
         const timeIncrement = 100;
         for (let i = 1; i <= cycles; i++) {
             const dateTime = i * timeIncrement;
             const id = i;
-            const userIdFrom = xpos
-            const userIdTo = ypos
+            const userIdFrom = userIdPattern.from;
+            const userIdTo = userIdPattern.to;
             const state = i % 100 < 95 ? TResult.CONFIRMED : TResult.BLOCKED
             const amount = i % 100;
             const metadata: Metadata = {
@@ -102,18 +95,7 @@ describe('Kafka Consumer Tests', function () {
                 dateTime
             }
             transactions.push({ msg: { payload: { id, dateTime, amount, userIdFrom, userIdTo }, metadata }, offset: i.toString() });
-
-
-            if (horizontal) {
-                xpos = (xpos+1) % userCount;
-            } else {
-                ypos = (ypos+1) % userCount;
-            }
-            remained--;
-            if (remained == 0) {
-                horizontal = !horizontal;
-                remained = maxSideSize;
-            }
+            userIdPattern.next();
         }
         const lastTransactionMap = new Map<number, InKafkaMessage>();
         const markMetadata = (metadata: Metadata, userId: number, date: number) => {
@@ -152,8 +134,6 @@ describe('Kafka Consumer Tests', function () {
             // for the last batch, commit everything, otherwise leave the last one in the buffer to maintain dateBefore/After integrity
             const resT = await sendBatch(setUpTempTransactionsTable, batch, topic_transactions);
             const resR = await sendBatch(setUpTempTransactionResultsTable, transactionResults, topic_transaction_res);
-            
-            
             expect(resT.duds, `unexpected duds for transactions at batch ending with ${i}`).to.equal(0);
             expect(resR.duds, `unexpected duds for transaction results at batch ending with ${i}` ).to.equal(0);
             expect(resT.newCount, `unexpected newCount for transactions at batch ending with ${i}`).to.equal(batch.length);
@@ -172,10 +152,6 @@ describe('Kafka Consumer Tests', function () {
     const analyzeUser = (transactions: InKafkaMessage[], params: StatementParameters) => {
         const print = (i?: number) => {
             return `User ${params.userId} ` + (i !== undefined ? `transaction  ${JSON.stringify(transactions![i])},` : ``) + ` params ${JSON.stringify(params)}`;
-        }
-        if (transactions.length == 0) {
-            expect(false, `${print()} no records received`).to.be.true;
-            return;
         }
         for (let i = 0; i < transactions!.length; i++) {
             // completeness check - that records are within date bounds and thath
@@ -200,49 +176,84 @@ describe('Kafka Consumer Tests', function () {
             expect(line.payload.id, `${print(i)} Wrong User id`).to.be.greaterThan(params.userId);
         }
     }
+
     const testParameters = async (p: StatementParameters[]) => {
         // Transactions must be sorted by userId so when the data for new user comes, the previous user is considered done
-        let currentUser: number | undefined = undefined;
         let analyzedTransactions = 0;
-        const transactions: InKafkaMessage[] = []
-        let idx = -1;
         const errors: string[] = [];
-        await db_connection!.getTransactions(p, async (user: number, line: InKafkaMessage) => {
-            try {
-                if (user !== currentUser) {
-                    if (currentUser !== undefined) {
-                        if (user < currentUser) {
-                            console.log(`Current user ${currentUser}, new user ${user}`);
-                        }
-                        if (p[idx] > p[idx + 1]) {
-                            console.log(`syja user ${p[idx]}, new user ${p[idx + 1]}`);
-                        }
-                        const oldParams = p[idx];
-                        analyzeUser(transactions, oldParams);
-                        // parameters are ordered by userId (if they don't, test will fail), so we can just move forward
-                        expect(user).to.be.greaterThan(currentUser ?? -1, `User ${user} came after ${currentUser}`);
-                    }
-                    idx++;
-                    while (idx < p.length - 1 && p[idx].userId != user) {
-                        idx++;
-                    }
-                    expect(p[idx].userId, `Unexpected user ${user}, expected ${p[idx].userId}`).to.equal(user);
-                    
-                    currentUser = user;
-                    transactions.length = 0;
-                }
-            } catch(e) {
-                if (errors.length < 10) {
-                    errors.push(e as string);
-                }
+        class WorkerLocal extends BaseWorker<number> {
+            constructor(private params: StatementParameters) {
+                super();
             }
-            transactions!.push(line);
-            analyzedTransactions++;
-        })
-        if (currentUser !== undefined) {
-            analyzeUser(transactions, p[idx]);
+            d = false;
+            async work(lines: InKafkaMessage[]): Promise<number> {
+                try {
+                    analyzeUser(lines, this.params);
+                    this.deferred.resolve(lines.length);
+                } catch(e) {
+                    errors.push(`\nError processing user ${this.params.userId} : ${e}`);
+                    this.deferred.reject(e);
+                }
+                return this.deferred.promise;
+            }
         }
+        const preparer1 = new BundleHandler<number>(100000, db_connection!, (p: StatementParameters) => {
+            return new WorkerLocal(p);
+        });
+        await Promise.all(p.map(par => preparer1.addTask(par).then(r => {
+            analyzedTransactions += r;
+        })));
         expect(errors, `Got errors:\n${errors.join('\n')}`).to.be.empty;
+        return analyzedTransactions;
+    }
+    const testParametersWrites = async (p: StatementParameters[]) => {
+        // Transactions must be sorted by userId so when the data for new user comes, the previous user is considered done
+        let analyzedTransactions = 0;
+        const errors: string[] = [];
+        const preparer1 = new BundleHandler<string[]>(100000, db_connection!, (p: StatementParameters) => {
+            const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
+            return new FileWriter(fileName);
+        });
+        async function processLineByLine(fileName: string, processor: (line: string) => void) {
+            let lineCount = 0;
+            const rl = createInterface({
+                input: fs.createReadStream(fileName),
+                crlfDelay: Infinity,
+            });
+
+            rl.on('line', (line) => {
+                lineCount++;
+                processor(line);
+            });
+            await once(rl, 'close');
+            // console.log('File processed.');
+            return lineCount;
+        }
+        let it = 0;
+        const files = (await Promise.all(p.map(par => preparer1.addTask(par).then(r=> {
+            it++;
+            process.stdout.clearLine(0);   // clear current line
+            process.stdout.cursorTo(0);    // move cursor to beginning of line
+            process.stdout.write(`Completed files write ${it * 50 / p.length}%`);
+            return r;
+        })))).map(r => r[0]);
+
+        async function getMessages(fileName: string) {
+            const messages: InKafkaMessage[] = [];
+            await processLineByLine(fileName, (line: string) => {
+                messages.push(MetadataWrapperValidator.parse(JSON.parse(line)));
+            });
+            return messages;
+        }
+        for (let i = 0; i < files.length; i++) {
+            const fileName = files[i];
+            const messages = await getMessages(fileName);
+            analyzedTransactions += messages.length;
+            analyzeUser(messages, p[i]);
+            process.stdout.clearLine(0);   // clear current line
+            process.stdout.cursorTo(0);    // move cursor to beginning of line
+            process.stdout.write(`Completed statement test for progress ${50 + i * 50 / files.length}%`);
+        }
         return analyzedTransactions;
     }
     const generateParameters = (userCounter: [number, Counters][]): StatementParameters[] => {
@@ -260,7 +271,7 @@ describe('Kafka Consumer Tests', function () {
 
             const fromm = Math.min(c[1].maxDate, minDateToGen + Math.floor(Math.random() * dateRangeToGen));
             const too = Math.max(c[1].minDate, fromm + Math.floor(Math.random() * (maxDateToGen - fromm)));
-            return { userId: c[0], fromm, too };
+            return { userId: c[0], fromm, too, type: StatementType.FS };
         });
     }
     const readStats = async () => {
@@ -295,7 +306,10 @@ describe('Kafka Consumer Tests', function () {
         userCounter.sort((l, r) => l[0] - r[0]);
         return userCounter;
     }
-    it(`try statements`, async () => {
+    it.only(`try statements`, async () => {
+        // Test checks that output records are within requested date range
+        // It also checkes and that no records are missed IF at least one record was returned
+
         // await createSchema(db_connection!.pool, "TestDBStatementGen");
         await db_connection?.pool.query(`use TestDBStatementGen`);
         await db_connection!.pool.query(`drop procedure if exists ${procGetTransactions.procName}`)
@@ -319,10 +333,10 @@ describe('Kafka Consumer Tests', function () {
             }
             let transactions
             try {
-                transactions = await testParameters(parameters);
+                transactions = await testParametersWrites(parameters);
             } catch(e) {
-                console.log(`Failed at iteration ${i} with ${parameters.length} parameters error ${JSON.stringify(e).slice(-1000)}`);
-                throw "exception during test execution";             
+                console.log(`Failed at iteration ${i} with ${parameters.length} parameters error ${JSON.stringify(e)}`);
+                throw "exception during test execution"; 
             }
             const newNow = Date.now();
             const elapsed = newNow - t1;
@@ -332,7 +346,7 @@ describe('Kafka Consumer Tests', function () {
             process.stdout.cursorTo(0);    // move cursor to beginning of line
             process.stdout.write(`${new Date().toISOString()}: Processing ${printStat(last(speedStats)!)}. Progress ${i * 100 / interations}%`);
             counter += parameters.length;
-        } 
-        console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)   
+        }
+        console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)
     })
 });

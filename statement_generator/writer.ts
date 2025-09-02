@@ -1,38 +1,52 @@
 
 
 import * as fsp from 'fs/promises';
+import { Deferred } from './common/utils.js';
 
 
-class Writer {
+export class Writer {
     messages: string[] = [];
     handle: fsp.FileHandle | undefined;
     writing = false;
     stopping = false;
     closed = false;
-    waiter: Promise<void>;
-    resolver: () => void = () => { };
-    constructor(fileName: string) {
+    deferred = new Deferred<void>();
+    constructor(private fileName: string) {
         fsp.open(fileName, 'a').then(h => {
             this.handle = h;
             this.write();
+        }).catch(e => {
+            this.deferred.reject(`error opening ${fileName} : ${e}`);
         });
-        this.waiter = new Promise<void>(resolve => this.resolver = resolve);
     }
-    stop() {
+    stop(abort = false): Promise<void> {
         if (!this.stopping && !this.closed) {
             this.stopping = true;
+            if (abort) {
+                this.messages = [];
+            }
             this.close()
         }
-        return this.waiter;           
+        return this.deferred.promise;
     }
-    private close() {
+    private close(aborted = false) {
         if (this.closed || this.writing) {
             return;
         }
         if (this.messages.length == 0) {
             this.closed = true;
-            this.handle?.close().catch(_ => { }).finally(() => this.resolver());
-        }                
+            if (this.handle) {
+                this.handle.close().then(_ => {
+                    if (aborted) {
+                        return fsp.rename(this.fileName, this.fileName + ".aborted");
+                        // ???: what if throws here?
+                        // ???: does catch wait for this to comlete?
+                    }
+                }).catch(_ => { }).finally(() => this.deferred.resolve());
+            } else {
+                this.deferred.reject("File handle not opened");
+            }
+        }
     }
     addMessage(line: string) {
         if (this.stopping || this.closed) {
@@ -56,7 +70,8 @@ class Writer {
                 this.write();
             }
         }).catch(e => {
-            throw new Error(`error writing ${message} : ${e}`);
+            this.deferred.reject(`error writing to ${this.fileName} : ${e}`);
+            this.close();
         });
     }
 }

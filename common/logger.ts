@@ -22,19 +22,19 @@ export class Logger {
     // }
 
     public error(message: string): void {
-        console.error(new Date().toLocaleString(), message);
+        console.error(new Date().toISOString(), message);
     }
     public warn(message: string): void {
-        console.warn(new Date().toLocaleString(), message);
+        console.warn(new Date().toISOString(), message);
     }
     public info(message: string): void {
-        console.info(new Date().toLocaleString(), message);
+        console.info(new Date().toISOString(), message);
     }
     public debug(message: string): void {
-        console.debug(new Date().toLocaleString(), message);
+        console.debug(new Date().toISOString(), message);
     }
     public log(message: string/*, level: LogLevel = LogLevel.INFO*/): void {
-        console.log(new Date().toLocaleString(), message);
+        console.log(new Date().toISOString(), message);
         // if (level >= this.logLevel) {
         //     console.log(`[${LogLevel[level]}] ${message}`);
         // }
