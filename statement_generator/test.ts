@@ -311,7 +311,7 @@ describe('Sanity check', function () {
         userCounter.sort((l, r) => l[0] - r[0]);
         return userCounter;
     }
-    it.only(`Try read statements`, async () => {
+    it(`Try read statements`, async () => {
         // Test checks that output records are within requested date range
         // It also checkes and that no records are missed IF at least one record was returned
 

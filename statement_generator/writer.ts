@@ -78,32 +78,3 @@ export class Writer {
         });
     }
 }
-
-export class WriterManager {
-    writers: Map<string, Writer> = new Map();
-    constructor(public baseDir: string) {
-    }
-    getWriter(fileName: string): Writer {
-        if (!this.writers.has(fileName)) {
-            this.writers.set(fileName, new Writer(fileName));
-        }
-        return this.writers.get(fileName)!;
-    }
-    stopAll() {
-        Promise.all(Array.from(this.writers.values()).map(w => w.flushAndStop()));
-    }
-    writeLine(fileName: string, line: string) {
-        this.getWriter(fileName).addMessage(line);
-    }
-    stopWriter(fileName: string) {
-        const w = this.writers.get(fileName);
-        if (w) {
-            w.flushAndStop()!.then(_ => {
-                if (this.writers.has(fileName)) {
-                    // if (this.writers.get(fileName)!.closed) { --- IGNORE as this writer is not supposed to live long ---}
-                    this.writers.delete(fileName);
-                }
-            });
-        }
-    }
-}

@@ -13,6 +13,7 @@ x-gql-env: &gql_env
   GRAPH_QL_HOSTNAME: ${GRAPH_QL_APP_NAME}
 x-environment: &mssql_env
   MSSQL_HOSTNAME: ${MSSQL_HOSTNAME}
+  MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
   MSSQL_PASSWORD: ${MSSQL_PASSWORD}
   MSSQL_DB_NAME: ${MSSQL_DB_NAME}
   MSSQL_CONSUMER_USERNAME: ${MSSQL_CONSUMER_USERNAME}
@@ -189,7 +190,6 @@ services:
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
         << : [*mssql_env]
-        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
       tty: false
       stdin_open: false
       restart: no
@@ -207,12 +207,9 @@ services:
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
         << : [*mssql_env]
-        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
-      # tty: false
-      # stdin_open: false
+      tty: false
+      stdin_open: false
       depends_on:
-        sqldb:
-          condition: service_healthy
         kafka1:
           condition: service_started
         db_initializer:
@@ -233,14 +230,9 @@ services:
         << : [*mssql_env]
         SHARED_DIR: ${SHARED_DIR}
         STATEMENT_GENERATOR_PORT: ${STATEMENT_GENERATOR_PORT}
-        MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
       depends_on:
-        sqldb:
-          condition: service_healthy
-        # db_initializer:
-        #   condition: service_completed_successfully
-        # message_sink:
-        #   condition: service_healthy
+        db_initializer:
+          condition: service_completed_successfully
 
   tester:
       extends: 

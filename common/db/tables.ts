@@ -1,6 +1,6 @@
 import { Offset, Transaction, TransactionResult } from "../event_types.js";
 import sql, { Table } from "mssql";
-import { consumerRole, statementCreatorRole } from "./auth.js";
+import { sinkRole, statementCreatorRole } from "./auth.js";
 import { parse } from "path";
 import { exit } from "process";
 
@@ -9,8 +9,9 @@ type MetadataSerialized = {
     metadata: string;
 }
 
-export type TransactionStored = MetadataSerialized & Transaction & { idx: number };
-export type TransactionResultStored = MetadataSerialized & TransactionResult & { idx: number };
+export type IdentityColumnT = { idx: number };
+export type TransactionStored = MetadataSerialized & Transaction & IdentityColumnT;
+export type TransactionResultStored = MetadataSerialized & TransactionResult & IdentityColumnT;
 
 type SqlType<T> = { name: string, type: () => T, defaultParse: (s: string) => any };
 function makeSqlType<T>(name: string, type: () => T, defaultParse: (s: string) => any): SqlType<T> {
@@ -28,6 +29,9 @@ export const sqlTypes = {
     tinyint:        makeSqlType('TINYINT',       () => sql.TinyInt,           (s: string) => Number.parseInt(s))
 }
 
+export const IdentityColumn: Columns<IdentityColumnT> = {
+    idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key')
+}
 export type TableDescription<T> = {
     name: string;
     columns: Columns<T>;
@@ -64,7 +68,7 @@ export function parseQueryRes<T>(data: QueryRecordSet<T>, validator: Columns<T>)
     }
     return parsed as T;
 }
-export const statTable: TableDescription<{idx: number, name: string, value: string}> = {
+export const statTable: TableDescription<IdentityColumnT & { name: string, value: string}> = {
     name: `${schema}.stats`,
     columns: {
         idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key'),
@@ -72,7 +76,7 @@ export const statTable: TableDescription<{idx: number, name: string, value: stri
         value: makeCol('value', sqlTypes.nvarchar)
     },
     permissions: [
-        { role: consumerRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
+        { role: sinkRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
     ]
 }
 
@@ -84,7 +88,7 @@ export const usersTable: TableDescription<UserData> = {
         name: makeCol("name", sqlTypes.nvarchar) 
     },
     permissions: [
-        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
+        { role: sinkRole, permissions: ['SELECT', 'INSERT'] },
         { role: statementCreatorRole, permissions: ['SELECT'] }
     ]
 }
@@ -101,7 +105,7 @@ export const transactionsTable: TableDescription<TransactionStored> = {
         metadata: makeCol("metadata", sqlTypes.nvarcharBig)
     },
     permissions: [
-        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
+        { role: sinkRole, permissions: ['SELECT', 'INSERT'] },
         { role: statementCreatorRole, permissions: ['SELECT'] }
     ]
 }
@@ -133,7 +137,7 @@ export const transactionResultsTable: TableDescription<TransactionResultStored> 
         metadata: makeCol('metadata', sqlTypes.nvarcharBig)
     },    
     permissions: [
-        { role: consumerRole, permissions: ['SELECT', 'INSERT'] },
+        { role: sinkRole, permissions: ['SELECT', 'INSERT'] },
         { role: statementCreatorRole, permissions: ['SELECT'] }
     ]
     // Don't add id foreign key to transactionsTable, as arrival order is not guaranteed
@@ -161,7 +165,6 @@ function makeDumpTable<T extends TransactionStored | TransactionResultStored>(ta
 }
 export const transactionsDumpTable = makeDumpTable(transactionsTable);
 export const transactionResultsDumpTable = makeDumpTable(transactionResultsTable);
-
 export const kafkaOffsetTable: TableDescription<Offset> = {
     name: `${schema}.kafka_offsets`, 
     columns: {
@@ -171,12 +174,12 @@ export const kafkaOffsetTable: TableDescription<Offset> = {
         offset: makeCol('offset', sqlTypes.bigInt, 'NOT NULL')
     }
     , permissions: [
-        { role: consumerRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
+        { role: sinkRole, permissions: ['SELECT', 'INSERT', 'UPDATE'] }
     ]
 }
 kafkaOffsetTable.primaryKey = [kafkaOffsetTable.columns.groupId.name, kafkaOffsetTable.columns.topic.name, kafkaOffsetTable.columns.partition.name];
 
-type RawData = {idx: "", data: ""};
+type RawData = IdentityColumnT & { data: ""};
 export const rawDataTable: TableDescription<RawData> = {
     name: `${schema}.raw_data`, 
     columns: {
@@ -184,7 +187,7 @@ export const rawDataTable: TableDescription<RawData> = {
         data: makeCol('data', sqlTypes.nvarcharBig, 'NOT NULL')
     }
     , permissions: [
-        { role: consumerRole, permissions: ['INSERT', `SELECT`] }
+        { role: sinkRole, permissions: ['INSERT', `SELECT`] }
     ]
 }
 rawDataTable.nonClusteredIndexes = [
@@ -193,4 +196,14 @@ rawDataTable.nonClusteredIndexes = [
         columns: [rawDataTable.columns.idx.name + ' DESC']
     }
 ]
+export enum RawTables {
+    transactions = 1,
+    transaction_results = 2,
+    raw = 3
+}
+export const rawTableNames = {
+    [RawTables.transactions]: transactionsDumpTable.name,
+    [RawTables.transaction_results]: transactionResultsDumpTable.name,
+    [RawTables.raw]: rawDataTable.name
+}
 

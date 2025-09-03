@@ -180,7 +180,7 @@ export class Sink {
         const db_connection: UserConnection = await connectToDb();
         const consumer: kf.Consumer = await connectToKafka(async (e: kf.ConsumerGroupJoinEvent) => {
             const offsets = await db_connection.getOffsets();
-            console.log(`Consumer group join event: ${JSON.stringify(e)}`);
+            logger.log(`Consumer group join event: ${JSON.stringify(e)}`);
             return Array.from(Object.entries(e.payload.memberAssignment)).flatMap(o => {
                 return o[1].map(p => ({
                     topic: o[0],

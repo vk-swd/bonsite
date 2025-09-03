@@ -2,9 +2,9 @@ import { InKafkaMessage, Metadata, MetadataValidator, Offset, OffsetValidator, S
 
 import sql from 'mssql'
 import { logger } from '../logger.js'
-import { Column, kafkaOffsetTable, parseQueryRes, rawDataTable, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './tables.js'
+import { Column, IdentityColumn, kafkaOffsetTable, parseQueryRes, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './tables.js'
 import { connectToDatabase, database, runQuery } from './common.js'
-import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, getRawDataRecordsProc, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable } from './procedures.js'
+import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable } from './procedures.js'
 import { consumerUser } from './auth.js'
 
 function setQueryInput<T, K extends keyof T>(request: sql.Request, column: Column<T, K>, value: T, arg?: string): void {
@@ -199,15 +199,21 @@ export class UserConnection {
             throw `Failed to getTransactions ${JSON.stringify(p)}: ${e}`
         }
     }
-    async getRawData(count: number): Promise<string[]> {
+    async getRawData(count: number, table: RawTables): Promise<any[]> {
         const request = this.pool.request();
+        let query = "";
         try {
-            request.input(getRawDataRecordsProc.lastCountArg, sql.BigInt, count);
-            const result = await request.execute(getRawDataRecordsProc.procName);
-            return result.recordset.map((r : any) => r.data);
+            const args = ["lastCount", "tNameArg"];
+            request.input(args[0], sql.BigInt, count);
+            query = `with topItems as (SELECT top (@${args[0]}) *
+                                        FROM ${rawTableNames[table]}
+                                        order by ${IdentityColumn.idx.name} DESC)
+                        SELECT * from topItems
+                                order by ${IdentityColumn.idx.name} ASC;`
+            const result = await request.query(query);
+            return result.recordset;
         } catch (e) {
-            logger.error(`Error getting raw data: ${e}`);
-            throw e;
+            throw `Error getting raw data. Query: ${query}. Error: ${e}`;
         }
     }
     async streamTable(name: string, processor: (row: any, total: number) => void): Promise<void> {

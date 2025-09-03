@@ -45,7 +45,7 @@ class TransactionEventsQueue {
             res.push(this.events.pop()!);
             count--;
         }
-        return res;        
+        return res;
     }
 }
 
@@ -131,7 +131,7 @@ export class Generator {
     }
     generate(count: number) {
         /*  Not going for much realism, where consumers rarely have transactions with other consumers
-            Also transaction latency is not emulating any thread contention, so 
+            Also transaction latency is not emulating any thread contention, so
                 transaction result delay will be random.
         */
         for (let i = this.eventsGenerated; i < this.eventsGenerated + count; i++) {
@@ -159,17 +159,17 @@ export class Generator {
             if (userIdFrom !== userIdTo) {
                 userStatTo.transactionCount++;
             }
-              
-            const tEvent: InKafkaMessage = { payload: transaction, metadata: 
-                { seqNumber: userStatFrom.seqNumber++, 
+
+            const tEvent: InKafkaMessage = { payload: transaction, metadata:
+                { seqNumber: userStatFrom.transactionSeqNumber++,
                     isIgnored: false } };
-            const rEvent: InKafkaMessage = { payload:result, metadata: 
+            const rEvent: InKafkaMessage = { payload:result, metadata:
                 { seqNumber: 0, // Seq number is accounted only for outgoing transactions
                     isIgnored: false } };
 
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: tEvent });
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent, seqNumberer: () => {
-                return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultCounter++;
+                return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultSeqNumber++;
             }});
         }
         this.eventsGenerated += count;
@@ -189,11 +189,11 @@ export function testGeneratorContinuous() {
         const gen = new Generator();
         const eventCount = 100000;
         const startTime = 100;
-        const params: GenParameters = { 
-            userCount: 1000, 
+        const params: GenParameters = {
+            userCount: 1000,
             dateFrom: startTime,
             dateTo: startTime + Math.random() * eventCount,
-            transactionCount: eventCount, 
+            transactionCount: eventCount,
             maxDelayMs: 500};
         gen.start(params);
         const events = gen.getEvents(eventCount * 2)!; // get all events

@@ -1,5 +1,5 @@
 import { MAX_DATE, MIN_DATE, StatementParameters, TResult } from "../event_types.js";
-import { Column, Columns, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
+import { Column, Columns, IdentityColumn, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
 import sql from 'mssql'
 
 
@@ -70,26 +70,6 @@ class GetTransactionsProc implements SProc<StatementReqParam> {
     }
 }
 export const procGetTransactions = new GetTransactionsProc();
-
-class GetRawDataRecordsProc implements SProc<{}> {
-    public lastCountArg = "lastCount";
-    public procName = `${schema}.getRawDataRecords`;
-    getProcedureQuery(): string {
-        return `
-            CREATE PROCEDURE ${this.procName}
-            @${this.lastCountArg} BIGINT
-            AS
-            SET NOCOUNT ON;
-            with topItems as (SELECT top (@${this.lastCountArg}) *
-                            FROM ${rawDataTable.name}
-                            order by ${rawDataTable.columns.idx.name} DESC)
-            SELECT ${rawDataTable.columns.data.name} as data from topItems
-                    order by ${rawDataTable.columns.idx.name} ASC;
-        `;
-    }
-}
-export const getRawDataRecordsProc = new GetRawDataRecordsProc();
-
 export function procedureQuery<T, K extends keyof T>(procedureName: string, columns: Column<T,K>[], tail: string): string {
     return `CREATE PROCEDURE ${procedureName}
         ${columns.map(c => `${c.parameterName} ${c.type.name}`).join(',\n')}
@@ -140,7 +120,7 @@ class CommitTempRecordsProc<T extends TransactionStored | TransactionResultStore
     getProcedureQuery(): string {
         return this.procQuery;
     }
-    constructor(public procName: string, tmpTable: TableDescription<T>, dstTable: TableDescription<T>, dumpTable: TableDescription<T>) {
+    constructor(public procName: string, tmpTable: TableDescription<T>, dstTable: TableDescription<T>, public dumpTable: TableDescription<T>) {
         let extra1: string = "";
 
         const distinctNew = "distinctNew";

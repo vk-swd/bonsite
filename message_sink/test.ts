@@ -10,7 +10,8 @@ import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
 import { logger } from './common/logger.js';
 import { connectToDatabase } from './common/db/common.js';
-import { transactionResultsTable, transactionsTable } from './common/db/tables.js';
+import { parseQueryRes, RawTables, transactionResultsTable, transactionsTable } from './common/db/tables.js';
+import { setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
@@ -67,54 +68,36 @@ async function testOffsets(topic: string, val: string, connection: UserConnectio
     chai.expect(offsets.getOffset(groupId, topic, 0)??'0', `expected ${val} from ${topic}`).to.equal(val);
 }
 
-function dataToTransaction(data: string): Transaction {
-    const parsed = JSON.parse(data, (key, value) => {
-        if (key == "") {
-            return value;
-        }    
-        return Object(transactionsTable.columns)[key]?.parse(value)
-    })
-    return TransactionValidator.parse(parsed);
-}
-
-function dataToTransactionRes(data: string): TransactionResult {
-    try {
-        return TransactionResultValidator.parse(JSON.parse(data, (key, value) => {
-            if (key == "") {
-                return value;
-            }    
-            return Object(transactionResultsTable.columns)[key]?.parse(value)
-        }))
-    } catch(e) {
-        throw `Failed to parse ${data}: ${e}`;
-    }
-}
 async function sendTransactions(tBatch: Batch, msg: string) {
     const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);
-    await sendBatch(topic_transactions, tBatch, db_connection!); 
-    const ignored = (await db_connection!.getRawData(expectedIgnored.length))
-                                        .map(r => dataToTransaction(r))
-    compareObjecs(ignored, expectedIgnored, msg);
+    await sendBatch(topic_transactions, tBatch, db_connection!);
+    const ignored = (await db_connection!.getRawData(expectedIgnored.length, RawTables.transactions))
+    const parsed = ignored.map(i => TransactionValidator.parse(parseQueryRes(i, transactionsTable.columns)));
+    compareObjecs(parsed, expectedIgnored, msg);
         
     await testOffsets(topic_transactions, last(tBatch)!.o, db_connection!);
 }
 async function sendTResults(resBatch: Batch, msg: string) {
     await sendBatch(topic_transaction_res, resBatch, db_connection!);
     const expectedIgnored = getIgnored<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
-    const ignored = ((await db_connection!.getRawData(expectedIgnored.length))
-                                        .map(r => dataToTransactionRes(r)));
-    compareObjecs(ignored, expectedIgnored, msg);
+    const ignored = ((await db_connection!.getRawData(expectedIgnored.length, RawTables.transaction_results)));
+    const parsed = ignored.map(i => TransactionResultValidator.parse(parseQueryRes(i, transactionResultsTable.columns)));
+    compareObjecs(parsed, expectedIgnored, msg);
+
     await testOffsets(topic_transaction_res, last(resBatch)!.o, db_connection!);
 }
 async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
     const expectedReturned = getReturnedTransactions(tBatch, resBatches, user);
-    const returned = (await db_connection!.getTransactions({ userId: user })).map(t => t.payload);
-    compareObjecs(returned, expectedReturned, msg);
+    const ts: Transaction[] = [];
+    await db_connection!.getTransactions([{ userId: user }], async (userId: number, transaction: InKafkaMessage) => {
+        ts.push(TransactionValidator.parse(transaction.payload));
+    })
+    compareObjecs(ts, expectedReturned, msg);
 }
 function compareObjecs<T>(actual: T[], expected: T[], message: string) {
     const a = actual
     const e = expected;
-    chai.expect(a, `expected ${e} but got ${a}`).to.deep.equal(e);
+    chai.expect(a, `expected ${JSON.stringify(e)} but got ${JSON.stringify(a)}`).to.deep.equal(e);
 }
 let db_connection: UserConnection | undefined = undefined
 describe('Kafka Consumer Tests', function () {
@@ -124,7 +107,7 @@ describe('Kafka Consumer Tests', function () {
         db_connection = new UserConnection(pool);
     });
     this.beforeEach(async () => {
-        await createSchema(db_connection!.pool, "TestDB", []);
+        await createSchema(db_connection!.pool, "TestDB");
         try {
         } catch (e) {
             logger.error(`Failed to create database connection: ${e}`);
@@ -240,7 +223,7 @@ describe.skip(`Audit tables`, function () {
                     rawStats.wrongRecord++;
                     return;
                 }
-                rawStats.seqNumberRange.add(metadata.seqNumber);
+                rawStats.seqNumberRange.add(metadata.seqNumber!);
             } else if (userId >= 0) {
                 if (!userStats.has(userId!)) {
                     userStats.set(userId, new Stat());
@@ -250,13 +233,13 @@ describe.skip(`Audit tables`, function () {
                     stats.wrongRecord++;
                     return;
                 }
-                stats.seqNumberRange.add(metadata.seqNumber);
+                stats.seqNumberRange.add(metadata.seqNumber!);
             } else {
                 if (metadata.isIgnored) {
                     resStat.wrongRecord++;
                     return;
                 }
-                resStat.seqNumberRange.add(metadata.seqNumber);
+                resStat.seqNumberRange.add(metadata.seqNumber!);
             }
         });
         const makeReport = (stats: Stat, name: string) => {
