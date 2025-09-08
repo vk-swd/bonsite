@@ -1,15 +1,16 @@
-import { getEnv } from './common/utils.js';
+import { getEnv, processLineByLine } from './common/utils.js';
 import { describe, it } from 'mocha'
 // addint as promised
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { logger } from './common/logger.js';
-import { GenerationState, GenParameters, ProgressReportValidator, ProgressReport, RequestResult, UserCounters } from './common/generator_parameters.js';
+import { GenerationState, GenParameters, ProgressReportValidator, ProgressReport, RequestResult, UserCounters, Counters } from './common/generator_parameters.js';
 import { RequestResultValidator, RequestStatus } from './common/generator_parameters.js';
 import z, { ZodType } from 'zod';
 import { gql } from 'graphql-request'
-import fs from 'fs'
-import { StatementParameters } from './common/event_types.js';
+import fs, { stat } from 'fs'
+import { InKafkaMessage, MetadataWrapperValidator, StatementParameters, StatementType, TransactionValidator } from './common/event_types.js';
+import { Transaction } from 'mssql';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -20,7 +21,7 @@ const GRAPH_QL_PORT = getEnv("GRAPH_QL_PORT");
 const SHARED_DIR = getEnv('SHARED_DIR');
 
 describe('Kafka Consumer Tests', function () {
-    this.timeout(10000); // set timeout for the tests
+    this.timeout(1000000); // set timeout for the tests
     const reqResultFields = `{${Object.keys(RequestResultValidator.shape).map(key => `${key}`).join("\n")}}`;
     const startQuery = (params: GenParameters) => gql`{ startGen(params:${JSON.stringify(params).replace(/"/g, "")}) ${reqResultFields}}`; 
     const stopQuery = `{ stopGen ${reqResultFields} }`;
@@ -60,72 +61,110 @@ describe('Kafka Consumer Tests', function () {
     it('', async () => {
         expect(true).to.be.true; // just to have a test
     });
-    it(`Simple functional test`, async () => {
+    function makeTestParams(maxUserCount: number, maxTransactionCount: number, runs: number, randomizer: () => number) : GenParameters[] {
+        let dateFrom = 0;
+        let minTransactionId = 0;
+        const params: GenParameters[] = [];
+        for (let i = 0; i < runs; i++) {
+            const userCount = Math.min(maxUserCount, Math.floor(1 + randomizer() * maxUserCount));
+            const dateRange = 1 + Math.floor(randomizer() * 1000000);
+            const transactionCount = Math.floor(Math.max(1, randomizer() * maxTransactionCount));
+            const minUserId = Math.floor(Math.max(randomizer() * (maxUserCount - userCount), 0));
+            params.push({
+                userCount,
+                dateFrom,
+                dateTo: dateFrom + dateRange,
+                transactionCount,
+                maxDelayMs: Math.floor(randomizer() * 1000),
+                minUserId,
+                minTransactionId
+            });
+            dateFrom += dateRange + 1;
+            minTransactionId += transactionCount;
+        }
+        return params
+    }
+    async function generateRecords(params: GenParameters) {
         await stopGen(); // stop any previous generation
-        const params: GenParameters = {
-            userCount: 1,
-            dateFrom: 100,
-            dateTo: 1000,
-            transactionCount: 5,
-            maxDelayMs: 200,
-            minUserId: 18
-        };
         const results = await startGen(params) as RequestResult;
         expect(results.status, `bad status in ${JSON.stringify(results)}`).to.equal(RequestStatus.OK);
-
-        // await request('https://api.spacex.land/graphql/', document)
+        // Wait for generation to stop so all records are posted to Kafka
+        let interval = 100;
+        const startTime = Date.now();
+        let runNum = 0;
         while (true) {
+            runNum++;
+            await new Promise(resolve => setTimeout(resolve, interval));
             const progress = await getProgress() as ProgressReport;
             if (progress.isRunning === GenerationState.STOPPED) {
                 console.log("Generation stopped.");
                 break;
             }
-            
-            console.log(`Progress: ${JSON.stringify(progress)}`);
-            await new Promise(resolve => setTimeout(resolve, 100));
+            const now = Date.now();
+            const elapsed = Math.max((now - startTime), 1)
+            const completionRate = elapsed / Math.max(1, progress.percentComplete);
+            const timeToFinish = completionRate * (100 - progress.percentComplete);
+            interval = Math.min(2000, Math.max(100, timeToFinish));            
+            console.log(`Progress: ${JSON.stringify(progress)} at ${runNum} delay ${now - startTime}, next in ${interval}ms`);
         }
-
-        const stat = await getStat();
-        expect(stat.status, `bad status in ${JSON.stringify(stat)}`).to.equal(RequestStatus.OK);
-        
-        const readStats = await fs.readFileSync(SHARED_DIR + "/" + stat.data);
-        const stats = UserCounters.deserialise(readStats.toString());
-        console.log(`readStats: ${Array.from(stats.data.entries()).map((d) => `${d[0]}: ${d[1].transactionCount}`).join(", ")}`);
-        /*
-            Iterate users and make a request for each.
-            IF i get non-complete list for some user - schedul re request for later
-            then get maximum delay from remaining users and 
-            Actually, i will do this sequentially, no need to emulate super effeciency here.
-            Might want to explore this  idea of concurrency in http server later. 
-            It is called load pallancing. It is implemented in nginx and in later apache versions.
-            where polling is used instead of running a thread per request.
-        Ok, to keep thngs going, make a separate event handling for data request and then separate for 
-        its processing so that tester and generator don't block each other.
-        */
-        
-        let userIds = Array.from(stats.data.entries());
-        
-        for (const data of stats.data) {
-            const userId = data[0]
-            const counters = data[1];
-            
+    }
+    async function waitForTransactionsToBeDeliveredToDB(expectedCount: number, params: StatementParameters): Promise<InKafkaMessage[]> {
+        const transactions: InKafkaMessage[] = [];
+        let retries = 10;
+        while (retries-- > 0) {
+            // console.log(`Waiting for transactions to be delivered to DB, attempt ${10 - retries}`);
+            const res = await getStatement(params)
+            // console.log(`Got statement request result: ${JSON.stringify(res)}`);
+            const statementFileName = SHARED_DIR + "/" + res.data
+            await processLineByLine(statementFileName, async (line) => {
+                // console.log(`From the statement: ${JSON.stringify(line)}`);
+                transactions.push(MetadataWrapperValidator.parse(JSON.parse(line)));
+            });
+            fs.unlink(statementFileName, (err) => {});
+            if (transactions.length >= expectedCount) break;
+            await new Promise(r => setTimeout(r, 200));
+            transactions.length = 0; // reset
         }
-
-        while (userIds.length > 0) {
-            userIds = (await Promise.all(userIds.map(async userId => {
-                const statFile = await getStatement({ userId: userId[0] })
-                const readStats: Object[] = JSON.parse(await fs.readFileSync(SHARED_DIR + "/" + statFile.data).toString());
-                console.log(`readStats: ${readStats} for user ${userId[0]} with counters: ${
-                    JSON.stringify(userId[1])}`);
-                console.log(`readStats.length: ${readStats.length}, userId[1].transactionCount: ${userId[1].transactionCount}`);
-                return { stats : readStats, userId };
-            }))).filter((u) => u.stats.length < u.userId[1].transactionCount).map((u) => u.userId);
-            console.log(`Remaining users: ${userIds.map(u => u[0]).join(", ")}`);
-            if (userIds.length === 0) {
-                console.log("No more users to process.");
-                break;
-            }
-            await new Promise((r) => setTimeout(r, 1000)); // wait for a second before next request
+        return transactions;
+    }
+    async function testStatements(params: GenParameters) {
+        const statFile = SHARED_DIR + '/' + (await getStat() as RequestResult).data;
+        await processLineByLine(statFile, async (line) => {
+            const counter = Counters.deserialise(line)
+            // console.log(`Processing line: ${JSON.stringify(counter)}`);
+            const statementParams = { userId: counter.userId, fromm: params.dateFrom, too: params.dateTo, type: StatementType.FS }
+            const transactions: InKafkaMessage[] = 
+                        await waitForTransactionsToBeDeliveredToDB(counter.transactionCount, statementParams);
+            counter.minDate = Math.min(counter.minDate, params.dateFrom);
+            counter.maxDate = Math.max(counter.maxDate, params.dateTo);
+            checkStatement(transactions, counter);            
+        },100);
+    }
+    function checkStatement(statements: InKafkaMessage[], epectedStats: Counters) {
+        expect(statements.length).to.equal(epectedStats.transactionCount, `Expected ${epectedStats.transactionCount} statements, got ${statements.length}`);
+        let lastDate = epectedStats.minDate;
+        let amountSum = 0;
+        const idSet = new Set<number>();
+        for (const statement of statements) {
+            const t = TransactionValidator.parse(statement.payload);
+            expect(t.userIdFrom == epectedStats.userId || t.userIdTo == epectedStats.userId).to.be.eq(true, `wrong userId in transaction: ${t.userIdFrom} -> ${t.userIdTo} for user ${epectedStats.userId}`);
+            expect(statement.payload.dateTime).to.be.greaterThanOrEqual(lastDate, `wrong date order: ${statement.payload.dateTime} after ${lastDate} for user ${epectedStats.userId}`);
+            expect(idSet.has(t.id)).to.be.eq(false, `duplicate transaction id ${t.id} for user ${epectedStats.userId}`);
+            expect(t.dateTime).to.be.at.least(epectedStats.minDate, `too early date: ${t.dateTime} < ${epectedStats.minDate} for user ${epectedStats.userId}`);
+            expect(t.dateTime).to.be.at.most(epectedStats.maxDate, `too late date: ${t.dateTime} > ${epectedStats.maxDate} for user ${epectedStats.userId}`);
+            idSet.add(t.id);
+            amountSum += t.amount;
+            lastDate = t.dateTime;
         }
+        expect(Math.floor(amountSum)).to.equal(epectedStats.amountSum, `wrong amount sum: expected ${epectedStats.amountSum}, got ${amountSum} for user ${epectedStats.userId}`);
+    }
+    it(`Simple functional test`, async () => {
+        logger.info(`Starting functional test with GRAPH_QL_HOSTNAME=${GRAPH_QL_HOSTNAME}, GRAPH_QL_PORT=${GRAPH_QL_PORT}, SHARED_DIR=${SHARED_DIR}`);
+        for (const param of makeTestParams(10000, 1000000, 1, () => 1)) {
+            await generateRecords(param);
+            await testStatements(param);
+        }
+        // ok the only problem at this point is that after i read all the lines i might be still processing some statements...how to check it
+        // leave a trace!
     });
 })
