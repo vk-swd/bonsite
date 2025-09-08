@@ -3,11 +3,31 @@ import { connectToDatabase } from "./common/db/common.js";
 import { createSchema } from "./common/db/init.js";
 import { logger } from "./common/logger.js";
 import { runQuery } from "./common/db/common.js";
-import { consumerUser as sinkUser, sinkRole, statementCreatorRole, statementUser, users } from "./common/db/auth.js";
+import { sinkRole, statementCreatorRole } from "./common/db/auth.js";
+import * as sql from 'mssql'
 
+
+logger.log(`1`)
 const now = Date.now();
 const user_sa = getEnv('MSSQL_SA_USERNAME')
-const pool = await connectToDatabase(user_sa)!;
+logger.log(`Starting DB initialization at ${new Date(now).toISOString()}`)
+let pool: sql.ConnectionPool | undefined = undefined;
+let retries = 10;
+while (!pool && retries > 0) {
+    try {
+        pool = await connectToDatabase(user_sa);
+        retries = 0;
+    } catch (e) {
+        logger.log(`Waiting for DB to be ready... ${retries} retries left`);
+        await new Promise(res => setTimeout(res, 1000));
+        retries--;
+    }
+}
+if (!pool) {
+    throw new Error("Could not connect to DB");
+}
+
+logger.log(`Connected to DB in ${Date.now() - now} ms`)
 const demo_password = getEnv('MSSQL_PASSWORD')
 
 
@@ -17,22 +37,20 @@ await createSchema(pool).then(res => {
     logger.error("Error creating schema:" + err);
 });
 
-
-for (const user of users) {
+const sinkUser = getEnv('MSSQL_CONSUMER_USERNAME')
+const statementUser = getEnv('MSSQL_STATEMENT_CREATOR_USERNAME')
+for (const user of [sinkUser, statementUser]) {
     await runQuery(pool, `
     BEGIN TRY
-        drop login ${user.login};
+        drop login ${user};
     END TRY
     begin catch
     end catch`)
+    await runQuery(pool, `CREATE LOGIN ${user} WITH PASSWORD = '${demo_password}'`)
+    await runQuery(pool, `CREATE USER ${user} FOR LOGIN ${user}`);
 }
-for (const user of users) {
-    await runQuery(pool, `CREATE LOGIN ${user.login} WITH PASSWORD = '${demo_password}'`)
-    await runQuery(pool, `CREATE USER ${user.name} FOR LOGIN ${user.login}`);
-}
-await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser.name};`);
-await runQuery(pool,`ALTER ROLE ${sinkRole} ADD MEMBER ${sinkUser.name};`);
-
+await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser};`);
+await runQuery(pool,`ALTER ROLE ${sinkRole} ADD MEMBER ${sinkUser};`);
 
 
 pool.close()

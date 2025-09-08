@@ -5,7 +5,6 @@ import { logger } from '../logger.js'
 import { Column, IdentityColumn, kafkaOffsetTable, parseQueryRes, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './tables.js'
 import { connectToDatabase, database, runQuery } from './common.js'
 import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable } from './procedures.js'
-import { consumerUser } from './auth.js'
 
 function setQueryInput<T, K extends keyof T>(request: sql.Request, column: Column<T, K>, value: T, arg?: string): void {
     request.input(arg ? arg : column.inputName!, column.type.type(), column.value(value));
@@ -50,8 +49,8 @@ export class ConnectionError extends Error {
 }
 
 export class UserConnection {
-    static async create(): Promise<UserConnection> {
-        const pool = await connectToDatabase(consumerUser.login, database);
+    static async create(login: string): Promise<UserConnection> {
+        const pool = await connectToDatabase(login, database);
         return new UserConnection(pool);
     }
     constructor(public pool: sql.ConnectionPool) {

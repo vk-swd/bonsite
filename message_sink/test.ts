@@ -20,7 +20,7 @@ const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS
 const [topic_transaction_res, topic_transactions] = topics;
 
 const user_sa = getEnv('MSSQL_SA_USERNAME')
-
+const TEST_DB_NAME = "TestDB";
 enum DstTable {
     RAW,
     PRIMARY
@@ -103,7 +103,7 @@ let db_connection: UserConnection | undefined = undefined
 describe('Kafka Consumer Tests', function () {
     this.timeout(10000); // Set timeout for the tests
     this.beforeAll(async () => {
-        const pool = await connectToDatabase(user_sa)!;
+        const pool = await connectToDatabase(user_sa, TEST_DB_NAME)!;
         db_connection = new UserConnection(pool);
     });
     this.beforeEach(async () => {
@@ -209,7 +209,9 @@ describe.skip(`Audit tables`, function () {
     this.timeout(10000000); // Set timeout for the tests
     it(`Audit tables`, async () => {
         // expect(testRangeSet()).not.to.throw;
-        const db_connection = await UserConnection.create();
+
+        const pool = await connectToDatabase(user_sa, TEST_DB_NAME)!;
+        const db_connection = new UserConnection(pool);
         class Stat {
             seqNumberRange = new RangeSet();
             wrongRecord = 0;

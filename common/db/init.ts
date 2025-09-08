@@ -2,10 +2,8 @@ import { roles, sinkRole, statementCreatorRole } from "./auth.js";
 import { database, runQuery } from "./common.js";
 import { addKafkaOffsetProcedure, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
 import { Column, kafkaOffsetTable, rawDataTable, schema, statTable, transactionResultsDumpTable, transactionResultsTable, transactionsDumpTable, transactionsTable, usersTable } from "./tables.js";
-import { getEnv } from '../utils.js'
 import sql from 'mssql'
 
-const demo_password = getEnv('MSSQL_PASSWORD')
 
 function columnsToString<T, K extends keyof T>(columns: Column<T,K>[]): string {
     return columns.map(c => `${c.name} ${c.type.name}${c.extra ? ' '+ c.extra : ''}`).join(',\n');

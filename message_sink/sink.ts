@@ -19,6 +19,7 @@ import { TransactionResultStored, TransactionStored } from "./common/db/tables.j
 // const topic_transaction_res = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
 // const topic_transactions = getEnv("KAFKA_TOPICS_TRANSACTIONS")
 export const groupId = getEnv("KAFKA_GROUP_ID");
+const DB_USER = getEnv("MSSQL_CONSUMER_USERNAME");
 
 /**
  * Parses messages from Kafka and validates them against the provided Zod schema.
@@ -166,7 +167,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
  */
 async function connectToDb(): Promise<UserConnection> {
     try {
-        return await UserConnection.create()
+        return await UserConnection.create(DB_USER)
     } catch (e) {
         mtrx.metrics?.dbConnectionFailure?.inc(1);
         throw `Failed to connect to database: ${e}`
