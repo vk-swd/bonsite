@@ -1,75 +1,68 @@
-import { createServer, Server } from 'http';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
-import { GenParameters, GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatUrl, stopUrl, RequestStatus } from './common/generator_parameters.js';
+import { GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatUrl, stopUrl, RequestStatus } from './common/generator_parameters.js';
 import { getEnv } from './common/utils.js';
 import * as mt from './monitoring_local.js'
-import { RequestResult } from './common/generator_parameters.js';
+import { handleRequest } from './common/apiRequestHandler.js';
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
+
+const metricStats = {
+    updateMaxResponseDelayMs: (ms:number) => mt.updateMaxApiResponseDelayMs(ms),
+    incrementFailedApiCallCount: () => mt.metrics?.failedApiCallCount.inc(),
+    incrementUnknownApiCallCount: () => mt.metrics?.unknownApiCallCount.inc()
+};
+
 export class GenApiServer extends EventEmitter {
     private server: Server;
-    constructor(progressReporter: () => ProgressReport, getStat: () => Promise<string>) {
+    handleStart(req: IncomingMessage, res: ServerResponse) : boolean {
+        return handleRequest('/' + startUrl, req, res, (data?: string) => {
+            return new Promise<void>((resolve, reject) => {
+                try {
+                    const parsedData = JSON.parse(data!);
+                    const params = GenParametersValidator.parse(parsedData);
+                    this.emit('start', params);
+                    resolve();
+                } catch (error) {
+                    reject(`Malformed JSON: ${error}`);
+                }
+            });
+        }, metricStats);
+    }
+    handleStop(req: IncomingMessage, res: ServerResponse): boolean {
+        return handleRequest('/' + stopUrl, req, res, () => {
+            this.emit('stop');
+            return Promise.resolve();
+        }, metricStats);
+    }
+    handleGetProgress(req: IncomingMessage, res: ServerResponse): boolean {
+        return handleRequest('/' + progressUrl, req, res, () => {
+            return Promise.resolve(this.progressReporter());
+        }, metricStats);
+    }
+    handleGetStat(req: IncomingMessage, res: ServerResponse): boolean {
+        return handleRequest('/' + getStatUrl, req, res, () => {
+            return this.getStat().then(stat => {
+                return {
+                    status: RequestStatus.OK,
+                    message: '',
+                    data: stat
+                };
+            });
+        }, metricStats);
+    }
+    constructor(private progressReporter: () => ProgressReport, private getStat: () => Promise<string>) {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.url}`)
-            mt.metrics?.apiCallCount.inc();
-            if (req.method === 'POST') { 
-                if (req.url === '/' + startUrl) {
-                    let data = '';
-                    req.on('data', chunk => data += chunk);
-                    req.on('end', () => {
-                        console.log(`RECEIVING SOME REQUEST data ${data}`)
-                        try {
-                            const parsedData = JSON.parse(data);
-                            console.log(`RECEIVING SOME REQUEST parsedData ${JSON.stringify(parsedData)}`)
-                            const params = GenParametersValidator.parse(parsedData);
-                            console.log(`Received parameters: ${JSON.stringify(params)}`);
-                            this.emit('start', params);
-                            res.writeHead(200);
-                            res.end();
-                        } catch (error) {
-                            mt.metrics?.failedApiCallCount.inc();
-                            res.writeHead(400);
-                            res.end(`Malformed JSON: ${error}`);
-                        }
-                    });
-                } else if (req.url === '/' + stopUrl) {
-                    this.emit('stop');
-                    res.writeHead(200);
-                    res.end();
-                } else {
-                    mt.metrics?.failedApiCallCount.inc();
-                    res.writeHead(404);
-                    res.end('Not Found');
-                }
-            } else if (req.method === 'GET') {
-                if (req.url === '/' + progressUrl) {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(progressReporter()));
-                } else if (req.url === '/' + getStatUrl) {
-                    getStat().then(stat => {
-                        const r: RequestResult = {
-                            status: RequestStatus.OK,
-                            message: '',
-                            data: stat
-                        };
-                        res.writeHead(200, { 'Content-Type': 'text/plain' });
-                        res.end(JSON.stringify(r));
-                    }).catch(err => {
-                        mt.metrics?.failedApiCallCount.inc();
-                        res.writeHead(500);
-                        res.end(`Error generating stat: ${err}`);
-                    });
-                } else {
-                    mt.metrics?.failedApiCallCount.inc();
-                    res.writeHead(404);
-                    res.end('Not Found');
-                }
-            } else {
-                mt.metrics?.failedApiCallCount.inc();
-                res.writeHead(404);
-                res.end('Not Found');
-            }
+            mt.metrics?.apiCallCount.inc();  
+            if (this.handleStart(req, res)) return;
+            if (this.handleStop(req, res)) return;
+            if (this.handleGetProgress(req, res)) return;
+            if (this.handleGetStat(req, res)) return;
+            res.writeHead(404);
+            res.end('Not Found');
+            mt.metrics?.unknownApiCallCount.inc();
         });
         this.server.listen(GENERATOR_PORT, () => {
             console.log(`Server listening on port ${GENERATOR_PORT}`);
