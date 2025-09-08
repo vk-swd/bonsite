@@ -1,15 +1,16 @@
 import { getEnv } from "./common/utils.js";
 import { GenerationState, GenParameters, ProgressReport } from "./common/generator_parameters.js";
 import { KClient } from "./common/kafka_client.js";
-import { Generator, TransactionEvent } from "./generator.js";
+import { Generator } from "./generator.js";
 
 import { KProducer } from "./kafka_producer.js";
 
+const MAX_IN_FLIGHT = 200;
 export class Sender {
-    producer = new KProducer(new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}))
+    producer = new KProducer(new KClient({ name: "generator", brokers: [getEnv("KAFKA_BROKERS")]}), MAX_IN_FLIGHT)
     generator = new Generator();
     constructor() {
-        this.producer.on(KProducer.event.requestMessages, () => this.sendEvents());
+        this.producer.on(KProducer.event.requestMessages, (num: number) => this.sendEvents(num));
     }
     progress(): ProgressReport {
         return {
@@ -20,16 +21,14 @@ export class Sender {
     }
     start(params: GenParameters) {
         this.generator.start(params);
-        this.sendEvents()
+        this.sendEvents(MAX_IN_FLIGHT)
     }
-    sendEvents() {
-        const inFlight = this.producer.getInFlight();
-        if (inFlight > 100) {
-            return;
-        }
-        const events = this.generator.getEvents(100)
+    sendEvents(num: number) {
+        // <= (2 * MAX_IN_FLIGHT - 1) will be in flight
+        const events = this.generator.getEvents(num)
         if (events !== undefined) {
-            events.forEach(e => this.producer.write(JSON.stringify(e.event), e.topic))
+            events.forEach(e => this.producer.write(JSON.stringify(e.event), e.topic));
+            this.producer.attemptDelivery();
         }
     }
     stop() {

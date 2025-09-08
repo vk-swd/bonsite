@@ -54,7 +54,6 @@ export async function dumpRegistry(localReg: prom.Registry | undefined = prom.re
     await fs.writeFileSync(LOCAL_REGISTRY_FILE_NAME, JSON.stringify(registry, null, 2));
 }
 
-
 export class MonitoringServer {
     private server: Server;
     constructor(scrape: () => Promise<string>) {
@@ -62,7 +61,13 @@ export class MonitoringServer {
             if (req.url === '/metrics') {
                 res.setHeader('Content-Type', prom.register.contentType);
                 res.writeHead(200);
-                res.end(await scrape());
+                scrape().then((data) => {
+                    res.end(data);
+                    logger.info("Scraped metrics");
+                }).catch((err) => {
+                    res.writeHead(500);
+                    res.end("Error collecting metrics: " + err);
+                });
             }
         });
         this.server.listen(PORT, () => {

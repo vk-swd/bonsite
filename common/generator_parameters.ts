@@ -6,7 +6,8 @@ export const GenParametersValidator = z.object({
     dateTo: z.number(),
     transactionCount: z.number(),
     maxDelayMs: z.number().optional(),
-    minUserId: z.number().optional()
+    minUserId: z.number().optional(),
+    minTransactionId: z.number().optional()
 });
 
 export type GenParameters = z.infer<typeof GenParametersValidator>;
@@ -41,29 +42,41 @@ export type ProgressReport = z.infer<typeof ProgressReportValidator>;
 
 export class Counters {
     constructor(
+        public userId: number = 0,
+        public amountSum: number = 0,
         public transactionCount: number = 0,
         public transactionSeqNumber: number = 0,
         public transactionResultSeqNumber: number = 0,
         public minDate: number = Number.MAX_SAFE_INTEGER,
         public maxDate: number = 0
     ) {}
+    serialise(): string {
+        return [this.userId, Math.floor(this.amountSum), this.transactionCount, this.transactionSeqNumber, this.transactionResultSeqNumber, this.minDate, this.maxDate].join(",");
+    }
+    static deserialise(data: string): Counters {
+        const parts = data.split(",");
+        return new Counters(
+            parseInt(parts[0]),
+            parseInt(parts[1]),
+            parseInt(parts[2]),
+            parseInt(parts[3]),
+            parseInt(parts[4]),
+            parseInt(parts[5]),
+            parseInt(parts[6])
+        );
+    }
 }
 export class UserCounters {
     data = new Map<number, Counters>();
     serialise(): string {
-        return JSON.stringify(Array.from(this.data.entries()).map(([userId, counters]) => [userId, counters.transactionCount]));
-    }
-    static deserialise(data: string): UserCounters {
-        const instance = new UserCounters();
-        instance.data = new Map<number, Counters>(JSON.parse(data).map(([userId, transactionCount]: [number, number]) => [userId, new Counters(transactionCount)]));
-        return instance;
+        return Array.from(this.data.values()).map((c => c.serialise())).join(',\n');
     }
     reset(): void {
         this.data.clear();
     }
     get(userId: number): Counters {
         if (!this.data.has(userId)) {
-            this.data.set(userId, new Counters());
+            this.data.set(userId, new Counters(userId));
         }
         return this.data.get(userId)!;
     }

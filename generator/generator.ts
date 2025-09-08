@@ -59,57 +59,48 @@ class DelayGenerator {
 }
 
 export class Generator {
-    static transactionId = 0;
+    private transactionId = 0;
     static resultTransactionId = 0;
     private queue = new TransactionEventsQueue();
     private delayGenerator = new DelayGenerator(100);
     private msgMetaDataPerUser = new UserCounters();
     private startTime: number = 0;
     private timeIncrement: number = 0;
-    private eventsToGenerate: number = 0;
-    private eventsGenerated: number = 0;
-    private eventsEnqueued: number = 0;
+    private transactionsToGenerate: number = 0;
+    private transactionsGenerated: number = 0;
+    private transactionsEnqueued: number = 0;
     private userCount: number = 0;
     private minUserId: number = 0;
     start(params: GenParameters) {
+        this.stop();
+        this.msgMetaDataPerUser.reset();
         this.startTime = params.dateFrom;
         const endTime = Math.max(params.dateTo, this.startTime);
         this.timeIncrement = (endTime - this.startTime) / Math.max(params.transactionCount, 1);
         this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
-        this.queue = new TransactionEventsQueue();
-        this.eventsEnqueued = 0;
-        this.eventsGenerated = 0;
-        this.eventsToGenerate = params.transactionCount;
-        this.msgMetaDataPerUser.reset();
+        this.transactionsToGenerate = params.transactionCount;
+        this.userCount = params.userCount;
         if (params.minUserId !== undefined) {
             this.minUserId = params.minUserId;
+        }
+        if (params.minTransactionId !== undefined) {
+            this.transactionId = params.minTransactionId;
         }
     }
     stop() {
         this.queue = new TransactionEventsQueue();
-        this.eventsEnqueued = 0;
-        this.eventsGenerated = 0;
-        this.eventsToGenerate = 0;
-        this.msgMetaDataPerUser.reset();
-        this.minUserId = 0;
+        this.transactionsEnqueued = 0;
+        this.transactionsGenerated = 0;
+        this.transactionsToGenerate = 0;
     }
     getEvents(count: number): Array<TransactionEvent> | undefined {
-        //TODO now to Date type
-        /* high latency might cause overinflated generated sets
-        * so chunks of defined generation intervals will be produced.
-        */
-        if (this.eventsEnqueued < count) {
-            // generate count * 2 events
-            /**How will generation go?
-             * 1. take current time
-             * 2. al events are going to be generated at time increments so for every event its time will be known
-             * 3. generate event at this time + some random delay
-             */
-            const toGenerate = Math.min(count * 2, this.eventsToGenerate - this.eventsGenerated);
+        if (this.transactionsEnqueued < count) {
+            // generate count * 2 transactions
+            const toGenerate = Math.min(count * 2, this.transactionsToGenerate - this.transactionsGenerated);
             this.generate(toGenerate);
         }
-        if (this.eventsToGenerate == this.eventsGenerated && this.queue.size() == 0) {
-            console.log(`Reached transaction count limit ${this.eventsToGenerate}, stopping generation`);
+        if (this.transactionsToGenerate == this.transactionsGenerated && this.queue.size() == 0) {
+            // console.log(`Reached transaction count limit ${this.transactionsToGenerate}, stopping generation`);
             return undefined;
         }
         const events = this.queue.dequeEvents(count);
@@ -118,29 +109,29 @@ export class Generator {
                 e.event.metadata.seqNumber = e.seqNumberer();
             }
             if (e.topic === KAFKA_TOPICS_TRANSACTIONS) {
-                this.eventsEnqueued--;
+                this.transactionsEnqueued--;
             }
         }
         return events;
     }
     percentComplete(): number {
-        return Math.floor(this.eventsGenerated * 100 / Math.max(this.eventsToGenerate + this.queue.size(),1));
+        return Math.floor(this.transactionsGenerated * 100 / Math.max(this.transactionsToGenerate + this.queue.size(),1));
     }
     generatedCount(): number {
-        return this.eventsGenerated;
+        return this.transactionsGenerated;
     }
     generate(count: number) {
         /*  Not going for much realism, where consumers rarely have transactions with other consumers
             Also transaction latency is not emulating any thread contention, so
                 transaction result delay will be random.
         */
-        for (let i = this.eventsGenerated; i < this.eventsGenerated + count; i++) {
+        for (let i = this.transactionsGenerated; i < this.transactionsGenerated + count; i++) {
             const transactionTime = this.startTime + i * this.timeIncrement;
             // Can make internal transfers too (same id to and from)
             const userIdFrom = this.minUserId + Math.floor(Math.random() * this.userCount);
             const userIdTo = this.minUserId + Math.floor(Math.random() * this.userCount);
             const transaction: Transaction = {
-                id: Generator.transactionId++,
+                id: this.transactionId++,
                 userIdFrom,
                 userIdTo,
                 dateTime: Math.floor(transactionTime),
@@ -156,8 +147,10 @@ export class Generator {
             const userStatTo = this.msgMetaDataPerUser.get(userIdTo);
 
             userStatFrom.transactionCount++;
+            userStatFrom.amountSum += transaction.amount;
             if (userIdFrom !== userIdTo) {
                 userStatTo.transactionCount++;
+                userStatTo.amountSum += transaction.amount;
             }
 
             const tEvent: InKafkaMessage = { payload: transaction, metadata:
@@ -172,8 +165,8 @@ export class Generator {
                 return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultSeqNumber++;
             }});
         }
-        this.eventsGenerated += count;
-        this.eventsEnqueued += count;
+        this.transactionsGenerated += count;
+        this.transactionsEnqueued += count;
     }
     queueSize(): number {
         return this.queue.size();
