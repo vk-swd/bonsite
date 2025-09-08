@@ -256,8 +256,8 @@ export class SetUpTempTableProc<T extends TransactionResultStored | TransactionS
 
     constructor(public srcTable: TableDescription<T>, private dumpTable: TableDescription<T>) {
         const tName = srcTable.name.replace(/\./g, '');
-        // this.tableName = `#${tName}`;
-        this.tableName = `${srcTable.name}temp`;
+        this.tableName = `#${tName}`;
+        // this.tableName = `${srcTable.name}temp`;
         this.procName = `${schema}.create${tName}`;
         this.dstTable = {...srcTable, name: this.tableName};
 
