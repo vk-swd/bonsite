@@ -11,6 +11,7 @@ volumes:
 x-gql-env: &gql_env
   GRAPH_QL_PORT: ${GRAPH_QL_PORT}
   GRAPH_QL_HOSTNAME: ${GRAPH_QL_APP_NAME}
+
 x-environment: &mssql_env
   MSSQL_HOSTNAME: ${MSSQL_HOSTNAME}
   MSSQL_SA_USERNAME: ${MSSQL_SA_USERNAME}
@@ -25,6 +26,7 @@ x-healthcheck-params: &healthcheck_params
   retries: 3
   start_period: 40s
   start_interval: 1s
+  
 
 # Environment variables are read from .env file automatically
 services:
@@ -35,7 +37,7 @@ services:
         VOLUME [${WORKDIR}]
         WORKDIR ${WORKDIR}
         COPY ./package.json ${WORKDIR}/package.json
-        RUN apt update; apt install -y procps net-tools iputils-ping curl wget; npm install; rm package*.json
+        RUN apt update; apt install -y procps net-tools iputils-ping curl wget apache2-utils; npm install; rm package*.json
     image: my-backend
   frontend_builder:
       extends: 
@@ -105,6 +107,8 @@ services:
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
         - shared_dir:${SHARED_DIR}
+        - ./${COMMON_DIR_NAME}/apiRequestHandler.ts:${WORKDIR}/${COMMON_DIR_NAME}/apiRequestHandler.ts
+      
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
@@ -126,6 +130,7 @@ services:
       - GENERATOR_NAME=${GENERATOR_NAME}
       - MONITORING_PORT=${MONITORING_PORT}
       - MESSAGE_SINK_NAME=${MESSAGE_SINK_NAME}
+      - STATEMENT_GENERATOR_NAME=${STATEMENT_GENERATOR_NAME}
     entrypoint: ["sh", "-c"]
     tty: true
     command: ['${SOURCEDIR}/generateConfig.sh > /etc/prometheus/prometheus.yml;
@@ -176,7 +181,7 @@ services:
     networks: 
         - backend_net
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd  -S localhost -U ${MSSQL_SA_USERNAME} -P ${MSSQL_PASSWORD} -C -Q exit"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd  -S localhost -U ${MSSQL_CONSUMER_USERNAME} -P ${MSSQL_PASSWORD} -C -Q exit"]
       <<: [*healthcheck_params]
       
 
@@ -195,7 +200,7 @@ services:
       restart: no
       depends_on:
         sqldb:
-          condition: service_healthy
+          condition: service_started
 
   message_sink:
       extends: 
@@ -207,13 +212,13 @@ services:
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
         << : [*mssql_env]
-      tty: false
-      stdin_open: false
+      # tty: false
+      # stdin_open: false
       depends_on:
         kafka1:
           condition: service_started
-        db_initializer:
-          condition: service_completed_successfully
+        sqldb:
+          condition: service_healthy
 
   statement_generator:
       extends: 
@@ -233,6 +238,19 @@ services:
       depends_on:
         db_initializer:
           condition: service_completed_successfully
+  backend:
+    image: busybox
+    depends_on:
+      gql:
+        condition: service_healthy
+      db_initializer:
+        condition: service_completed_successfully
+      message_sink:
+        condition: service_healthy
+      graphana:
+        condition: service_started
+      prometheus:
+        condition: service_started
 
   tester:
       extends: 
@@ -251,10 +269,3 @@ services:
       # tty: false
       # stdin_open: false
       restart: no
-      depends_on:
-        gql:
-          condition: service_healthy
-        graphana:
-          condition: service_started
-        prometheus:
-          condition: service_started
