@@ -11,6 +11,7 @@ export class Writer {
     stopping = false;
     closed = false;
     deferred = new Deferred<void>();
+    pos = 0;
     constructor(private fileName: string) {
         fsp.open(fileName, 'a').then(h => {
             this.handle = h;
@@ -63,9 +64,13 @@ export class Writer {
             return;
         }
         this.writing = true;
-        const message = this.messages[0];
-        this.messages = this.messages.slice(1);
-        this.handle.write(message + "\n").then(_ => {
+        let buffer = "";
+        while (this.pos < this.messages.length && buffer.length < 256 * 1024) {
+            buffer += this.messages[this.pos++] + "\n";
+        }
+        this.messages.splice(0, this.pos);
+        this.pos = 0;
+        this.handle.write(buffer).then(_ => {
             this.writing = false;
             if (this.stopping && this.messages.length == 0) {
                 this.close();

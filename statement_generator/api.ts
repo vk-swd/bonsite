@@ -2,6 +2,8 @@ import { createServer, Server } from 'http';
 import { EventEmitter } from 'events';
 import { getEnv } from './common/utils.js';
 import { StatementParameters, StatementParametersValidator, reqStatementUrl } from './common/event_types.js';
+import { rmSync } from 'fs';
+import { metrics } from './monitoring_local.js';
 // import * as mt from './monitoring_local.js'
 
 const STATEMENT_GENERATOR_PORT = getEnv("STATEMENT_GENERATOR_PORT");
@@ -19,9 +21,13 @@ export class StatementGenApiServer extends EventEmitter {
                     req.on('end', () => {
                         const p = StatementParametersValidator.parse(JSON.parse(data))
                         statementWriter(p).then(rr => {
+                            metrics?.servedStatementsCount.inc();
                             // TODO: add compression for big responses
                             res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(rr);
+                            // TODO: consider handling backpressure for huge datasets
+                            // or save a file and send it link.
+                            rr.forEach(r => res.write(r));
+                            res.end();
                             // mt.metrics?.successfulApiCallCount.inc();
                         }).catch(err => {
                             console.error('Error in progressReporter:', err);

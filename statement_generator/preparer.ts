@@ -3,8 +3,10 @@ import { InKafkaMessage, StatementParameters, StatementType } from "./common/eve
 import { Deferred, getEnv } from './common/utils.js';
 import { UserConnection } from "./common/db/db_defines.js";
 import { Writer } from './writer.js';
+import { metrics, updateMaxResponseDelayMs } from './monitoring_local.js';
+import { logger } from './common/logger.js';
+import { last } from './common/utils.js';
 
-let requestCount = 0;
 const SHARED_DIR = getEnv('SHARED_DIR');
 
 const ABORT_CHECK_MIN_INTERVAL_MS = 1000;
@@ -35,29 +37,46 @@ export class BaseWorker<O> implements Worker<O> {
 }
 export class Serialiser extends BaseWorker<string[]> {
     deferred = new Deferred<string[]>();
+    creationTime = Date.now();
     constructor() {
         super();
     }
     work(lines: InKafkaMessage[]): Promise<string[]> {
         this.deferred.resolve(lines.map(l => JSON.stringify(l)));
+        metrics?.servedStatementsCount.inc();
+        metrics?.servedTransactionRecords.inc(lines.length);
+        updateMaxResponseDelayMs(Date.now() - this.creationTime);
         return this.deferred.promise;
     }
 }
 export class FileWriter extends BaseWorker<string[]> {
     deferred = new Deferred<string[]>();
     writer: Writer;
-    constructor(private fileName: string) {
+    creationTime = Date.now();
+    constructor(private fileName: string, baseDir: string = SHARED_DIR) {
         super();
-        this.writer = new Writer(fileName);
+        this.writer = new Writer(baseDir + '/' + fileName);
     }
     work(lines: InKafkaMessage[]): Promise<string[]> {
         lines.forEach(l => this.writer.addMessage(JSON.stringify(l)));
-        this.writer.flushAndStop().then(() => {
+        this.writer.flushAndStop().then(async () => {
+            metrics?.filesGenerated.inc();
+            metrics?.servedStatementsCount.inc();
+            metrics?.servedTransactionRecords.inc(lines.length);
+            updateMaxResponseDelayMs(Date.now() - this.creationTime);
             this.deferred.resolve([this.fileName]);
         }).catch(e => {
+            metrics?.fileWriteErrors.inc();
             this.deferred.reject(e);
         });
         return this.deferred.promise;
+    }
+    cancel(reason?: any): void {
+        this.writer.abort().then(() => {
+            this.deferred.reject(reason);
+        }).catch(e => {
+            this.deferred.reject(`Error aborting file write ${this.fileName} : ${e}`);
+        });
     }
 }
 
@@ -83,6 +102,7 @@ export class BundleHandler<O> {
         if (this.bundleTimer) {
             return;
         }
+        // TODO: A balanced task bundling to minimize latency and maximize throughput
         this.bundleTimer = setTimeout(async () => {
             // TODO: track max delay between runs and number of processed records
             // process all waiting tasks in a bundle
@@ -105,6 +125,8 @@ export class BundleHandler<O> {
             let currentResult: InKafkaMessage[] = [];
             let listIdx: number | undefined = undefined;
             try {
+                console.log(`getting transactions ${JSON.stringify(params)} statement requests`);
+                metrics?.databaseRequests.inc();
                 await this.db_connection!.getTransactions(params, async (user: number, line: InKafkaMessage) => {
                     if (listIdx === undefined) {
                         listIdx = 0;
@@ -114,7 +136,9 @@ export class BundleHandler<O> {
                         }
                     } else if (listIdx >= params.length) {
                         // all users processed, but db returned more - stopr request but dont reject all
-                        throw new Error(`Received transaction for user ${user} after all ${params.length} users were processed`);
+                        logger.error(`Received transaction ${JSON.stringify(line)}. 
+                        Requested users ${JSON.stringify(last(params))}. Ignoring.`);
+                        return;
                     } else if (user !== params[listIdx].userId) {
                         tasks[listIdx].work(currentResult);
                         listIdx++;
@@ -127,6 +151,7 @@ export class BundleHandler<O> {
                     currentResult.push(line);
                 })
             } catch(e) {
+                metrics?.databaseRequestErrors.inc();
                 if (listIdx !== undefined) {
                     for (let i = listIdx; i < tasks.length; i++) {
                         tasks[i].cancel(`Error processing user ${params[i].userId} : ${e}`);
@@ -153,7 +178,7 @@ export class Preparer extends BundleHandler<string[]> {
         super(maxInFlight, db_connection, (p: StatementParameters) => {
             if ((p.type ?? StatementType.FS) === StatementType.FS) {
                 const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
-                return new FileWriter(SHARED_DIR + "/" + fileName);
+                return new FileWriter(fileName);
             } else {
                 return new Serialiser();
             }

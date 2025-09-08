@@ -3,11 +3,9 @@ import { BundleHandler, FileWriter, BaseWorker } from './preparer.js';
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult } from './common/event_types.js';
-import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
+import { Deferred, getEnv, last, processLineByLine, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
 import {it, describe} from 'mocha'
-import fs from 'fs';
 import fsp from 'fs/promises';
-import { once } from 'events';
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { logger } from './common/logger.js';
@@ -15,7 +13,6 @@ import { connectToDatabase, runQuery } from './common/db/common.js';
 import { Counters, UserCounters } from './common/generator_parameters.js';
 import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
 import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
-import { createInterface } from 'readline/promises';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -222,20 +219,6 @@ describe('Sanity check', function () {
             const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
             return new FileWriter(fileName);
         });
-        async function processLineByLine(fileName: string, processor: (line: string) => void) {
-            let lineCount = 0;
-            const rl = createInterface({
-                input: fs.createReadStream(fileName),
-                crlfDelay: Infinity,
-            });
-
-            rl.on('line', (line) => {
-                lineCount++;
-                processor(line);
-            });
-            await once(rl, 'close');
-            return lineCount;
-        }
         const progressWrite = new ProgressPrinter(p.length, (pc) => `files written ${pc}%, files read 0%`); 
         const files = (await Promise.all(p.map(par => preparer1.addTask(par).then(r=> {
             progressWrite.writeProgress();
@@ -244,7 +227,7 @@ describe('Sanity check', function () {
 
         async function getMessages(fileName: string) {
             const messages: InKafkaMessage[] = [];
-            await processLineByLine(fileName, (line: string) => {
+            await processLineByLine(fileName, async (line: string) => {
                 messages.push(MetadataWrapperValidator.parse(JSON.parse(line)));
             });
             return messages;
