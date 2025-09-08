@@ -10,7 +10,8 @@ class Metrics {
         public serverSetUpFailed: prom.Counter,
         public requestCount: prom.Counter,
         public requestSuccess: prom.Counter,
-        public requestError: prom.Counter) {
+        public requestError: prom.Counter,
+        public maxResponseDelayMs: prom.Counter) {
     }
 }
 
@@ -26,13 +27,21 @@ export async function startMonitoring() {
         await makeCounter('server_setup_failed', 'Number of times server setup failed', localReg),
         await makeCounter('request_count', 'Number of requests received', localReg),
         await makeCounter('request_success', 'Number of successful requests', localReg),
-        await makeCounter('request_error', 'Number of requests that resulted in an error', localReg)
+        await makeCounter('request_error', 'Number of requests that resulted in an error', localReg),
+        await makeCounter('max_response_delay_ms', 'Maximum response delay in milliseconds', localReg)
     );
     server = new MonitoringServer(async () => {
         logger.info("Scraping metrics");
-        const metrics = await localReg.metrics();
-        return metrics;
+        metrics?.maxResponseDelayMs.inc(maxApiResponseDelayMs);
+        maxApiResponseDelayMs = 0;
+        const metrics1 = await localReg.metrics();
+        return metrics1;
     });
 }
-
+let maxApiResponseDelayMs = 0;
+export function updateMaxApiResponseDelayMs(value: number) {
+    if (value > maxApiResponseDelayMs) {
+        maxApiResponseDelayMs = value;
+    }
+}
 export { dumpRegistry } from "./common/monitoring.js";

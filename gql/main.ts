@@ -37,8 +37,6 @@ input StatementParameters {
 
 const getProgress: GraphQLUnionType = schema.getType("ReProg")! as GraphQLUnionType;
 getProgress!.resolveType = (value: any) => {
-    // console.log("Resolving type for:", JSON.stringify(obj));
-    console.log("Resolving type for:");
     console.log("Resolving type for:", JSON.stringify(value));
     if (value.status !== undefined) {
       return "Result";
@@ -101,6 +99,7 @@ function zodParse<T>(data: string | Object, validator: ZodType<T>): T {
 }
 function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T> = defaultDataHandler, init?: RequestInit): Promise<T|gp.RequestResult> {
   console.log(`Fetching ${url} with init: ${JSON.stringify(init)}`);
+  const now = Date.now();
   return fetch(url, init)
     .then(res => {
       if (!res.ok) {
@@ -118,7 +117,10 @@ function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T> 
       logger.error(msg);
       mtx.metrics?.requestError.inc();
       return { status: RequestStatus.ERROR, message: msg };
-    });
+    }).finally(() => {
+        const delay = Date.now() - now;
+        mtx.updateMaxApiResponseDelayMs(delay);
+    })
 }
 const Query = {
   hello: () => "Hello world!",
