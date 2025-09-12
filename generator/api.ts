@@ -4,6 +4,7 @@ import { GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatU
 import { getEnv } from './common/utils.js';
 import * as mt from './monitoring_local.js'
 import { handleRequest } from './common/apiRequestHandler.js';
+import { logger } from './common/logger.js';
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 
@@ -54,7 +55,7 @@ export class GenApiServer extends EventEmitter {
     constructor(private progressReporter: () => ProgressReport, private getStat: () => Promise<string>) {
         super()
         this.server = createServer(async (req, res) => {
-            console.log(`RECEIVING SOME REQUEST ${req.url}`)
+            logger.info(`RECEIVING SOME REQUEST ${req.url}`)
             mt.metrics?.apiCallCount.inc();  
             if (this.handleStart(req, res)) return;
             if (this.handleStop(req, res)) return;
@@ -65,7 +66,7 @@ export class GenApiServer extends EventEmitter {
             mt.metrics?.unknownApiCallCount.inc();
         });
         this.server.listen(GENERATOR_PORT, () => {
-            console.log(`Server listening on port ${GENERATOR_PORT}`);
+            logger.info(`Server listening on port ${GENERATOR_PORT}`);
         })
     }
 }

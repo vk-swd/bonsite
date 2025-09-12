@@ -39,19 +39,29 @@ export const ProgressReportValidator = z.object({
     percentComplete: z.number()
 });
 export type ProgressReport = z.infer<typeof ProgressReportValidator>;
-
+const MAGIC_UNDEFINED = -1;
 export class Counters {
     constructor(
         public userId: number = 0,
         public amountSum: number = 0,
         public transactionCount: number = 0,
-        public transactionSeqNumber: number = 0,
-        public transactionResultSeqNumber: number = 0,
-        public minDate: number = Number.MAX_SAFE_INTEGER,
-        public maxDate: number = 0
+        public minDate: number | undefined = undefined,
+        public maxDate: number | undefined = undefined
     ) {}
+    updateMinDate(date: number) {
+        if (this.minDate === undefined || date < this.minDate) {
+            this.minDate = date;
+        }
+    }
+    updateMaxDate(date: number) {
+        if (this.maxDate === undefined || date > this.maxDate) {
+            this.maxDate = date;
+        }
+    }
     serialise(): string {
-        return [this.userId, Math.floor(this.amountSum), this.transactionCount, this.transactionSeqNumber, this.transactionResultSeqNumber, this.minDate, this.maxDate].join(",");
+        return [this.userId, Math.floor(this.amountSum), 
+            this.transactionCount, 
+            this.minDate??MAGIC_UNDEFINED, this.maxDate??MAGIC_UNDEFINED].join(",");
     }
     static deserialise(data: string): Counters {
         const parts = data.split(",");
@@ -59,10 +69,8 @@ export class Counters {
             parseInt(parts[0]),
             parseInt(parts[1]),
             parseInt(parts[2]),
-            parseInt(parts[3]),
-            parseInt(parts[4]),
-            parseInt(parts[5]),
-            parseInt(parts[6])
+            parts[3] == `${MAGIC_UNDEFINED}` ? undefined : parseInt(parts[3]),
+            parts[4] == `${MAGIC_UNDEFINED}` ? undefined : parseInt(parts[4])
         );
     }
 }

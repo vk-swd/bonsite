@@ -25,10 +25,10 @@ export async function startMonitoring() {
     }
     metrics = new Metrics(
         await makeCounter('server_setup_failed', 'Number of times server setup failed', localReg),
-        await makeCounter('request_count', 'Number of requests received', localReg),
-        await makeCounter('request_success', 'Number of successful requests', localReg),
-        await makeCounter('request_error', 'Number of requests that resulted in an error', localReg),
-        await makeCounter('max_response_delay_ms', 'Maximum response delay in milliseconds', localReg)
+        await makeCounter('api_calls_total', 'Number of gql calls received', localReg),
+        await makeCounter('api_success_total', 'Number of successful gql calls', localReg),
+        await makeCounter('api_error_total', 'Number of gql calls that resulted in an error', localReg),
+        await makeCounter('max_api_response_delay_ms', 'Maximum response delay in milliseconds', localReg)
     );
     server = new MonitoringServer(async () => {
         logger.info("Scraping metrics");

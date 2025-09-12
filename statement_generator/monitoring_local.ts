@@ -6,6 +6,10 @@ export const localReg: prom.Registry = new prom.Registry();
 
 class Metrics {
     constructor(
+        public apiCallCount: prom.Counter,
+        public apiSuccess: prom.Counter,
+        public apiError: prom.Counter,
+        public apiUnknown: prom.Counter,
         public statementRequestCount: prom.Counter,
         public servedStatementsCount: prom.Counter,
         public maxResponseDelayMs: prom.Counter,
@@ -34,9 +38,13 @@ export async function startMonitoring() {
         return;
     }
     metrics = new Metrics(
+        await makeCounter('api_calls_total', 'Number of API calls received', localReg),
+        await makeCounter('api_success_total', 'Number of successful API calls', localReg),
+        await makeCounter('api_error_total', 'Number of API calls that resulted in an error', localReg),
+        await makeCounter('api_unknown_total', 'Number of API calls that resulted in an unknown status', localReg),
         await makeCounter('statement_requests_total', 'Number of statement requests received', localReg),
         await makeCounter('served_statements_total', 'Number of statements served', localReg),
-        await makeCounter('max_response_delay_ms', 'Maximum response delay in milliseconds', localReg),
+        await makeCounter('max_api_response_delay_ms', 'Maximum response delay in milliseconds', localReg),
         await makeCounter('served_transaction_records_total', 'Number of transaction records served', localReg),
         await makeCounter('files_generated_total', 'Number of files generated', localReg),
         await makeCounter('database_requests_total', 'Number of database requests made', localReg),

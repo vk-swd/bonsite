@@ -37,7 +37,6 @@ input StatementParameters {
 
 const getProgress: GraphQLUnionType = schema.getType("ReProg")! as GraphQLUnionType;
 getProgress!.resolveType = (value: any) => {
-    console.log("Resolving type for:", JSON.stringify(value));
     if (value.status !== undefined) {
       return "Result";
     }
@@ -98,14 +97,13 @@ function zodParse<T>(data: string | Object, validator: ZodType<T>): T {
   }
 }
 function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T> = defaultDataHandler, init?: RequestInit): Promise<T|gp.RequestResult> {
-  console.log(`Fetching ${url} with init: ${JSON.stringify(init)}`);
   const now = Date.now();
+  mtx.metrics?.requestCount.inc();
   return fetch(url, init)
     .then(res => {
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
-      console.log(`Request to ${url} successful, status: ${JSON.stringify(res)}`);
       return dataHandler(res)
     })
     .then(data => {
@@ -154,7 +152,7 @@ try {
     })
   );
   app.listen(GRAPH_QL_PORT, () => {
-    console.log(`Running a GraphQL API server at http://localhost:${GRAPH_QL_PORT}/graphql`);
+    logger.info(`Running a GraphQL API server at http://localhost:${GRAPH_QL_PORT}/graphql`);
   });
 } catch (e) {
   const msg = `Error starting GraphQL server: ${JSON.stringify(e)}`;

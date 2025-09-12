@@ -33,8 +33,6 @@ dateBefore: z.number().optional(),
 dateAfter: z.number().optional()
 });
 export const MetadataValidator = z.object({
-    seqNumber: z.number().optional(),
-    isIgnored: z.boolean().optional(),
     dateTime: z.number().optional(),
     userDatePtrs: z.array(DatePtrValidator).optional(),
     state: z.nativeEnum(TResult).optional()

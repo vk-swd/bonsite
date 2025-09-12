@@ -13,6 +13,7 @@ export class Writer {
     deferred = new Deferred<void>();
     pos = 0;
     constructor(private fileName: string) {
+        //TODO: make it open file only if there is something to write (on the 1st line)
         fsp.open(fileName, 'a').then(h => {
             this.handle = h;
             this.write();

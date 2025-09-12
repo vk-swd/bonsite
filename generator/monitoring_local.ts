@@ -49,9 +49,10 @@ export async function startMonitoring() {
         return;
     }
     metrics = new Metrics(
-        await makeCounter('api_call_count', 'Number of API calls made to the generator', localReg),
-        await makeCounter('api_failed_call_count', 'Number of failed API calls made to the generator', localReg),
-        await makeCounter('api_unknown_call_count', 'Number of unknown API calls made to the generator', localReg),
+        await makeCounter('api_calls_total', 'Number of API calls made to the generator', localReg),
+        await makeCounter('api_error_total', 'Number of failed API calls made to the generator', localReg),
+        await makeCounter('api_unknown_total', 'Number of unknown API calls made to the generator', localReg),
+        
         await makeCounter('kafka_producer_disconnect_count', 'Number of times the producer disconnected', localReg),
         await makeCounter('kafka_producer_network_request_timeout_count', 'Number of network request timeouts', localReg),
         await makeCounter('kafka_producer_network_request_count', 'Number of network requests made by the producer', localReg),
@@ -62,7 +63,7 @@ export async function startMonitoring() {
         await makeCounter('kafka_producer_retry_count', 'Number of retries made by the producer', localReg),
         await makeCounter('kafka_producer_max_send_latency_ms', 'Maximum time taken to send a message in milliseconds', localReg),        
         new prom.Gauge({ name: 'generatedTransactionId', help: 'id of last message produced by generator', registers: [localReg] }),
-        await makeCounter('max_response_delay_ms', 'Maximum response delay in milliseconds', localReg)
+        await makeCounter('max_api_response_delay_ms', 'Maximum response delay in milliseconds', localReg)
     )
     server = new MonitoringServer(async () => {
         logger.info(`Scraping metrics ${totalmsgSent.value}`);

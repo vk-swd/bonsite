@@ -29,7 +29,7 @@ export type TransactionResultScheduled = {
 const KAFKA_TOPICS_TRANSACTIONS: string = getEnv("KAFKA_TOPICS_TRANSACTIONS");
 const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
 const MS_PER_SECOND = 1000;
-export type TransactionEvent = {topic: string, event: InKafkaMessage, seqNumberer?: () => number};
+export type TransactionEvent = {topic: string, event: InKafkaMessage};
 
 class TransactionEventsQueue {
     private events = new PriorityQ<TransactionEvent>((a,b) => a.event.payload.dateTime < b.event.payload.dateTime);
@@ -105,9 +105,6 @@ export class Generator {
         }
         const events = this.queue.dequeEvents(count);
         for (const e of events) {
-            if (e.seqNumberer !== undefined) {
-                e.event.metadata.seqNumber = e.seqNumberer();
-            }
             if (e.topic === KAFKA_TOPICS_TRANSACTIONS) {
                 this.transactionsEnqueued--;
             }
@@ -135,7 +132,7 @@ export class Generator {
                 userIdFrom,
                 userIdTo,
                 dateTime: Math.floor(transactionTime),
-                amount: Math.random() * 1000
+                amount: 1 + Math.floor(Math.random() * 1000)
             }
             const result: TransactionResult = {
                 dateTime: this.delayGenerator.delay(transactionTime),
@@ -148,22 +145,22 @@ export class Generator {
 
             userStatFrom.transactionCount++;
             userStatFrom.amountSum += transaction.amount;
+            userStatFrom.updateMinDate(transaction.dateTime);
+            userStatFrom.updateMaxDate(transaction.dateTime);
             if (userIdFrom !== userIdTo) {
                 userStatTo.transactionCount++;
                 userStatTo.amountSum += transaction.amount;
+                userStatTo.updateMinDate(transaction.dateTime);
+                userStatTo.updateMaxDate(transaction.dateTime);
             }
 
             const tEvent: InKafkaMessage = { payload: transaction, metadata:
-                { seqNumber: userStatFrom.transactionSeqNumber++,
-                    isIgnored: false } };
+                { } };
             const rEvent: InKafkaMessage = { payload:result, metadata:
-                { seqNumber: 0, // Seq number is accounted only for outgoing transactions
-                    isIgnored: false } };
+                { } };
 
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: tEvent });
-            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent, seqNumberer: () => {
-                return this.msgMetaDataPerUser.get(userIdTo)!.transactionResultSeqNumber++;
-            }});
+            this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent });
         }
         this.transactionsGenerated += count;
         this.transactionsEnqueued += count;

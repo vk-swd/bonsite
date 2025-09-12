@@ -13,7 +13,7 @@ export class StatementGenApiServer extends EventEmitter {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.url}`)
-            // mt.metrics?.apiCallCount.inc();
+            metrics?.apiCallCount.inc();
             if (req.method === 'POST') {
                 if (req.url === '/' + reqStatementUrl) {
                     let data = '';
@@ -21,30 +21,32 @@ export class StatementGenApiServer extends EventEmitter {
                     req.on('end', () => {
                         const p = StatementParametersValidator.parse(JSON.parse(data))
                         statementWriter(p).then(rr => {
-                            metrics?.servedStatementsCount.inc();
                             // TODO: add compression for big responses
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             // TODO: consider handling backpressure for huge datasets
                             // or save a file and send it link.
                             rr.forEach(r => res.write(r));
                             res.end();
-                            // mt.metrics?.successfulApiCallCount.inc();
+                            metrics?.apiSuccess.inc();
                         }).catch(err => {
                             console.error('Error in progressReporter:', err);
                             // mt.metrics?.failedApiCallCount.inc();
                             res.writeHead(500);
                             res.end(`Internal Server Error: ${err}`);
+                            metrics?.apiError.inc();
                         });
                     });
                 } else {
                     // mt.metrics?.failedApiCallCount.inc();
                     res.writeHead(404);
                     res.end('Not Found');
+                    metrics?.apiUnknown.inc();
                 }
             } else {
                 // mt.metrics?.failedApiCallCount.inc();
                 res.writeHead(404);
                 res.end('Not Found');
+                metrics?.apiUnknown.inc();
             }
         });
         this.server.listen(STATEMENT_GENERATOR_PORT, () => {

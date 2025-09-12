@@ -3,7 +3,7 @@ import { BundleHandler, FileWriter, BaseWorker } from './preparer.js';
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult } from './common/event_types.js';
-import { Deferred, getEnv, last, processLineByLine, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
+import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
 import {it, describe} from 'mocha'
 import fsp from 'fs/promises';
 import chai, { expect } from 'chai';
@@ -13,6 +13,7 @@ import { connectToDatabase, runQuery } from './common/db/common.js';
 import { Counters, UserCounters } from './common/generator_parameters.js';
 import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
 import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
+import { processLineByLine } from './common/files.js';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -21,6 +22,7 @@ chai.config.truncateThreshold = 10000
 const topics = ["trans", "res"];
 const [topic_transaction_res, topic_transactions] = topics;
 
+const SHARED_DIR = getEnv('SHARED_DIR');
 const user_sa = getEnv('MSSQL_SA_USERNAME')
 
 let db_connection: UserConnection | undefined = undefined
@@ -213,11 +215,11 @@ describe('Sanity check', function () {
         return analyzedTransactions;
     }
     const testParametersWrites = async (p: StatementParameters[]) => {
-        // Transactions must be sorted by userId so when the data for new user comes, the previous user is considered done
+        // Produce "n.length" satement files, then read them all, analyze and delete
         let analyzedTransactions = 0;
         const preparer1 = new BundleHandler<string[]>(100000, db_connection!, (p: StatementParameters) => {
             const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
-            return new FileWriter(fileName);
+            return new FileWriter(fileName, p);
         });
         const progressWrite = new ProgressPrinter(p.length, (pc) => `files written ${pc}%, files read 0%`); 
         const files = (await Promise.all(p.map(par => preparer1.addTask(par).then(r=> {
@@ -234,7 +236,7 @@ describe('Sanity check', function () {
         }
         const progressRead = new ProgressPrinter(p.length, (pc) => `files written 100%, files read ${pc}%`); 
         for (let i = 0; i < files.length; i++) {
-            const fileName = files[i];
+            const fileName = SHARED_DIR + "/" + files[i];
             const messages = await getMessages(fileName);
             analyzedTransactions += messages.length;
             analyzeUser(messages, p[i]);
@@ -247,18 +249,20 @@ describe('Sanity check', function () {
     const generateParameters = (userCounter: [number, Counters][]): StatementParameters[] => {
         const threshold = Math.random();
         return userCounter.filter(() => Math.random() < threshold).map(c => {
-            const dateRange = c[1].maxDate - c[1].minDate;
+            const minDate = c[1].minDate??new Date(MIN_DATE).getTime();
+            const maxDate = c[1].maxDate??new Date(MAX_DATE).getTime();
+            const dateRange = maxDate - minDate;
             const itemCount = c[1].transactionCount;
             if (itemCount == 0) {
                 return { userId: c[0], fromm: new Date(MIN_DATE).getTime(), too: new Date(MAX_DATE).getTime()};
             }
-            const minDateToGen = Math.floor(c[1].minDate - dateRange / itemCount);
-            const maxDateToGen = Math.ceil(c[1].maxDate + dateRange / itemCount);
+            const minDateToGen = Math.floor(minDate - dateRange / itemCount);
+            const maxDateToGen = Math.ceil(maxDate + dateRange / itemCount);
             // Add some room for the first and last item to make them more likely to be included
             const dateRangeToGen = maxDateToGen - minDateToGen;
 
-            const fromm = Math.min(c[1].maxDate, minDateToGen + Math.floor(Math.random() * dateRangeToGen));
-            const too = Math.max(c[1].minDate, fromm + Math.floor(Math.random() * (maxDateToGen - fromm)));
+            const fromm = Math.min(maxDate, minDateToGen + Math.floor(Math.random() * dateRangeToGen));
+            const too = Math.max(minDate, fromm + Math.floor(Math.random() * (maxDateToGen - fromm)));
             return { userId: c[0], fromm, too, type: StatementType.FS };
         });
     }
@@ -274,16 +278,15 @@ describe('Sanity check', function () {
             if (meta.state == TResult.CONFIRMED) {
                 const counterFrom = userCounterMap.get(res.userIdFrom);
                 counterFrom.transactionCount++;
-                counterFrom.minDate = Math.min(counterFrom.minDate, res.dateTime);
-                counterFrom.maxDate = Math.max(counterFrom.maxDate, res.dateTime);
+                counterFrom.updateMinDate(res.dateTime);
+                counterFrom.updateMaxDate(res.dateTime);
                 if (res.userIdFrom != res.userIdTo) {
                     const counterTo = userCounterMap.get(res.userIdTo);
-                    counterFrom.transactionCount++;
-                    counterTo.minDate = Math.min(counterTo.minDate, res.dateTime);
-                    counterTo.maxDate = Math.max(counterTo.maxDate, res.dateTime);
+                    counterTo.transactionCount++;
+                    counterTo.updateMinDate(res.dateTime);
+                    counterTo.updateMaxDate(res.dateTime);
                 }
             }
-            
             streamedLines++;
             if (progressRead == undefined) {
                 progressRead = new ProgressPrinter(count, (pc) => `Streaming files to read stats: ${pc}%`)
@@ -306,32 +309,36 @@ describe('Sanity check', function () {
         const userCounter:[number, Counters][] = await readStats();
         const interations = 20
         let t1 = Date.now();
-        const speedStats: [number,number,number, number][] = [];
-        const printStat = (s: [number,number,number, number]) => {
-            return `${s[0]} t-s, ${s[1]} users, ${s[3]} ms, ${(s[0]/s[1]).toFixed(0)} t/user ${(s[0]/s[3]).toFixed(0)} t/ms`
+        type SpeedStat = [number, number, number, number, number]; // transactions, users, ms total, ms read
+        const speedStats: SpeedStat[] = [];
+        const printStat = (s: SpeedStat) => {
+            return `${s[0]} t-s, ${s[1]} users, ${s[3]} ms, ${s[4]}ms, ${(s[0]/s[1]).toFixed(0)} t/user ${(s[0]/s[3]).toFixed(0)} t/ms`
         }
         const progressTracker = new ProgressPrinter(interations, (pc) => `Processing stats: ${printStat(last(speedStats)!)}. Progress: ${pc}%`);
         for (let i = 0; i < interations; i++) {
             const parameters = generateParameters(userCounter);
             const newNow1 = Date.now();
             const elapsed1 = newNow1 - t1;
+            let elapsed11 = 0;
             t1 = newNow1;
             if (parameters.length == 0) {
                 continue;
             }
             let transactions
+            let rawLines;
             try {
                 process.stdout.write(`\n`); // for progress output
                 transactions = await testParametersWrites(parameters);
-                const rawLines = await testParameters(parameters);
-                expect(transactions, `Different number of transactions processed in write and read modes`).to.be.eq(rawLines);
+                elapsed11 = Date.now() - t1;
+                rawLines = await testParameters(parameters);
             } catch(e) {
                 throw `Error ${JSON.stringify(e).slice(-5000)} at iteration ${i} of ${parameters.length}`;
             }
+            expect(transactions, `Different number of transactions processed in write and read modes`).to.be.eq(rawLines);
             const newNow = Date.now();
             const elapsed = newNow - t1;
             t1 = newNow;
-            speedStats.push([transactions!, parameters.length, elapsed1, elapsed]);
+            speedStats.push([transactions!, parameters.length, elapsed1, elapsed, elapsed11]);
             progressTracker.writeProgress();
         }
         console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)
