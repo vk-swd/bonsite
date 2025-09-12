@@ -174,11 +174,12 @@ export class BundleHandler<O> {
 }
 
 export class Preparer extends BundleHandler<string[]> {
+    salt = 0;
     constructor(db_connection: UserConnection, maxInFlight: number = 100000) {
         super(maxInFlight, db_connection, (p: StatementParameters) => {
             if ((p.type ?? StatementType.FS) === StatementType.FS) {
-                const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
-                return new FileWriter(fileName);
+                const fileName = `statement-${p.userId}-${p.fromm}-${p.too}-${new Date().toISOString()}-${this.salt++}.json`;
+                return new FileWriter(fileName, p);
             } else {
                 return new Serialiser();
             }
