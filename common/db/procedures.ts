@@ -38,7 +38,8 @@ class GetTransactionsProc implements SProc<StatementReqParam> {
             const from = StatmentParamTable.columns.fromm!.name;
             const to = StatmentParamTable.columns.too!.name;
             const id = StatmentParamTable.columns.userId.name;
-            return `select p.${id} as pid, t.*
+            const idx = StatmentParamTable.columns.idx.name;
+            return `select p.${id} as pid, p.${idx} as pidx, t.*
             from ${StatmentParamTable.name} as p
             left join
             ${transactionsTable.name} as t
@@ -60,7 +61,7 @@ class GetTransactionsProc implements SProc<StatementReqParam> {
         ${selectUsers(transactionsTable.columns.userIdTo.name)}
         and t.${transactionsTable.columns.userIdTo.name} != t.${transactionsTable.columns.userIdFrom.name}
         )
-        select * from unioned order by pid, ${transactionsTable.columns.dateTime.name}
+        select * from unioned order by pidx, ${transactionsTable.columns.dateTime.name}
         `
         ;
     }

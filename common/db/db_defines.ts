@@ -5,6 +5,7 @@ import { logger } from '../logger.js'
 import { Column, IdentityColumn, kafkaOffsetTable, parseQueryRes, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './tables.js'
 import { connectToDatabase, database, runQuery } from './common.js'
 import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable } from './procedures.js'
+import { Deferred } from '../utils.js'
 
 function setQueryInput<T, K extends keyof T>(request: sql.Request, column: Column<T, K>, value: T, arg?: string): void {
     request.input(arg ? arg : column.inputName!, column.type.type(), column.value(value));
@@ -160,43 +161,57 @@ export class UserConnection {
             (${rawDataTable.columns.data.name})
             VALUES (@${placeholder});`);
     }
-    async getTransactions(p: StatementParameters[], processor: (user: number, line: InKafkaMessage) => Promise<void>): Promise<void> {
+    async getTransactions(p: StatementParameters[], processor: (user: number, reqId: number, line: InKafkaMessage) => Promise<void>): Promise<void> {
         const request = this.pool.request();
         await request.query(`DROP TABLE IF EXISTS ${StatmentParamTable.name}`);
-        await request.batch(`create table ${StatmentParamTable.name} (
+        const rrr = await request.batch(`create table ${StatmentParamTable.name} (
             ${procGetTransactions.columns
-                .map((c, idx) => `${c.name} ${c.type.name} ${idx == 0 ? c.extra : ""}`).join(', ')})`)
+                .map((c, idx) => `${c.name} ${c.type.name}`).join(', ')})`)
         const table = new sql.Table(StatmentParamTable.name);
-        const dataColumns = procGetTransactions.columns.slice(1); // skip idx
+        const dataColumns = procGetTransactions.columns;
         try {
             dataColumns.forEach(c => table.columns.add(c.name, c.type.type()))
         } catch (e) {
             throw `Failed to make table for getTransactions ${JSON.stringify(p)}: ${e}`
         }
         try {
-            for (const record of p) {
-                table.rows.add(...dataColumns.map(c => c.value(record as StatementParameters & {idx: number})));
+            for (let idx = 0; idx < p.length; idx++) {
+                const record = {...p[idx], idx: idx};
+                table.rows.add(...dataColumns.map(c => c.value(record)));
             }
             await request.bulk(table);
         } catch (e) {
             throw `Failed to add statement parameter record ${JSON.stringify(p)}: ${e}`
         }
         request.stream = true; // Enable streaming
+        const deferred = new Deferred<void>();
+        let inFlight = 0;
+        let done = false;
         request.on('row', async (row: any) => {
             const parsed = parseQueryRes(row, transactionsTable.columns);
-            const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;
-            try {
-                await processor(Number.parseInt(row.pid), res);
-            } catch (e) {
-                logger.error(`Error processing transaction for user ${row.pid} : ${e}`);
+            const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;            
+            inFlight++;
+            processor(Number.parseInt(row.pid),Number.parseInt(row.pidx), res)
+            .catch(e => {
                 request.cancel();
-            }
+                deferred.reject(`Error processing transaction for) user ${row.pid} : ${e}`);
+            }).finally(() => {
+                inFlight--
+                if (inFlight == 0 && done) {
+                    deferred.resolve();
+                }
+            });
         })
         try {
             await request.batch(`EXEC ${procGetTransactions.procName}`);
         } catch (e) {
-            throw `Failed to getTransactions ${JSON.stringify(p)}: ${e}`
+            deferred.reject(`Error running getTransactions ${JSON.stringify(p)}: ${e}`);
         }
+        done = true;
+        if (inFlight == 0) {
+            deferred.resolve();
+        }
+        await deferred.promise;
     }
     async getRawData(count: number, table: RawTables): Promise<any[]> {
         const request = this.pool.request();
