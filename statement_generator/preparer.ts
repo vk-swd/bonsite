@@ -95,7 +95,7 @@ export class FileWriter extends BaseWorker<string[]> {
 }
 
 export class BundleHandler<O> {
-    waitingList: Worker<O>[] = [];
+    waitingList: {user: number, task: Worker<O>, param: StatementParameters}[] = [];
     statementParams: StatementParameters[] = [];
     bundleTimer: NodeJS.Timeout | undefined = undefined;
     inFlightResuests = 0;
@@ -105,7 +105,7 @@ export class BundleHandler<O> {
     }
     addTask(p: StatementParameters): Promise<O> {
         const task: Worker<O> = this.workerFactory(p);
-        this.waitingList.push(task as Worker<O>);
+        this.waitingList.push({user: p.userId, task, param: p});
         this.statementParams.push(p);
         if (!this.bundleTimer) {
             this.start();
@@ -133,57 +133,66 @@ export class BundleHandler<O> {
                 return;
             }
             // TODO: consider resolving tasks and params in chunks
+            
             const tasks = this.waitingList.splice(0, toProcess);
-            const params = this.statementParams.splice(0, toProcess);
             this.inFlightResuests += toProcess;
-            let currentResult: InKafkaMessage[] = [];
-            let listIdx: number | undefined = undefined;
+            let currentResult: [InKafkaMessage,number][] = [];
+            let lastReqId: number | undefined = undefined;
             try {
-                console.log(`getting transactions ${JSON.stringify(params)} statement requests`);
                 metrics?.databaseRequests.inc();
-                await this.db_connection!.getTransactions(params, async (user: number, line: InKafkaMessage) => {
-                    if (listIdx === undefined) {
-                        listIdx = 0;
-                        for (; listIdx < params.length
-                                && params[listIdx].userId !== user; listIdx++) {
-                            tasks[listIdx].work([]);
+                await this.db_connection!.getTransactions(tasks.map(t => t.param), async (user: number, reqId: number, line: InKafkaMessage) => {
+                    /* An assumprion here that "db_connection.getTransactions" will asssign
+                        "idx" column to the parameter locatein in the "params" array
+                        That's why the "params" index - listIdx - is used as request identifier
+                    */
+                    if (reqId > tasks.length || tasks[reqId].user !== user 
+                        || ((lastReqId !== undefined) && (reqId < lastReqId))) {
+                        throw `Unexpected output in a transactions request.
+                        reqId: ${reqId}, user: ${user}, 
+                        lastReqId ${lastReqId}, ${lastReqId ? `last user ${tasks[lastReqId].user}` : ``}
+                        Ignoring ${tasks.length} tasks from ${tasks[0].user} to ${last(tasks)?.user}.`
+                    }
+                    if (lastReqId === undefined) {
+                        //if transactions started not from the first task.
+                        lastReqId = reqId;
+                        for (let i = 0; i < lastReqId; i++) {
+                                    tasks[i].task.work([]);
                         }
-                    } else if (listIdx >= params.length) {
-                        // all users processed, but db returned more - stopr request but dont reject all
-                        logger.error(`Received transaction ${JSON.stringify(line)}. 
-                        Requested users ${JSON.stringify(last(params))}. Ignoring.`);
-                        return;
-                    } else if (user !== params[listIdx].userId) {
-                        tasks[listIdx].work(currentResult);
-                        listIdx++;
+                    } else if (lastReqId !== reqId) {
+                        tasks[lastReqId].task.work(currentResult.map(r => r[0]));
                         currentResult = [];
                         // Some users may be skipped if dates didn't include any transactions
-                        for (;listIdx < params.length && params[listIdx].userId != user; listIdx++) {
-                            tasks[listIdx].work([]);
+                        // listIdx < params.length && params[listIdx].userId != user; listIdx++)
+                        for (let i = lastReqId + 1; i < reqId; i++ ) {
+                            tasks[i].task.work([]);
                         }
+                        lastReqId = reqId;
                     }
-                    currentResult.push(line);
+                    currentResult.push([line, reqId]);
                 })
             } catch(e) {
                 metrics?.databaseRequestErrors.inc();
-                if (listIdx !== undefined) {
-                    for (let i = listIdx; i < tasks.length; i++) {
-                        tasks[i].cancel(`Error processing user ${params[i].userId} : ${e}`);
+                if (lastReqId !== undefined) {
+                    for (let i = lastReqId; i < tasks.length; i++) {
+                        tasks[i].task.cancel(`Error processing user ${tasks[i].user} : ${e}`);
                     }
-                    listIdx = undefined;
+                    // TODO: make a more explicit error state
+                    lastReqId = tasks.length;
                 }
             }
-            if (listIdx !== undefined) {
-                for (; listIdx < tasks.length; listIdx++) {
-                    tasks[listIdx].work(currentResult);
-                    currentResult = [];
-                }
+            if (lastReqId == undefined) {
+                lastReqId = 0;
             }
-            await Promise.all(tasks.map(t => t.result.catch(_ => {}).finally(() => {
+            for (; lastReqId < tasks.length; lastReqId++) {
+                tasks[lastReqId].task.work(currentResult.map(r => r[0]));
+
+                currentResult = [];
+            }
+            await Promise.all(tasks.map(t => t.task.result.catch(_ => {}).finally(() => {
                 this.inFlightResuests--;
             })));
             this.bundleTimer.refresh();
-        }, 1000);
+        }, 100);
     }
 }
 
