@@ -1,3 +1,4 @@
+import { clear } from "console";
 
 export function last<T>(a: Array<T>): T | undefined {
     return a[a.length - 1];
@@ -243,17 +244,46 @@ export class ProgressPrinter {
     it = 0;
     progressThreshold: number;
     threshold: number;
-    constructor(private total: number, private msg: (pc: string) => string) {
+    timeout: NodeJS.Timeout | undefined = undefined;
+    constructor(private total: number, private msg: (pc: string) => string, private newline = false) {
         this.progressThreshold = total / 50;
         this.threshold = this.progressThreshold;
     }
-    writeProgress() {
-        this.it++;
-        if (this.it > this.threshold || this.it == this.total) {
+    update = false;
+    writeMsg() {
+        if (!this.newline) {
             process.stdout.clearLine(0);   // clear current line
             process.stdout.cursorTo(0);    // move cursor to beginning of line
-            process.stdout.write(this.msg((this.it * 100 / this.total).toFixed(0).padStart(3)));
+        }
+        process.stdout.write(this.msg((this.it * 100 / this.total).toFixed(0).padStart(3)));
+        if (this.newline) {
+            process.stdout.write('\n'); // needed to flush the line
+        }
+        this.update = false;
+        if (this.it == this.total) {
+            return;
+        }
+        this.timeout = setTimeout(() => {
+            clearTimeout(this.timeout);
+            this.timeout = undefined;
+            if (this.update) {
+                this.writeMsg();
+            }
+        }, 2000);
+    }
+    writeProgress(increment?: number) {
+        this.it += increment ?? 1;
+        if (this.it == this.total) {
+            this.writeMsg();
+            return;
+        }
+        if (this.it > this.threshold) {
             this.threshold += this.progressThreshold;
+            if (this.timeout) {
+                this.update = true;
+                return;
+            }
+            this.writeMsg();
         }
     }
 }
