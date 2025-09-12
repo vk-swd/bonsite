@@ -227,6 +227,7 @@ services:
       volumes:
         - ./${STATEMENT_GENERATOR_NAME}:${SOURCEDIR}
         - shared_dir:${SHARED_DIR}
+        - ./${COMMON_DIR_NAME}/files.ts:${WORKDIR}/${COMMON_DIR_NAME}/files.ts
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
@@ -260,6 +261,7 @@ services:
         - ./${TESTER_NAME}:${SOURCEDIR}
         - shared_dir:${SHARED_DIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+        - ./${COMMON_DIR_NAME}/files.ts:${WORKDIR}/${COMMON_DIR_NAME}/files.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
       environment:
         SHARED_DIR: ${SHARED_DIR}
