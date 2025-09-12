@@ -53,11 +53,20 @@ export class FileWriter extends BaseWorker<string[]> {
     deferred = new Deferred<string[]>();
     writer: Writer;
     creationTime = Date.now();
-    constructor(private fileName: string, baseDir: string = SHARED_DIR) {
+    constructor(private fileName: string, private p : StatementParameters, baseDir: string = SHARED_DIR) {
         super();
         this.writer = new Writer(baseDir + '/' + fileName);
+        this.timeout = setTimeout(() => this.trackTime(), 5000);
+    }
+    timeout: NodeJS.Timeout | undefined = undefined;
+    trackTime() {
+        logger.warn(`Task hanging for to long ${JSON.stringify(this.p)} filename ${this.fileName}`);
+        clearTimeout(this.timeout);
+        this.timeout = setTimeout(() => this.trackTime(), 5000);
     }
     work(lines: InKafkaMessage[]): Promise<string[]> {
+        //TODO: for 0 lines return empty file name array
+        //TODOTODO: make a more informative result structure
         lines.forEach(l => this.writer.addMessage(JSON.stringify(l)));
         this.writer.flushAndStop().then(async () => {
             metrics?.filesGenerated.inc();
@@ -68,6 +77,11 @@ export class FileWriter extends BaseWorker<string[]> {
         }).catch(e => {
             metrics?.fileWriteErrors.inc();
             this.deferred.reject(e);
+        }).finally(() => {
+            if (this.timeout) {
+                clearTimeout(this.timeout);
+                this.timeout = undefined;
+            }
         });
         return this.deferred.promise;
     }
