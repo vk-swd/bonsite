@@ -89,7 +89,7 @@ async function sendTResults(resBatch: Batch, msg: string) {
 async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
     const expectedReturned = getReturnedTransactions(tBatch, resBatches, user);
     const ts: Transaction[] = [];
-    await db_connection!.getTransactions([{ userId: user }], async (userId: number, transaction: InKafkaMessage) => {
+    await db_connection!.getTransactions([{ userId: user }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
         ts.push(TransactionValidator.parse(transaction.payload));
     })
     compareObjecs(ts, expectedReturned, msg);
@@ -97,13 +97,14 @@ async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user
 function compareObjecs<T>(actual: T[], expected: T[], message: string) {
     const a = actual
     const e = expected;
-    chai.expect(a, `expected ${JSON.stringify(e)} but got ${JSON.stringify(a)}`).to.deep.equal(e);
+    chai.expect(a, message).to.deep.equal(e);
 }
 let db_connection: UserConnection | undefined = undefined
 describe('Kafka Consumer Tests', function () {
     this.timeout(10000); // Set timeout for the tests
     this.beforeAll(async () => {
-        const pool = await connectToDatabase(user_sa, TEST_DB_NAME)!;
+        const pool = await connectToDatabase(user_sa)!;
+        // pool.request().query(`use ${TEST_DB_NAME}`);
         db_connection = new UserConnection(pool);
     });
     this.beforeEach(async () => {
@@ -123,10 +124,10 @@ describe('Kafka Consumer Tests', function () {
         const batches: Batch[] = [
             [
                 { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
-                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1 }, o: `${tIdx++}` },
-                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
-                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
-                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 110.0, amount: 1.00, userIdFrom: 1, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 111.0, amount: 1.00, userIdFrom: 1, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 112.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 113.0, amount: 1.00, userIdFrom: 0, userIdTo: 1 }, o: `${tIdx++}` },
+                { dstTable: DstTable.PRIMARY, t: { id: tId++, dateTime: 114.0, amount: 1.00, userIdFrom: 1, userIdTo: 1 }, o: `${tIdx++}` },
             ],
             [
                 { dstTable: DstTable.PRIMARY, t: { id: rId++, dateTime: 200, state: TResult.CONFIRMED }, o: `${rIdx++}` },
@@ -138,14 +139,14 @@ describe('Kafka Consumer Tests', function () {
         ].map(b => b.map(t => {
             // Dud metadata records as completeness is not tested
             return { dstTable: t.dstTable, 
-                t: { metadata: { seqNumber: 0, isIgnored: false }, payload: t.t } as InKafkaMessage,
+                t: { metadata: {}, payload: t.t } as InKafkaMessage,
                 o: t.o };
         }));
 
         await sendTransactions(batches[0], `Sending transactions batch 0`);
         await sendTResults(batches[1], `Sending transaction results batch 1`);
-        await checkValidTransactions([batches[0]], [batches[1]], 0, `Checking valid transactions after batch 0 and 1`);
-        await checkValidTransactions([batches[0]], [batches[1]], 1, `Checking valid transactions after batch 0 and 1`);
+        await checkValidTransactions([batches[0]], [batches[1]], 0, `Checking valid transactions after batch 0 and 1 for 0`);
+        await checkValidTransactions([batches[0]], [batches[1]], 1, `Checking valid transactions after batch 0 and 1 for 1`);
     })
     it(`Test conflict handling`, async () => {
         let tIdx = 1;
@@ -187,7 +188,7 @@ describe('Kafka Consumer Tests', function () {
         ].map(b => b.map(t => {
             // Dud metadata records as completeness is not tested
             return { dstTable: t.dstTable, 
-                t: { metadata: { seqNumber: 0, isIgnored: false }, payload: t.t } as InKafkaMessage,
+                t: { metadata: {}, payload: t.t } as InKafkaMessage,
                 o: t.o };
         }));
 
@@ -204,62 +205,3 @@ describe('Kafka Consumer Tests', function () {
         await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 2, `Checking valid transactions after batch 2 and 3`);
     });
 });
-
-describe.skip(`Audit tables`, function () {
-    this.timeout(10000000); // Set timeout for the tests
-    it(`Audit tables`, async () => {
-        // expect(testRangeSet()).not.to.throw;
-
-        const pool = await connectToDatabase(user_sa, TEST_DB_NAME)!;
-        const db_connection = new UserConnection(pool);
-        class Stat {
-            seqNumberRange = new RangeSet();
-            wrongRecord = 0;
-        }
-        const userStats = new Map<number,Stat>();
-        const rawStats = new Stat();
-        const resStat = new Stat();
-        const query = await db_connection.streamTransactions((metadata: Metadata, userId?: number) => {
-            if (userId === undefined) {
-                if (!metadata.isIgnored) {
-                    rawStats.wrongRecord++;
-                    return;
-                }
-                rawStats.seqNumberRange.add(metadata.seqNumber!);
-            } else if (userId >= 0) {
-                if (!userStats.has(userId!)) {
-                    userStats.set(userId, new Stat());
-                }
-                const stats = userStats.get(userId)!;
-                if (metadata.isIgnored) {
-                    stats.wrongRecord++;
-                    return;
-                }
-                stats.seqNumberRange.add(metadata.seqNumber!);
-            } else {
-                if (metadata.isIgnored) {
-                    resStat.wrongRecord++;
-                    return;
-                }
-                resStat.seqNumberRange.add(metadata.seqNumber!);
-            }
-        });
-        const makeReport = (stats: Stat, name: string) => {
-            const ranges = stats.seqNumberRange.getRanges();
-            const rangeStr = ranges.map(r => `[${r.start}, ${r.end})`). join(', ');
-            return `${name} stats: wrong records: ${stats.wrongRecord}, seqNumber ranges: ${rangeStr}`;
-        }
-        const report = ['\n',
-            makeReport(rawStats, `Raw messages`),
-            makeReport(resStat, `Transaction results`),
-            ...Array.from(userStats.entries()).map(([userId, stats]) => makeReport(stats, `User ${userId}`))
-        ].join('\n');
-        logger.info(report);
-        /*
-            signal generator to produce N messages with the following parameters to test performance:
-            chance of duplicate
-            chance of reorder
-            chance of invalid messages = wrong type, missing fields, etc.
-        */
-    });
-})
