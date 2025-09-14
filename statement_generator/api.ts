@@ -1,19 +1,35 @@
-import { createServer, Server } from 'http';
+import { createServer, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
 import { getEnv } from './common/utils.js';
-import { StatementParameters, StatementParametersValidator, reqStatementUrl } from './common/event_types.js';
+import { StatementParameters, StatementParametersValidator, UserDataList, reqStatementUrl, reqUsersUrl } from './common/event_types.js';
 import { rmSync } from 'fs';
-import { metrics } from './monitoring_local.js';
+import { metrics, updateMaxResponseDelayMs } from './monitoring_local.js';
+import { handleRequest, MetricStats } from './common/apiRequestHandler.js';
 // import * as mt from './monitoring_local.js'
 
 const STATEMENT_GENERATOR_PORT = getEnv("STATEMENT_GENERATOR_PORT");
+
+const metricCB: MetricStats = {
+    updateMaxResponseDelayMs: (value: number) => updateMaxResponseDelayMs(value),
+    incrementFailedApiCallCount: () => metrics?.apiError.inc(),
+    incrementUnknownApiCallCount: () => metrics?.apiUnknown.inc()
+}
+
 export class StatementGenApiServer extends EventEmitter {
     private server: Server;
     constructor(statementWriter: (p: StatementParameters) => Promise<string[]>) {
         super()
         this.server = createServer(async (req, res) => {
-            console.log(`RECEIVING SOME REQUEST ${req.url}`)
+            console.log(`RECEIVING SOME REQUEST ${req.method} ${req.url}`)
             metrics?.apiCallCount.inc();
+            if (handleRequest('/' + reqUsersUrl, req, res, async (data?: string) => {
+                console.log(`Generating users data...${data}`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                const res1 = JSON.stringify([{ id: 1, name: `User${1}` }])
+                res.write(res1);
+            }, metricCB)) {
+                return;
+            }
             if (req.method === 'POST') {
                 if (req.url === '/' + reqStatementUrl) {
                     let data = '';

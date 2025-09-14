@@ -49,10 +49,11 @@ services:
         - ./${FRONTEND_NAME}:${SOURCEDIR}
         - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
       container_name: frontend_builder
-      restart: no
-      tty: false
-      stdin_open: false
+      # restart: no
+      # tty: false
+      # stdin_open: false
 
   frontend_server:
     image: nginx:mainline-alpine3.22
@@ -70,11 +71,11 @@ services:
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:81:81"
-    depends_on:
-      frontend_builder:
-        condition: service_completed_successfully
-      gql:
-        condition: service_healthy
+    # depends_on:
+    #   frontend_builder:
+    #     condition: service_completed_successfully
+    #   gql:
+    #     condition: service_healthy
     networks: 
       - backend_net
   
@@ -86,6 +87,7 @@ services:
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:
@@ -231,6 +233,7 @@ services:
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/apiRequestHandler.ts:${WORKDIR}/${COMMON_DIR_NAME}/apiRequestHandler.ts
       hostname: "${STATEMENT_GENERATOR_NAME}"
       environment:
         << : [*mssql_env]
@@ -263,6 +266,7 @@ services:
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/files.ts:${WORKDIR}/${COMMON_DIR_NAME}/files.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+        - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
       environment:
         SHARED_DIR: ${SHARED_DIR}
         <<: [*gql_env]

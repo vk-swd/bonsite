@@ -1,16 +1,26 @@
 import { z } from "zod";
+import { getEnum, getInt as getNumber, getIntOptional as getNumberOptional, getString } from "./zodGqlTypes.js";
 
 export const GenParametersValidator = z.object({
-    userCount: z.number(),
-    dateFrom: z.number(),
-    dateTo: z.number(),
-    transactionCount: z.number(),
-    maxDelayMs: z.number().optional(),
-    minUserId: z.number().optional(),
-    minTransactionId: z.number().optional()
+    userCount: getNumber(),
+    dateFrom: getNumber(),
+    dateTo: getNumber(),
+    transactionCount: getNumber(),
+    maxDelayMs: getNumberOptional(),
+    minUserId: getNumberOptional(),
+    minTransactionId: getNumberOptional()
 });
 
 export type GenParameters = z.infer<typeof GenParametersValidator>;
+
+export const PostTransactionValidator = z.object({
+    userFrom: getString(),
+    userTo: getString(),
+    amount: getNumber(),
+    date: getNumber()
+});
+export type PostTransactionParams = z.infer<typeof PostTransactionValidator>;
+
 
 export const startUrl = "start"
 export const stopUrl = "stop"
@@ -21,10 +31,11 @@ export enum RequestStatus {
     OK = 200,
     ERROR = 500,
 }
+
 export const RequestResultValidator = z.object({
     status: z.nativeEnum(RequestStatus),
-    message: z.string(),
-    data: z.union([z.null(), z.string()]).optional(),
+    message: getString(),
+    data: z.union([z.null(), getString()]).optional(),
 });
 export type RequestResult = z.infer<typeof RequestResultValidator>;
 
@@ -34,9 +45,9 @@ export enum GenerationState {
 }
 
 export const ProgressReportValidator = z.object({
-    totalSent: z.number(),
-    isRunning: z.nativeEnum(GenerationState),
-    percentComplete: z.number()
+    totalSent: getNumber(),
+    isRunning: getEnum(GenerationState, "Int"),
+    percentComplete: getNumber()
 });
 export type ProgressReport = z.infer<typeof ProgressReportValidator>;
 const MAGIC_UNDEFINED = -1;

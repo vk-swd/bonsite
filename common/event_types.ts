@@ -1,7 +1,9 @@
 import { date, z } from "zod";
+import { getEnum, getEnumOptional, getInt as getNumber, getIntOptional as getNumberOptional, getString } from "./zodGqlTypes.js";
 
+const IdValidator = getNumber();
 export const TransactionValidator = z.object({
-    id: z.number(),
+    id: IdValidator,
     dateTime: z.number(),
     amount: z.number(),
     userIdFrom: z.number(),
@@ -21,14 +23,14 @@ export enum TResult {
     BLOCKED = 4
 }
 export const TransactionResultValidator = z.object({
-    id: z.number(),
+    id: IdValidator,
     dateTime: z.number(),
     state: z.nativeEnum(TResult)
 });
 export type TransactionResult = z.infer<typeof TransactionResultValidator>;
 
 const DatePtrValidator = z.object({
-    userId: z.number(),
+    userId: IdValidator,
 dateBefore: z.number().optional(),
 dateAfter: z.number().optional()
 });
@@ -54,8 +56,15 @@ export const OffsetValidator = z.object({
 })
 export type Offset = z.infer<typeof OffsetValidator>;
 
+export const UserDataValidator = z.object({
+    id: IdValidator,
+    name: getString()
+});
+export const UserDataValidatorList = z.array(UserDataValidator);
+export type UserDataList = z.infer<typeof UserDataValidatorList>;
 
 export const reqStatementUrl = "statements"
+export const reqUsersUrl = "users"
 export const MIN_DATE = "1970-01-01T00:00:00.000Z";
 export const MAX_DATE = "9999-12-31T23:59:59.997Z";
 export enum StatementType {
@@ -63,9 +72,9 @@ export enum StatementType {
     DS = 2  // delta statement
 }
 export const StatementParametersValidator = z.object({
-    userId: z.number(),
-    fromm: z.number().optional(),
-    too: z.number().optional(),
-    type: z.nativeEnum(StatementType).optional()
+    userId: getNumber(),
+    fromm: getNumberOptional(),
+    too: getNumberOptional(),
+    type: getEnumOptional(StatementType, "Int")
 });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;

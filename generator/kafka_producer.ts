@@ -67,10 +67,10 @@ export class KProducer extends EventEmitter {
         }
         this.producer.connect();
     }
-    disconnect() {
+    async disconnect() {
         this.isStopped = true;
         this.isConnected = false;
-        this.producer.disconnect();
+        await this.producer.disconnect();
     }
     getInFlight() {
         return this.inFlight;

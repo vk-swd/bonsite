@@ -18,7 +18,7 @@ const api = new GenApiServer(() => sender.progress(), () => {
     return new Promise((resolve, reject) => {
         fs.writeFile(SHARED_DIR + "/" + fileName, statsToSave, (err) => {
             if (err) {
-                console.error(`Error writing stats to file ${fileName}:`, err);
+                logger.error(`Error writing stats to file ${fileName}: ` + err);
                 reject(err);
                 return;
             }
@@ -27,7 +27,7 @@ const api = new GenApiServer(() => sender.progress(), () => {
     });
 });
 api.on('start', (p: GenParameters) => {
-    console.log("Starting sender signaled by API with params", p);
+    logger.log("Starting sender signaled by API with params" + JSON.stringify(p));
     sender.start(p);  
 } );
 api.on('stop', () => {sender.stop();});

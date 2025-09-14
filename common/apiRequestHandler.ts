@@ -1,7 +1,8 @@
 
 import { IncomingMessage, ServerResponse } from 'http';
+import { logger } from './logger.js';
 
-type MetricStats = {
+export type MetricStats = {
     updateMaxResponseDelayMs: (value: number) => void,
     incrementFailedApiCallCount: () => void,
     incrementUnknownApiCallCount: () => void
@@ -16,23 +17,20 @@ export function handleRequest<T>(url: string, req: IncomingMessage, res: ServerR
         let data = '';
         req.on('data', chunk => data += chunk);
         req.on('end', () => {
-            process(data).then(() => {
-                res.writeHead(200);
-                res.end();
+            process(data).then((_) => {
                 metrics.updateMaxResponseDelayMs(Date.now() - now);
             }).catch((error) => {
+                logger.error(`Error processing request for ${req.url}: ${error}`);
                 metrics.incrementFailedApiCallCount();
                 res.writeHead(400);
                 res.end(`Request processing error for ${req.url}: ${error}`);
             });
         });
     } else if (req.method === 'GET'){
-        process().then((r) => {
-            const contentType = typeof r === 'string' ? 'text/plain' : 'application/json';
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(JSON.stringify(r));
+        process().then((_) => {
             metrics.updateMaxResponseDelayMs(Date.now() - now);
         }).catch((error) => {
+            logger.error(`Error processing request for ${req.url}: ${error}`);
             metrics.incrementFailedApiCallCount();
             res.writeHead(500);
             res.end(`Request processing error for ${req.url}: ${error}`);

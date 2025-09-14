@@ -146,22 +146,21 @@ testButt.addEventListener('click', () => {
 const genButton = document.getElementById("gen_button")!
 genButton.addEventListener('click', () => {
   let query = "";
-  if (genButton.dataset.isStarted == "true") {
-    genButton.dataset.isStarted = "false";
-    genButton.textContent = "Start Gen"
-    query = `{ stopGen {status, message, data}}`
-  } else {
-    const params: GenParameters = {
-      userCount: parseInt(getValyeElement("userCountInput").value),
-      maxTransactionsPerSec: parseInt(getValyeElement("tPerSecInput").value),
-      generationIntervalMs: parseInt(getValyeElement("genIntervalInput").value),
-      maxDelayMs: parseInt(getValyeElement("maxdelayInput").value),
-      transactionCount: parseInt(getValyeElement("msgCountInput").value)
-    };
-    genButton.textContent = "Started Gen"
-    genButton.dataset.isStarted = "true";
-    query = `{ startGen(params: ${JSON.stringify(params).replace(/"/g, "")}) {status, message, data}  }`
-  }
+  // if (genButton.dataset.isStarted == "true") {
+  //   genButton.dataset.isStarted = "false";
+  //   genButton.textContent = "Start Gen"
+  //   query = `{ stopGen {status, message, data}}`
+  // } else {
+  //   const params: GenParameters = {
+  //     userCount: parseInt(getValyeElement("userCountInput").value),
+  //     generationIntervalMs: parseInt(getValyeElement("genIntervalInput").value),
+  //     maxDelayMs: parseInt(getValyeElement("maxdelayInput").value),
+  //     transactionCount: parseInt(getValyeElement("msgCountInput").value)
+  //   };
+  //   genButton.textContent = "Started Gen"
+  //   genButton.dataset.isStarted = "true";
+  //   query = `{ startGen(params: ${JSON.stringify(params).replace(/"/g, "")}) {status, message, data}  }`
+  // }
   console.log(`query is ${query}`);
   fetch("/graphql", {
     method: "POST",

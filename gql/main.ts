@@ -1,6 +1,6 @@
 import express from "express";
 import { createHandler } from "graphql-http/lib/use/express";
-import { buildSchema, GraphQLAbstractType, GraphQLError, GraphQLResolveInfo, GraphQLSchema, GraphQLUnionType } from "graphql";
+import { buildSchema, GraphQLError, GraphQLSchema, GraphQLUnionType } from "graphql";
 import * as gp from "./common/generator_parameters.js";
 import { getEnv } from "./common/utils.js";
 import { logger } from "./common/logger.js";
@@ -8,43 +8,26 @@ import { GenParametersValidator, RequestStatus } from "./common/generator_parame
 import * as mtx from "./monitoring_local.js";
 import z, { ZodObject, ZodRawShape, ZodType } from "zod";
 import { HealthCheckSever } from "./common/healthcheck.js";
-import { StatementParameters, StatementParametersValidator, reqStatementUrl } from "./common/event_types.js";
- 
+import { StatementParameters, reqUsersUrl, StatementParametersValidator, UserDataList, UserDataValidator, UserDataValidatorList, reqStatementUrl } from "./common/event_types.js";
+import * as gqld from "./common/gqlDeclarations.js";
 
 const schema: GraphQLSchema = buildSchema(`
 type Query {
-  startGen(params: GenParameters!): Result
-  stopGen: Result
-  getProgress: ReProg!
-  getGeneratorStats: Result!
-  getStatement(params: StatementParameters!): Result
-  hello:String
+  ${gqld.startGen.declaration()}
+  ${gqld.getGeneratorStats.declaration()}
+  ${gqld.stopGen.declaration()}
+  ${gqld.getProgress.declaration()}
+  ${gqld.getStatement.declaration()}
+  ${gqld.hello.declaration()}
+  ${gqld.users.declaration()}
+  ${gqld.postTransaction.declaration()}
 }
-union ReProg = ProgressReport | Result
-type ProgressReport {
-  ${Object.keys(gp.ProgressReportValidator.shape).map(key => `  ${key}: Int`).join(",\n")}
-}
-type Result {
-  ${Object.keys(gp.RequestResultValidator.shape).map((key, idx) => `${key}: ${idx == 0 ? "Int!" : "String"}`).join(",\n")}
-}
-input GenParameters {
-  ${Object.keys(GenParametersValidator.shape).map(key => `${key}: Int`).join(",\n")}
-}
-input StatementParameters {
-  ${Object.keys(StatementParametersValidator.shape).map(key => `${key}: Int`).join(",\n")}
-}
+${gqld.ProgressReportGqlType.declaration()}
+${gqld.GenParametersGqlType.declaration()}
+${gqld.StatementParametersGqlType.declaration()}
+${gqld.PostTransactionParamsGqlType.declaration()}
+${gqld.UserRecordGqlType.declaration()}
 `);
-
-const getProgress: GraphQLUnionType = schema.getType("ReProg")! as GraphQLUnionType;
-getProgress!.resolveType = (value: any) => {
-    if (value.status !== undefined) {
-      return "Result";
-    }
-    if (value.totalSent !== undefined) {
-      return "ProgressReport";
-    }
-    return Promise.resolve(undefined);
-}
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 const GENERATOR_HOST = getEnv("GENERATOR_HOST");
@@ -60,34 +43,8 @@ function params<T>(params: T): RequestInit {
     body: JSON.stringify(params)};
   return init;
 }
-function toggleGeneration(params?: gp.GenParameters): Promise<gp.RequestResult> {
-  const isStart = params !== undefined;
-  const operation = "Generation " + isStart ? "start" : "stop";
-  const url = `http://${GENERATOR_HOST}:${GENERATOR_PORT}/${isStart ? gp.startUrl : gp.stopUrl}`;
-  logger.info(operation + isStart ? ` with params: ${JSON.stringify(params)}` : "");
-  mtx.metrics?.requestCount.inc();
-  return fetch(url, {
-    method: "POST",
-    headers: {
-    "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    ...(isStart ? { body: JSON.stringify(params) } : {})
-  })
-  .then(res => res.text())
-  .then(message=> {
-    mtx.metrics?.requestSuccess.inc();
-    return { status: RequestStatus.OK, message } })
-  .catch(e => {
-    const msg = `${operation} ERROR: ${e}`;
-    logger.error(msg);
-    mtx.metrics?.requestError.inc();
-    return { status: RequestStatus.ERROR, message: msg };
-  });
-}
-async function defaultDataHandler(res: Response): Promise<any> {
-    const raw = await res.json()
-    return zodParse(raw, gp.RequestResultValidator);
+async function defaultDataHandler(res: Response): Promise<string> {
+    return "ok";
 }
 function zodParse<T>(data: string | Object, validator: ZodType<T>): T {
   try {
@@ -96,7 +53,7 @@ function zodParse<T>(data: string | Object, validator: ZodType<T>): T {
     throw new Error(`Zod validation failed for ${JSON.stringify(data)}: ${e}`);
   }
 }
-function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T> = defaultDataHandler, init?: RequestInit): Promise<T|gp.RequestResult> {
+function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T>, init?: RequestInit): Promise<T> {
   const now = Date.now();
   mtx.metrics?.requestCount.inc();
   return fetch(url, init)
@@ -114,31 +71,37 @@ function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T> 
       const msg = `Error fetching ${url}: ${error}`;
       logger.error(msg);
       mtx.metrics?.requestError.inc();
-      return { status: RequestStatus.ERROR, message: msg };
+      throw new Error(msg);
     }).finally(() => {
         const delay = Date.now() - now;
         mtx.updateMaxApiResponseDelayMs(delay);
     })
 }
 const Query = {
-  hello: () => "Hello world!",
-  stopGen() {
-    return toggleGeneration();
+  hello: () => {throw new Error("Hello world!")},
+  stopGen: () => {
+    return getRequest<string>(httpG + gp.stopUrl, defaultDataHandler);
   },
-  startGen: async (arg: {params: gp.GenParameters} ): Promise<gp.RequestResult>  => {
-    return toggleGeneration(arg.params);
+  startGen: async (arg: {params: gp.GenParameters} ) => {
+    return getRequest<string>(httpG + gp.startUrl, defaultDataHandler, params(arg.params));
   },
-  getProgress: async (): Promise<gp.RequestResult | gp.ProgressReport> => {
+  getProgress: async (): Promise<gp.ProgressReport> => {
       return await getRequest(httpG + gp.progressUrl, async (res: Response) => 
         zodParse(await res.json(), gp.ProgressReportValidator));
   },
-  getGeneratorStats: async (): Promise<gp.RequestResult> => {
-      return await getRequest(httpG + gp.getStatUrl)
+  getGeneratorStats: async (): Promise<string> => {
+      return await getRequest<string>(httpG + gp.getStatUrl, res => res.text());
   },
-  getStatement: async (arg: {params: StatementParameters} ): Promise<gp.RequestResult> => {
-    return await getRequest(httpSG + reqStatementUrl, async (res: Response) => {
-      return { status: RequestStatus.OK, message:"", data: await res.text() }}, params(arg.params));
-  }
+  getStatement: async (arg: {params: StatementParameters} ): Promise<string> => {
+    return await getRequest(httpSG + reqStatementUrl, res => res.text(), params(arg.params));
+  },
+  users: async (arg: {name?: string} ): Promise<UserDataList> => {
+    return await getRequest<UserDataList>(httpSG + reqUsersUrl, async (res: Response) => {
+      const data = UserDataValidatorList.parse(await res.json());
+      // logger.info(`Fetched users: ${JSON.stringify(data)}`);
+      return data as UserDataList;
+    }, params(arg.name));
+  } 
 }
 try {
   await mtx.startMonitoring();

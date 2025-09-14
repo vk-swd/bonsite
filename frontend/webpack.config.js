@@ -6,17 +6,26 @@ if (process.env.FRONTEND_DEPLOY_FOLDER === undefined) {
 }
 
 module.exports = {
-    entry: './main.ts',
+    entry: './main.tsx',
     output: {
       path: process.env.FRONTEND_DEPLOY_FOLDER, //process.env.KAFKA_HOSTNAME
       filename: 'main.js',
     },
     module: {
-      rules: [{ test: /\.ts$/, use: "ts-loader" }],
+      rules: [
+        { 
+          test: /\.[jt]sx?$/, 
+          use: {
+            loader: "babel-loader",
+            options: {
+              presets: ["@babel/preset-env", "@babel/preset-react", "@babel/preset-typescript"],
+            },
+          }
+        }],
     },
     resolve: {
       symlinks: false, // Set to false to resolve modules to their symlinked location
-      extensions: ['.ts', '.js'],
+      extensions: [".ts", ".tsx", ".js", ".jsx"],
     },
     plugins: [
       new CopyPlugin({
@@ -26,3 +35,26 @@ module.exports = {
       })
     ]
   };
+
+
+// module.exports = {
+//     entry: './main.ts',
+//     output: {
+//       path: process.env.FRONTEND_DEPLOY_FOLDER, //process.env.KAFKA_HOSTNAME
+//       filename: 'main.js',
+//     },
+//     module: {
+//       rules: [{ test: /\.ts$/, use: "ts-loader" }],
+//     },
+//     resolve: {
+//       symlinks: false, // Set to false to resolve modules to their symlinked location
+//       extensions: ['.ts', '.js'],
+//     },
+//     plugins: [
+//       new CopyPlugin({
+//         patterns: [
+//           { from: 'index.html', to: process.env.FRONTEND_DEPLOY_FOLDER }, // copies all files from public/ into dist/
+//         ],
+//       })
+//     ]
+//   };

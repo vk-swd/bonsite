@@ -17,39 +17,32 @@ const metricStats = {
 export class GenApiServer extends EventEmitter {
     private server: Server;
     handleStart(req: IncomingMessage, res: ServerResponse) : boolean {
-        return handleRequest('/' + startUrl, req, res, (data?: string) => {
-            return new Promise<void>((resolve, reject) => {
-                try {
-                    const parsedData = JSON.parse(data!);
-                    const params = GenParametersValidator.parse(parsedData);
-                    this.emit('start', params);
-                    resolve();
-                } catch (error) {
-                    reject(`Malformed JSON: ${error}`);
-                }
-            });
+        return handleRequest('/' + startUrl, req, res, async (data?: string) => {
+            const parsedData = JSON.parse(data!);
+            const params = GenParametersValidator.parse(parsedData);
+            this.emit('start', params);
+            res.writeHead(200);
+            res.end();
         }, metricStats);
     }
     handleStop(req: IncomingMessage, res: ServerResponse): boolean {
-        return handleRequest('/' + stopUrl, req, res, () => {
+        return handleRequest('/' + stopUrl, req, res, async () => {
             this.emit('stop');
-            return Promise.resolve();
+            res.writeHead(200);
+            res.end();
         }, metricStats);
     }
     handleGetProgress(req: IncomingMessage, res: ServerResponse): boolean {
-        return handleRequest('/' + progressUrl, req, res, () => {
-            return Promise.resolve(this.progressReporter());
+        return handleRequest('/' + progressUrl, req, res, async () => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.progressReporter()));
         }, metricStats);
     }
     handleGetStat(req: IncomingMessage, res: ServerResponse): boolean {
-        return handleRequest('/' + getStatUrl, req, res, () => {
-            return this.getStat().then(stat => {
-                return {
-                    status: RequestStatus.OK,
-                    message: '',
-                    data: stat
-                };
-            });
+        return handleRequest('/' + getStatUrl, req, res, async () => {
+            const r = await this.getStat()
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(r);
         }, metricStats);
     }
     constructor(private progressReporter: () => ProgressReport, private getStat: () => Promise<string>) {

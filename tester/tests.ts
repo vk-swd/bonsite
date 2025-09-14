@@ -16,6 +16,7 @@ import { InKafkaMessage, MetadataWrapperValidator, StatementParameters, Statemen
 import { processLineByLine } from './common/files.js';
 import { getRandomValues } from 'crypto';
 import { ProgressPrinter } from './common/utils.js';
+import { getGeneratorStats, getProgress, getStatement, startGen, stopGen } from './common/gqlDeclarations.js';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -25,44 +26,9 @@ const GRAPH_QL_HOSTNAME = getEnv("GRAPH_QL_HOSTNAME");
 const GRAPH_QL_PORT = getEnv("GRAPH_QL_PORT");
 const SHARED_DIR = getEnv('SHARED_DIR');
 
+const GQL_URL = `http://${GRAPH_QL_HOSTNAME}:${GRAPH_QL_PORT}/graphql`
 describe('Kafka Consumer Tests', function () {
     this.timeout(1000000); // set timeout for the tests
-    const reqResultFields = `{${Object.keys(RequestResultValidator.shape).map(key => `${key}`).join("\n")}}`;
-    const startQuery = (params: GenParameters) => gql`{ startGen(params:${JSON.stringify(params).replace(/"/g, "")}) ${reqResultFields}}`; 
-    const stopQuery = `{ stopGen ${reqResultFields} }`;
-    const progressQuery = `{ getProgress {
-        ... on ProgressReport {
-        ${Object.keys(ProgressReportValidator.shape).map(key => `${key}`).join("\n")}
-        }
-        ... on Result ${reqResultFields}
-      }}`
-    const statementQuery = (params: StatementParameters) => `{ getStatement(params:${JSON.stringify(params).replace(/"/g, "")}) ${reqResultFields}}`;
-    const request1 = async <T>(method: "POST" | "GET", query: string, field: string, validator: ZodType<T>) : Promise<T> => {
-        let rewRes
-        let jsonRes
-        const doc = gql`${query}`
-        try {
-            // jsonRes = await request(`http://${GRAPH_QL_HOSTNAME}:${GRAPH_QL_PORT}/graphql`, doc)
-            rewRes = await fetch(`http://${GRAPH_QL_HOSTNAME}:${GRAPH_QL_PORT}/graphql`, {
-                method,
-                headers: {
-                    "Content-Type": "application/json",
-                    Accept: "application/json",
-                },
-                body: JSON.stringify({ query }),
-            })
-            jsonRes = (await rewRes.json());
-            return validator.parse((jsonRes.data)[field]);
-        } catch (e) {
-            logger.error(`Error in request ${doc}. Raw res: ${JSON.stringify(rewRes)} - ${JSON.stringify(jsonRes)}. Error: ${e}`);
-            throw e;
-        }
-    }
-    const stopGen = async () => await request1("POST", stopQuery, "stopGen", RequestResultValidator);
-    const startGen = async (params: GenParameters) => await request1("POST", startQuery(params), "startGen", RequestResultValidator);
-    const getProgress = async () => await request1("POST", progressQuery, "getProgress", ProgressReportValidator);
-    const getStat = async () => await request1<RequestResult>("POST", `{ getGeneratorStats ${reqResultFields} }`, "getGeneratorStats", RequestResultValidator);
-    const getStatement = async (params: StatementParameters) => await request1("POST", statementQuery(params), "getStatement", RequestResultValidator);
     it('', async () => {
         expect(true).to.be.true; // just to have a test
     });
@@ -144,9 +110,8 @@ describe('Kafka Consumer Tests', function () {
         return params
     }
     async function generateRecords(params: GenParameters) {
-        await stopGen(); // stop any previous generation
-        const results = await startGen(params) as RequestResult;
-        expect(results.status, `bad status in ${JSON.stringify(results)}`).to.equal(RequestStatus.OK);
+        await stopGen.fetchCall(GQL_URL); // stop any previous generation
+        await startGen.fetchCall(GQL_URL, params);
         // Wait for generation to stop so all records are posted to Kafka
         let interval = 100;
         const startTime = Date.now();
@@ -154,7 +119,7 @@ describe('Kafka Consumer Tests', function () {
         while (true) {
             runNum++;
             await new Promise(resolve => setTimeout(resolve, interval));
-            const progress = await getProgress() as ProgressReport;
+            const progress = await getProgress.fetchCall(GQL_URL);
             if (progress.isRunning === GenerationState.STOPPED) {
                 console.log("Generation stopped.");
                 break;
@@ -167,32 +132,46 @@ describe('Kafka Consumer Tests', function () {
             console.log(`Progress: ${JSON.stringify(progress)} at ${runNum} delay ${now - startTime}, next in ${interval}ms`);
         }
     }
+    let lastMsgTime = 0;
+    let totalCount = 0;
+    let fetchedCount = 0;
+    let userCount = 0;
     async function waitForTransactionsToBeDeliveredToDB(expectedCount: number, params: StatementParameters): Promise<void> {
         let retries = 10;
         let lastCount = 0;
+        totalCount += expectedCount;
+        userCount++;
         while (retries-- > 0) {
             // TODO: try paginated big requests
             const res = await testRequestedStatement(params, true)
+            fetchedCount += (res.tCount - lastCount);
             if (res.tCount > lastCount) {
                 // got some new transactions, reset retries
                 retries = 10;
             }
             lastCount = res.tCount;
             if (res.tCount >= expectedCount) break;
+            const newNow = Date.now();
+            if (newNow - lastMsgTime > 2000) {
+                lastMsgTime = newNow;
+                logger.log(`Waiting for transactions to be delivered to DB: ${fetchedCount}/${totalCount} for ${userCount} users`);
+            }
             await new Promise(r => setTimeout(r, 1000));
-            logger.log(`Waiting for transactions to be delivered to DB: ${res.tCount}/${expectedCount} for user ${params.userId}`);
         }
+        fetchedCount -= lastCount;
+        userCount--;
+        totalCount -= expectedCount;
         if (retries <= 0) {
             throw `Timeout waiting for transactions to be delivered to DB, only ${lastCount} of ${expectedCount} received for user ${params.userId}`;
         }
     }
     type TestValues = { tCount: number, tSum: number, file: string };
     async function testRequestedStatement(params:StatementParameters, rmServed: boolean = true): Promise<TestValues> {
-        const res = await getStatement(params)
+        const res = await getStatement.fetchCall(GQL_URL, params)
         const idSet = new Set<number>();
         let lastDate = params.fromm??0;
         let amountSum = 0;
-        const statementFileName = SHARED_DIR + "/" + res.data
+        const statementFileName = SHARED_DIR + "/" + res
         function tInfo(ta: Transaction, p? : StatementParameters) {
             return statementFileName + ": " + JSON.stringify(ta) + (p ? ` for params ${JSON.stringify(p)}` : '');
         }
@@ -217,7 +196,7 @@ describe('Kafka Consumer Tests', function () {
         return { tCount: idSet.size, tSum: Math.floor(amountSum), file: statementFileName };        
     }
     async function testStatements(progressTracker: ProgressPrinter) {
-        const statFile = SHARED_DIR + '/' + (await getStat() as RequestResult).data;
+        const statFile = SHARED_DIR + '/' + (await getGeneratorStats.fetchCall(GQL_URL));
         await processLineByLine(statFile, async (line) => {
             const counter = Counters.deserialise(line)
             expect(counter.minDate).to.not.be.undefined;
