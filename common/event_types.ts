@@ -31,8 +31,8 @@ export type TransactionResult = z.infer<typeof TransactionResultValidator>;
 
 const DatePtrValidator = z.object({
     userId: IdValidator,
-dateBefore: z.number().optional(),
-dateAfter: z.number().optional()
+    dateBefore: z.number().optional(),
+    dateAfter: z.number().optional()
 });
 export const MetadataValidator = z.object({
     dateTime: z.number().optional(),
@@ -57,20 +57,36 @@ export const OffsetValidator = z.object({
 export type Offset = z.infer<typeof OffsetValidator>;
 
 export const UserDataValidator = z.object({
-    id: IdValidator,
-    name: getString()
+    cursor: IdValidator,
+    name: getString() //edge?
 });
 export const UserDataValidatorList = z.array(UserDataValidator);
 export type UserDataList = z.infer<typeof UserDataValidatorList>;
 
+export const UserDataRequestValidator = z.object({
+    cursor: IdValidator,
+    count: getNumber(),
+    name: getString()
+});
+export type UserDataRequest = z.infer<typeof UserDataRequestValidator>;
+
 export const reqStatementUrl = "statements"
 export const reqUsersUrl = "users"
+export const postTransactionsUrl = "postT"
 export const MIN_DATE = "1970-01-01T00:00:00.000Z";
 export const MAX_DATE = "9999-12-31T23:59:59.997Z";
 export enum StatementType {
     FS = 1, // full statement
     DS = 2  // delta statement
 }
+export const StatementParametersValidatorGql = z.object({
+    userId: getString(),
+    fromm: getString(),
+    too: getString(),
+    type: getEnumOptional(StatementType, "Int")
+});
+export type StatementParametersGql = z.infer<typeof StatementParametersValidatorGql>;
+
 export const StatementParametersValidator = z.object({
     userId: getNumber(),
     fromm: getNumberOptional(),

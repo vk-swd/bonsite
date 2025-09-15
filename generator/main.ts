@@ -6,6 +6,7 @@ import { HealthCheckSever } from "./common/healthcheck.js";
 import fs from 'fs';
 import { getEnv } from "./common/utils.js";
 import { logger } from "./common/logger.js";
+import { PostTransactionParams } from "./common/generator_parameters.js";
 await startMonitoring();
 const sender = new Sender();
 
@@ -26,10 +27,13 @@ const api = new GenApiServer(() => sender.progress(), () => {
         })
     });
 });
-api.on('start', (p: GenParameters) => {
+api.on(GenApiServer.event.postTransaction, (p: PostTransactionParams) => {
+    sender.postTransaction(p);  
+});
+api.on(GenApiServer.event.startGen, (p: GenParameters) => {
     logger.log("Starting sender signaled by API with params" + JSON.stringify(p));
     sender.start(p);  
-} );
-api.on('stop', () => {sender.stop();});
+});
+api.on(GenApiServer.event.stopGen, () => {sender.stop();});
 
 const healthCheckServer = new HealthCheckSever();

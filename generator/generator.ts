@@ -5,6 +5,7 @@ import { last, PriorityQ } from './common/utils.js'
 import { InKafkaMessage, Transaction, TransactionResult, TResult } from './common/event_types.js';
 import { Counters } from './common/generator_parameters.js';
 import { UserCounters } from './common/generator_parameters.js';
+import { PostTransactionParams } from './common/generator_parameters.js';
 
 
 
@@ -93,6 +94,11 @@ export class Generator {
         this.transactionsGenerated = 0;
         this.transactionsToGenerate = 0;
     }
+    getTransactionsToPost(params: PostTransactionParams): TransactionEvent[] {
+        const [t,r] = this.getTransaction(params.userFrom, params.userTo, params.amount, params.date, params.date, TResult.CONFIRMED);
+        return [{ topic: KAFKA_TOPICS_TRANSACTIONS, event: t },
+            { topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: r }];
+    }
     getEvents(count: number): Array<TransactionEvent> | undefined {
         if (this.transactionsEnqueued < count) {
             // generate count * 2 transactions
@@ -117,48 +123,42 @@ export class Generator {
     generatedCount(): number {
         return this.transactionsGenerated;
     }
+    private getTransaction(userIdFrom: number, userIdTo: number, amount: number, 
+        transactionTime: number, datetimeR: number, state: TResult): [InKafkaMessage, InKafkaMessage] {
+        const transaction: Transaction = {
+            id: this.transactionId++,
+            userIdFrom,
+            userIdTo,
+            dateTime: transactionTime,
+            amount
+        }
+        const result: TransactionResult = {
+            dateTime: datetimeR,
+            id: transaction.id,
+            state,
+        }
+        this.msgMetaDataPerUser.incrementStat(userIdFrom, amount, transaction.dateTime);
+        if (userIdFrom !== userIdTo) {
+            this.msgMetaDataPerUser.incrementStat(userIdTo, amount, transaction.dateTime);
+        }
+        return [{ payload: transaction, metadata: { } }, { payload:result, metadata: { } }];
+    }
+    getnUserId(): number {
+        return this.minUserId + Math.floor(Math.random() * this.userCount);
+    }
     generate(count: number) {
         /*  Not going for much realism, where consumers rarely have transactions with other consumers
             Also transaction latency is not emulating any thread contention, so
                 transaction result delay will be random.
         */
         for (let i = this.transactionsGenerated; i < this.transactionsGenerated + count; i++) {
-            const transactionTime = this.startTime + i * this.timeIncrement;
+            const transactionTime =  Math.floor(this.startTime + i * this.timeIncrement);
             // Can make internal transfers too (same id to and from)
-            const userIdFrom = this.minUserId + Math.floor(Math.random() * this.userCount);
-            const userIdTo = this.minUserId + Math.floor(Math.random() * this.userCount);
-            const transaction: Transaction = {
-                id: this.transactionId++,
-                userIdFrom,
-                userIdTo,
-                dateTime: Math.floor(transactionTime),
-                amount: 1 + Math.floor(Math.random() * 1000)
-            }
-            const result: TransactionResult = {
-                dateTime: this.delayGenerator.delay(transactionTime),
-                id: transaction.id,
-                state: TResult.CONFIRMED,
-            }
-
-            const userStatFrom = this.msgMetaDataPerUser.get(userIdFrom);
-            const userStatTo = this.msgMetaDataPerUser.get(userIdTo);
-
-            userStatFrom.transactionCount++;
-            userStatFrom.amountSum += transaction.amount;
-            userStatFrom.updateMinDate(transaction.dateTime);
-            userStatFrom.updateMaxDate(transaction.dateTime);
-            if (userIdFrom !== userIdTo) {
-                userStatTo.transactionCount++;
-                userStatTo.amountSum += transaction.amount;
-                userStatTo.updateMinDate(transaction.dateTime);
-                userStatTo.updateMaxDate(transaction.dateTime);
-            }
-
-            const tEvent: InKafkaMessage = { payload: transaction, metadata:
-                { } };
-            const rEvent: InKafkaMessage = { payload:result, metadata:
-                { } };
-
+            const amount = 1 + Math.floor(Math.random() * 1000);
+            const [tEvent, rEvent] = this.getTransaction(this.getnUserId(), this.getnUserId(), 
+                amount, transactionTime, 
+                this.delayGenerator.delay(transactionTime), 
+                TResult.CONFIRMED);
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: tEvent });
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent });
         }

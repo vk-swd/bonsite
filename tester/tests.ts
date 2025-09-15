@@ -192,7 +192,7 @@ describe('Kafka Consumer Tests', function () {
         });
         if (rmServed) {
             fs.unlink(statementFileName, (_) => {});
-        }        
+        }
         return { tCount: idSet.size, tSum: Math.floor(amountSum), file: statementFileName };        
     }
     async function testStatements(progressTracker: ProgressPrinter) {
@@ -247,4 +247,7 @@ describe('Kafka Consumer Tests', function () {
             await testStatements(progressTracker);
         }
     });
+    it(`ui exposed functionality test`, async() => {
+        //request n rows from an id and a regular expression
+    })
 })

@@ -97,7 +97,6 @@ export class KProducer extends EventEmitter {
             const partitionedBuffer = msgBuffer.get(key)!;
             partitionedBuffer.push(m);
         }
-        // msgBuffer.forEach((messages, topic) => {
         const buffers = Array.from(msgBuffer.values());
         while (true) {
             let total = 0;

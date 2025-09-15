@@ -10,8 +10,9 @@ import {
 } from "@mui/material";
 
 import Select, { InputActionMeta } from 'react-select'
-import { GenParameters, GenParametersValidator } from "./common/generator_parameters";
-
+import { GenParameters, GenParametersValidator, PostTransactionValidatorGql } from "./common/generator_parameters.js";
+import * as gqlp from "./common/gqlDeclarations.js"
+import { number } from "zod";
 
 class ValueRef {
   val: string = "";
@@ -20,6 +21,7 @@ type Params<T>= {
   [K in keyof T]: ValueRef;
 }
 
+const postedStas = {success: 0, failed: 0};
 export default function App() {
   const [tx, setTx] = useState({
     date: new ValueRef,
@@ -49,10 +51,41 @@ export default function App() {
     );
   };
   function startGenerate() {
-
-  }
-  function postTransaction() {
     
+  }
+  const setPostedStatsTxt = () => {
+    if (postedStas.success === 0 && postedStas.failed === 0) {
+      postedStasTxt.val = "";
+      setPostedStats({...postedStasTxt});
+      return;
+    }
+    let txt = `Posted: ${postedStas.success}`;
+    if (postedStas.failed > 0) {
+      txt += `, Failed: ${postedStas.failed}`;
+    }
+    postedStasTxt.val = txt;
+    console.log("Setting posted stats", txt);
+    setPostedStats({...postedStasTxt});
+  }
+  const [postedStasTxt, setPostedStats] = useState(new ValueRef);
+  const [lastPostError, setLastPostError] = useState(new ValueRef);
+
+  function postTransaction() {
+    const params = PostTransactionValidatorGql.parse({amount: tx.amount.val,
+      userFrom: tx.userFrom.val,
+      userTo: tx.userTo.val,
+      date: Math.floor(new Date(tx.date.val).getTime()).toFixed(0)
+    });
+    gqlp.postTransaction.fetchCall('/graphql', params).then(_ => {
+      postedStas.success++;
+      lastPostError.val = "";
+    }).catch(err => {
+      postedStas.failed++;
+      lastPostError.val = err.message;
+    }).finally(() => {
+      setPostedStatsTxt()
+      setLastPostError({...lastPostError});
+    });
   }
   function getGenerationProgress() {
     
@@ -93,7 +126,7 @@ export default function App() {
     />
   }
 
-  const [data, setData] = useState(new ValueRef);
+  const [genProgress, setGenProgress] = useState(new ValueRef);
 
   const textInput = (lab: string, str: Object, field: ValueRef, setter: (val: any) => void, type: 'text' | 'number' =  'text') => {
     return <TextField
@@ -102,12 +135,15 @@ export default function App() {
       value={field.val}
       onChange={(e) => {
         field.val = e.target.value;
-        data.val = field.val;
-        setData(data);
         setter({ ...str })
       }}
       type={type}
     />
+  }
+  function label(dataSrc: ValueRef) {
+    return <Typography sx={{ mt: 2 }}>
+      {dataSrc.val}
+    </Typography>
   }
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
@@ -121,18 +157,20 @@ export default function App() {
             {dateTimeInput("Date", tx, tx.date, setTx)}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User From", tx, tx.userFrom, setTx)}
+            {textInput("User Id From", tx, tx.userFrom, setTx, "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User To", tx, tx.userTo, setTx)}
+            {textInput("User Id To", tx, tx.userTo, setTx, "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
             {textInput("Amount", tx, tx.amount, setTx, "number")}
           </Grid>
           <Grid item xs={12}>
-            <Button variant="contained" onClick={handleCreateTransaction}>
+            <Button variant="contained" onClick={postTransaction}>
               Send to Kafka
             </Button>
+            {label(postedStasTxt)}
+            {label(lastPostError)}
           </Grid>
         </Grid>
       </Paper>
@@ -164,9 +202,6 @@ export default function App() {
             <Button variant="contained" onClick={handleCreateTransaction}>
               Generate
             </Button>
-            <Typography sx={{ mt: 2 }}>
-              {data.val}
-            </Typography>
           </Grid>
         </Grid>
       </Paper>

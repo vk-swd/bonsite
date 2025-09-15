@@ -1,17 +1,17 @@
-import z, { ZodObject, ZodRawShape } from "zod";
-import { StatementParametersValidator, UserDataValidator } from "./event_types.js";
-import { GenParametersValidator, PostTransactionValidator, ProgressReportValidator } from "./generator_parameters.js";
+import z, { ZodObject, ZodRawShape, ZodType } from "zod";
+import { StatementParametersValidatorGql, UserDataRequestValidator, UserDataValidator } from "./event_types.js";
+import { GenParametersValidatorGql, PostTransactionValidatorGql, ProgressReportValidator } from "./generator_parameters.js";
 
 
 export function gqlFromZod<T extends ZodRawShape>(validator: ZodObject<T>): string {
     let res = "";
     Object.entries(validator.shape).forEach(([key, value])=> {
-        res += `${key}: ${value.description}\n`;
+        res += `${key}: ${(value as ZodObject<any>).meta()?.description}\n`;
     })
     return res;
 }
-type FunctionsMap<T> = {
-    [k in keyof T]: (val: T[k]) => string
+type FunctionsMap<T extends ZodRawShape> = {
+    [k in keyof z.infer<ZodObject<T>>]: (val: z.infer<ZodObject<T>>[k]) => string
 }
 
 interface BaseGqlType<T> {
@@ -61,7 +61,7 @@ class GqlInt implements BaseGqlType<number> {
 }
 export class GqlType<T extends ZodRawShape> implements BaseGqlType<z.infer<ZodObject<T>>> {
     fieldsRV: string = "";
-    requestMaker: FunctionsMap<z.infer<ZodObject<T>>> | undefined = undefined;
+    requestMaker: FunctionsMap<T>;
     argValue: (params: z.infer<ZodObject<T>>) => string
     name(): string {
         return this._name;
@@ -69,15 +69,19 @@ export class GqlType<T extends ZodRawShape> implements BaseGqlType<z.infer<ZodOb
     constructor(public _name: string, public validator: ZodObject<T>, private type: "input" | "type") {
         this.fieldsRV = "{" + Object.keys(validator.shape).join(' ') + "}";
         this.requestMaker = Object.fromEntries(Object.entries(validator.shape).map(([key, value]) => {
-            if (value.description == "Int" || value.description == "Int!") {
+            const meta = (value as ZodType<any>).meta()?.description;
+            if (meta == "Int" || meta == "Int!") {
                 return [key, (val: number) => val.toFixed(0)];
             } else {
-                return [key, (val: string) => `\"${val}\"`];
+                return [key, (val: string) => { 
+
+                console.log(`Using string for ${key} with meta ${meta} fpr val ${val}`);
+                    return `\\"${val}\\"`}];
             }}));
-        this.argValue = (params: z.infer<ZodObject<T>>): string =>
-                `{ ${Object.entries(params).map(([key, value]) =>
-                `${key}: ${this.requestMaker![key](value)}`).join(", ")} }`;  
-       
+        this.argValue = (params: z.infer<ZodObject<T>>): string => {
+            return `{ ${Object.keys(this.requestMaker).map((key) =>
+                    `${key}: ${Object(this.requestMaker)[key](Object(params)[key])}`).join(", ")} }`;
+        }
     }
     validate(data: z.infer<ZodObject<T>>): z.infer<ZodObject<T>> {
         return this.validator.parse(data);
@@ -94,10 +98,11 @@ export class GqlType<T extends ZodRawShape> implements BaseGqlType<z.infer<ZodOb
 }
 
 export const ProgressReportGqlType = new GqlType("ProgressReport", ProgressReportValidator, "type");
-export const GenParametersGqlType = new GqlType("GenParameters", GenParametersValidator, "input");
-export const StatementParametersGqlType = new GqlType("StatementParameters", StatementParametersValidator, "input");
-export const PostTransactionParamsGqlType = new GqlType("PostTransactionParams", PostTransactionValidator, "input");
+export const GenParametersGqlType = new GqlType("GenParameters", GenParametersValidatorGql, "input");
+export const StatementParametersGqlType = new GqlType("StatementParameters", StatementParametersValidatorGql, "input");
+export const PostTransactionParamsGqlType = new GqlType("PostTransactionParams", PostTransactionValidatorGql, "input");
 export const UserRecordGqlType = new GqlType("UserRecord", UserDataValidator, "type");
+export const UserRequestGqlType = new GqlType("UserRequest", UserDataRequestValidator, "input");
 
 class GqlFunction<T, K> {
     constructor(public name: string, public returnType: BaseGqlType<T>, public paramType?: BaseGqlType<K>) {
@@ -132,6 +137,6 @@ export const startGen = new GqlFunction("startGen", new GqlString(), GenParamete
 export const getProgress = new GqlFunction("getProgress", ProgressReportGqlType);
 export const getStatement = new GqlFunction("getStatement", new GqlString(), StatementParametersGqlType);
 export const hello = new GqlFunction("hello", new GqlString());
-export const users = new GqlFunction("users", UserRecordGqlType, new GqlString());
+export const users = new GqlFunction("users", UserRecordGqlType, UserRequestGqlType);
 export const postTransaction = new GqlFunction("postTransaction", new GqlString(), PostTransactionParamsGqlType);
 export const getGeneratorStats = new GqlFunction("getGeneratorStats", new GqlString());

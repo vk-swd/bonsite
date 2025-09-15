@@ -1,6 +1,18 @@
 import { z } from "zod";
 import { getEnum, getInt as getNumber, getIntOptional as getNumberOptional, getString } from "./zodGqlTypes.js";
 
+
+export const GenParametersValidatorGql = z.object({
+    userCount: getString(),
+    dateFrom: getString(),
+    dateTo: getString(),
+    transactionCount: getString(),
+    maxDelayMs: getString(),
+    minUserId: getString(),
+    minTransactionId: getString()
+});
+export type GenParametersGql = z.infer<typeof GenParametersValidatorGql>;
+
 export const GenParametersValidator = z.object({
     userCount: getNumber(),
     dateFrom: getNumber(),
@@ -13,9 +25,17 @@ export const GenParametersValidator = z.object({
 
 export type GenParameters = z.infer<typeof GenParametersValidator>;
 
-export const PostTransactionValidator = z.object({
+export const PostTransactionValidatorGql = z.object({
     userFrom: getString(),
     userTo: getString(),
+    amount: getString(),
+    date: getString()
+});
+export type PostTransactionParamsGql = z.infer<typeof PostTransactionValidatorGql>;
+
+export const PostTransactionValidator = z.object({
+    userFrom: getNumber(),
+    userTo: getNumber(),
     amount: getNumber(),
     date: getNumber()
 });
@@ -26,18 +46,6 @@ export const startUrl = "start"
 export const stopUrl = "stop"
 export const progressUrl = "progress"
 export const getStatUrl = "getstat"
-
-export enum RequestStatus {
-    OK = 200,
-    ERROR = 500,
-}
-
-export const RequestResultValidator = z.object({
-    status: z.nativeEnum(RequestStatus),
-    message: getString(),
-    data: z.union([z.null(), getString()]).optional(),
-});
-export type RequestResult = z.infer<typeof RequestResultValidator>;
 
 export enum GenerationState {
     RUNNING = 1,
@@ -98,5 +106,12 @@ export class UserCounters {
             this.data.set(userId, new Counters(userId));
         }
         return this.data.get(userId)!;
+    }
+    incrementStat(userId: number, amount: number, date: number) {
+        const c = this.get(userId);
+        c.transactionCount++;
+        c.amountSum += amount;
+        c.updateMinDate(date);
+        c.updateMaxDate(date);
     }
 }

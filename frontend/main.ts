@@ -1,5 +1,5 @@
 import { json } from 'stream/consumers';
-import { GenParameters, RequestResultValidator } from "./common/generator_parameters";
+import { GenParameters } from "./common/generator_parameters";
 
 // async function loadData() {
 //   const query = `
@@ -171,7 +171,7 @@ genButton.addEventListener('click', () => {
     body: JSON.stringify({ query }),
   }).then(response => response.json())
     .then(data => {
-      const results = RequestResultValidator.parse(genButton.dataset.isStarted == "true" ? data.data.startGen : data.data.stopGen);
+      // const results = RequestResultValidator.parse(genButton.dataset.isStarted == "true" ? data.data.startGen : data.data.stopGen);
     })
     .catch(error => {
       console.error("Request failed:", error);

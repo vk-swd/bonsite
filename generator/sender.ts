@@ -2,8 +2,8 @@ import { getEnv } from "./common/utils.js";
 import { GenerationState, GenParameters, ProgressReport } from "./common/generator_parameters.js";
 import { KClient } from "./common/kafka_client.js";
 import { Generator } from "./generator.js";
-
 import { KProducer } from "./kafka_producer.js";
+import { PostTransactionParams } from "./common/generator_parameters.js";
 
 const MAX_IN_FLIGHT = 200;
 export class Sender {
@@ -22,6 +22,11 @@ export class Sender {
     start(params: GenParameters) {
         this.generator.start(params);
         this.sendEvents(MAX_IN_FLIGHT)
+    }
+    postTransaction(userData: PostTransactionParams) {
+        const events = this.generator.getTransactionsToPost(userData);
+        events.forEach(e => this.producer.write(JSON.stringify(e.event), e.topic));
+        this.producer.attemptDelivery();
     }
     sendEvents(num: number) {
         // <= (2 * MAX_IN_FLIGHT - 1) will be in flight

@@ -13,7 +13,7 @@ services:
         - ./${COMMON_DIR_NAME}/healthcheck.ts:${WORKDIR}/${COMMON_DIR_NAME}/healthcheck.ts
       working_dir: ${WORKDIR}
       entrypoint: ["/bin/bash", "-c"]
-      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm install; npm run deploy; exec bash"]
+      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm run deploy; exec bash"]
       environment:
         - NODE_PRESERVE_SYMLINKS=1
         - HEALTHCHECK_PORT=${HEALTHCHECK_PORT}
@@ -21,6 +21,8 @@ services:
         - backend_net
       tty: true
       stdin_open: true
+      mem_limit: 3g
+      memswap_limit: 0m
       restart: always
       healthcheck:
         test: ["CMD-SHELL", "node ./healthcheck.js ${HEALTHCHECK_PORT} >> ./healthcheck.log"]

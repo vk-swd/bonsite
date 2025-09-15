@@ -48,6 +48,7 @@ services:
       volumes:
         - ./${FRONTEND_NAME}:${SOURCEDIR}
         - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
+        - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
         - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
       container_name: frontend_builder
@@ -180,6 +181,8 @@ services:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
     hostname: "${MSSQL_HOSTNAME}"
+    mem_limit: 2g
+    memswap_limit: 0m
     networks: 
         - backend_net
     healthcheck:

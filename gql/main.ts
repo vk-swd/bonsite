@@ -1,15 +1,14 @@
 import express from "express";
 import { createHandler } from "graphql-http/lib/use/express";
-import { buildSchema, GraphQLError, GraphQLSchema, GraphQLUnionType } from "graphql";
+import { buildSchema, GraphQLError, GraphQLSchema } from "graphql";
 import * as gp from "./common/generator_parameters.js";
 import { getEnv } from "./common/utils.js";
 import { logger } from "./common/logger.js";
-import { GenParametersValidator, RequestStatus } from "./common/generator_parameters.js";
 import * as mtx from "./monitoring_local.js";
-import z, { ZodObject, ZodRawShape, ZodType } from "zod";
 import { HealthCheckSever } from "./common/healthcheck.js";
-import { StatementParameters, reqUsersUrl, StatementParametersValidator, UserDataList, UserDataValidator, UserDataValidatorList, reqStatementUrl } from "./common/event_types.js";
+import { StatementParameters, reqUsersUrl, postTransactionsUrl, UserDataList, reqStatementUrl, StatementParametersGql } from "./common/event_types.js";
 import * as gqld from "./common/gqlDeclarations.js";
+import { UserDataRequest } from "./common/event_types.js";
 
 const schema: GraphQLSchema = buildSchema(`
 type Query {
@@ -27,6 +26,7 @@ ${gqld.GenParametersGqlType.declaration()}
 ${gqld.StatementParametersGqlType.declaration()}
 ${gqld.PostTransactionParamsGqlType.declaration()}
 ${gqld.UserRecordGqlType.declaration()}
+${gqld.UserRequestGqlType.declaration()}
 `);
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
@@ -45,13 +45,6 @@ function params<T>(params: T): RequestInit {
 }
 async function defaultDataHandler(res: Response): Promise<string> {
     return "ok";
-}
-function zodParse<T>(data: string | Object, validator: ZodType<T>): T {
-  try {
-    return validator.parse(data);
-  } catch (e) {
-    throw new Error(`Zod validation failed for ${JSON.stringify(data)}: ${e}`);
-  }
 }
 function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T>, init?: RequestInit): Promise<T> {
   const now = Date.now();
@@ -82,26 +75,45 @@ const Query = {
   stopGen: () => {
     return getRequest<string>(httpG + gp.stopUrl, defaultDataHandler);
   },
-  startGen: async (arg: {params: gp.GenParameters} ) => {
-    return getRequest<string>(httpG + gp.startUrl, defaultDataHandler, params(arg.params));
+  startGen: async (arg: {params: gp.GenParametersGql} ) => {
+    const param: gp.GenParameters = {
+       userCount: Number.parseInt(arg.params.userCount),
+        dateFrom: Number.parseInt(arg.params.dateFrom),
+        dateTo: Number.parseInt(arg.params.dateTo),
+        transactionCount: Number.parseInt(arg.params.transactionCount),
+        maxDelayMs: Number.parseInt(arg.params.maxDelayMs),
+        minUserId: Number.parseInt(arg.params.minUserId),
+        minTransactionId: Number.parseInt(arg.params.minTransactionId)
+    };
+    return getRequest<string>(httpG + gp.startUrl, defaultDataHandler, params(param));
   },
   getProgress: async (): Promise<gp.ProgressReport> => {
-      return await getRequest(httpG + gp.progressUrl, async (res: Response) => 
-        zodParse(await res.json(), gp.ProgressReportValidator));
+      return await getRequest(httpG + gp.progressUrl, res => res.json());
   },
   getGeneratorStats: async (): Promise<string> => {
       return await getRequest<string>(httpG + gp.getStatUrl, res => res.text());
   },
-  getStatement: async (arg: {params: StatementParameters} ): Promise<string> => {
-    return await getRequest(httpSG + reqStatementUrl, res => res.text(), params(arg.params));
+  getStatement: async (arg: {params: StatementParametersGql} ): Promise<string> => {
+      const p: StatementParameters = {
+        userId: Number.parseInt(arg.params.userId),
+        fromm: arg.params.fromm.length == 0 ? undefined : Number.parseInt(arg.params.fromm),
+        too: arg.params.too.length == 0 ? undefined : Number.parseInt(arg.params.too),
+        type: arg.params.type === undefined ? undefined : arg.params.type
+      };
+    return await getRequest(httpSG + reqStatementUrl, res => res.text(), params(p));
   },
-  users: async (arg: {name?: string} ): Promise<UserDataList> => {
-    return await getRequest<UserDataList>(httpSG + reqUsersUrl, async (res: Response) => {
-      const data = UserDataValidatorList.parse(await res.json());
-      // logger.info(`Fetched users: ${JSON.stringify(data)}`);
-      return data as UserDataList;
-    }, params(arg.name));
-  } 
+  users: async (arg: {params: UserDataRequest} ): Promise<UserDataList> => {
+    return await getRequest<UserDataList>(httpSG + reqUsersUrl, res => res.json(), params(arg.params));
+  },
+  postTransaction: async (arg: {params: gp.PostTransactionParamsGql} ): Promise<string> => {
+      const p: gp.PostTransactionParams = {
+        userFrom: Number.parseInt(arg.params.userFrom),
+        userTo: Number.parseInt(arg.params.userTo),
+        amount: Number.parseInt(arg.params.amount),
+        date: Number.parseInt(arg.params.date)
+      };
+    return await getRequest<string>(httpG + postTransactionsUrl, res => res.text(), params(p));
+  }
 }
 try {
   await mtx.startMonitoring();
