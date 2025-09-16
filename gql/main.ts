@@ -52,7 +52,7 @@ function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T>,
   return fetch(url, init)
     .then(res => {
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+        throw new Error(`HTTP error! status: ${res.status}, message: ${res.statusText}`);
       }
       return dataHandler(res)
     })
@@ -78,10 +78,10 @@ const Query = {
   startGen: async (arg: {params: gp.GenParametersGql} ) => {
     const param: gp.GenParameters = {
        userCount: Number.parseInt(arg.params.userCount),
-        dateFrom: Number.parseInt(arg.params.dateFrom),
-        dateTo: Number.parseInt(arg.params.dateTo),
+        dateFrom: new  Date(arg.params.dateFrom).getTime(),
+        dateTo: new  Date(arg.params.dateTo).getTime(),
         transactionCount: Number.parseInt(arg.params.transactionCount),
-        maxDelayMs: Number.parseInt(arg.params.maxDelayMs),
+        maxDelayMs: arg.params.maxDelayMs.length ? Number.parseInt(arg.params.maxDelayMs) : undefined,
         minUserId: Number.parseInt(arg.params.minUserId),
         minTransactionId: Number.parseInt(arg.params.minTransactionId)
     };
@@ -110,7 +110,7 @@ const Query = {
         userFrom: Number.parseInt(arg.params.userFrom),
         userTo: Number.parseInt(arg.params.userTo),
         amount: Number.parseInt(arg.params.amount),
-        date: Number.parseInt(arg.params.date)
+        date: new Date(arg.params.date).getTime()
       };
     return await getRequest<string>(httpG + postTransactionsUrl, res => res.text(), params(p));
   }

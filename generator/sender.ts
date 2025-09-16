@@ -4,6 +4,7 @@ import { KClient } from "./common/kafka_client.js";
 import { Generator } from "./generator.js";
 import { KProducer } from "./kafka_producer.js";
 import { PostTransactionParams } from "./common/generator_parameters.js";
+import { logger } from "./common/logger.js";
 
 const MAX_IN_FLIGHT = 200;
 export class Sender {
@@ -13,13 +14,20 @@ export class Sender {
         this.producer.on(KProducer.event.requestMessages, (num: number) => this.sendEvents(num));
     }
     progress(): ProgressReport {
+        const toSend = this.generator.getTransactionsToGenerate() * 2;
+        const sent = Math.max(0, this.generator.generatedCount() * 2 - this.generator.queueSize() - this.producer.getInFlight());
+        const progress = sent === toSend ? 100 : sent * 100 / Math.max(toSend,1);
         return {
             totalSent: this.generator.generatedCount(),
             isRunning: this.isStopped() ? GenerationState.STOPPED : GenerationState.RUNNING,
-            percentComplete: this.generator.percentComplete()
+            percentComplete: Math.floor(progress),
+            maxUserId: this.generator.getMaxUserIdGenerated(),
+            maxTransactionId: this.generator.getTransactionIdNext(),
+            generated: this.generator.getGeneratedDuringSession()
         }
     }
     start(params: GenParameters) {
+        logger.info(`Starting generation with params: ${JSON.stringify(params)}`);
         this.generator.start(params);
         this.sendEvents(MAX_IN_FLIGHT)
     }
@@ -40,7 +48,7 @@ export class Sender {
         this.generator.stop();
     }
     isStopped(): boolean {
-        return this.producer.getInFlight() === 0 && this.generator.percentComplete() === 100;
+        return this.producer.getInFlight() === 0;
     }
 }
 

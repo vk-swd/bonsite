@@ -72,10 +72,16 @@ export class Generator {
     private transactionsEnqueued: number = 0;
     private userCount: number = 0;
     private minUserId: number = 0;
+    private maxUserId: number = 0;
+    private generatedDuringSession: number = 0;
+    private stopped = true;
     start(params: GenParameters) {
         this.stop();
+        this.stopped = false;
         this.msgMetaDataPerUser.reset();
         this.startTime = params.dateFrom;
+        this.generatedDuringSession = 0;
+        this.transactionsGenerated = 0;
         const endTime = Math.max(params.dateTo, this.startTime);
         this.timeIncrement = (endTime - this.startTime) / Math.max(params.transactionCount, 1);
         this.delayGenerator = new DelayGenerator(params.maxDelayMs??100);
@@ -88,11 +94,19 @@ export class Generator {
             this.transactionId = params.minTransactionId;
         }
     }
+    getTransactionIdNext(): number {
+        return this.transactionId;
+    }
+    getMaxUserIdGenerated(): number {
+        return this.maxUserId;
+    }
+    getGeneratedDuringSession(): number {
+        return this.generatedDuringSession;
+    }
     stop() {
         this.queue = new TransactionEventsQueue();
         this.transactionsEnqueued = 0;
-        this.transactionsGenerated = 0;
-        this.transactionsToGenerate = 0;
+        this.stopped = true;
     }
     getTransactionsToPost(params: PostTransactionParams): TransactionEvent[] {
         const [t,r] = this.getTransaction(params.userFrom, params.userTo, params.amount, params.date, params.date, TResult.CONFIRMED);
@@ -100,14 +114,14 @@ export class Generator {
             { topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: r }];
     }
     getEvents(count: number): Array<TransactionEvent> | undefined {
+        if (this.stopped || this.transactionsToGenerate == this.transactionsGenerated && this.queue.size() == 0) {
+            this.stopped = true;
+            return undefined;
+        }
         if (this.transactionsEnqueued < count) {
             // generate count * 2 transactions
             const toGenerate = Math.min(count * 2, this.transactionsToGenerate - this.transactionsGenerated);
             this.generate(toGenerate);
-        }
-        if (this.transactionsToGenerate == this.transactionsGenerated && this.queue.size() == 0) {
-            // console.log(`Reached transaction count limit ${this.transactionsToGenerate}, stopping generation`);
-            return undefined;
         }
         const events = this.queue.dequeEvents(count);
         for (const e of events) {
@@ -117,11 +131,11 @@ export class Generator {
         }
         return events;
     }
-    percentComplete(): number {
-        return Math.floor(this.transactionsGenerated * 100 / Math.max(this.transactionsToGenerate + this.queue.size(),1));
-    }
     generatedCount(): number {
         return this.transactionsGenerated;
+    }
+    getTransactionsToGenerate(): number {
+        return this.transactionsToGenerate;
     }
     private getTransaction(userIdFrom: number, userIdTo: number, amount: number, 
         transactionTime: number, datetimeR: number, state: TResult): [InKafkaMessage, InKafkaMessage] {
@@ -137,7 +151,9 @@ export class Generator {
             id: transaction.id,
             state,
         }
+        this.maxUserId = Math.max(this.maxUserId, userIdFrom, userIdTo);
         this.msgMetaDataPerUser.incrementStat(userIdFrom, amount, transaction.dateTime);
+        this.generatedDuringSession+=2;
         if (userIdFrom !== userIdTo) {
             this.msgMetaDataPerUser.incrementStat(userIdTo, amount, transaction.dateTime);
         }

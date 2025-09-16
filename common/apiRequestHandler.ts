@@ -22,8 +22,8 @@ export function handleRequest<T>(url: string, req: IncomingMessage, res: ServerR
             }).catch((error) => {
                 logger.error(`Error processing request for ${req.url}: ${error}`);
                 metrics.incrementFailedApiCallCount();
-                res.writeHead(400);
-                res.end(`Request processing error for ${req.url}: ${error}`);
+                res.writeHead(400, `Request processing error for ${req.url}: ${error.message.replace(/[^\x20-\x7E]+/g, '')}`);
+                res.end();
             });
         });
     } else if (req.method === 'GET'){
@@ -32,13 +32,13 @@ export function handleRequest<T>(url: string, req: IncomingMessage, res: ServerR
         }).catch((error) => {
             logger.error(`Error processing request for ${req.url}: ${error}`);
             metrics.incrementFailedApiCallCount();
-            res.writeHead(500);
-            res.end(`Request processing error for ${req.url}: ${error}`);
+            res.writeHead(500, `Request processing error for ${req.url}: ${error.message.replace(/[^\x20-\x7E]+/g, '')}`);
+            res.end();
         });
     } else {
         metrics.incrementUnknownApiCallCount();
-        res.writeHead(404);
-        res.end('Malformed request');
+        res.writeHead(404, `Unsupported method: ${req.method}`);
+        res.end();
     }
     return true;
 }

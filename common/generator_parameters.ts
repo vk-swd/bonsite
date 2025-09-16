@@ -55,7 +55,10 @@ export enum GenerationState {
 export const ProgressReportValidator = z.object({
     totalSent: getNumber(),
     isRunning: getEnum(GenerationState, "Int"),
-    percentComplete: getNumber()
+    percentComplete: getNumber(),
+    maxUserId: getNumber(),
+    maxTransactionId: getNumber(),
+    generated: getNumber()
 });
 export type ProgressReport = z.infer<typeof ProgressReportValidator>;
 const MAGIC_UNDEFINED = -1;

@@ -10,98 +10,198 @@ import {
 } from "@mui/material";
 
 import Select, { InputActionMeta } from 'react-select'
-import { GenParameters, GenParametersValidator, PostTransactionValidatorGql } from "./common/generator_parameters.js";
+import { GenerationState, GenParametersValidator, GenParametersValidatorGql, PostTransactionValidatorGql, ProgressReport } from "./common/generator_parameters.js";
 import * as gqlp from "./common/gqlDeclarations.js"
-import { number } from "zod";
+import z, { set, ZodObject } from "zod";
+import { StatementParametersValidatorGql } from "./common/event_types.js";
+import { fa } from "zod/v4/locales";
+import { logger } from "./common/logger.js";
 
-class ValueRef {
-  val: string = "";
+enum StartGenButtonStates {
+  NothingHappens,
+  CalledToStartGeneration,
+  CalledToStopGeneration
 }
+const startGenButtonStates = new Map<StartGenButtonStates, {buttonLabel: string, buttonDisabled: boolean}>([
+  [StartGenButtonStates.NothingHappens, {buttonLabel: "Start Generation", buttonDisabled: false}],
+  [StartGenButtonStates.CalledToStartGeneration, {buttonLabel: "Stop Generation", buttonDisabled: false}],
+  [StartGenButtonStates.CalledToStopGeneration, {buttonLabel: "Stop Generation", buttonDisabled: true}]])
+
 type Params<T>= {
-  [K in keyof T]: ValueRef;
+  [K in keyof T]: string;
+}
+function makeParamsState<T extends ZodObject, K extends z.infer<T>>(shape: T): Required<Params<K>> {
+  return Object.fromEntries(Object.keys(shape.shape).map((key) => [key, ""])) as Required<Params<K>>
+}
+const GQL_URL = "/graphql";
+
+const dateTimeInput = (lab: string, val: () => string, updateVal: (val: string) => void) => {
+  return <TextField
+    fullWidth
+    label={lab}
+    type="datetime-local"
+    InputLabelProps={{ shrink: true }}
+    inputProps={{
+      step: 1 // allows seconds
+    }}
+    value={val()}
+    onChange={(e) => updateVal(e.target.value)}
+  />
+}
+const textInput = (lab: string, val: () => string, updateVal: (v: string) => void,  type: 'text' | 'number' =  'text') => {
+  return <TextField
+    fullWidth
+    label={lab}
+    value={val()}
+    onChange={(e) => updateVal(e.target.value)}
+    type={type}
+  />
+}
+function makeButton<T>(lab: string|(() => string), toggler: () => boolean, onClick: () => void) {
+  return <Button variant="contained" 
+  disabled={toggler()}
+  onClick={onClick}>
+    {lab instanceof Function ? lab() : lab}
+  </Button>
+}
+function label(toggler: () => string) {
+  return <Typography sx={{ mt: 2, minWidth: 0, whiteSpace: 'normal'}}>
+    {toggler()}
+  </Typography>
 }
 
-const postedStas = {success: 0, failed: 0};
-export default function App() {
-  const [tx, setTx] = useState({
-    date: new ValueRef,
-    userFrom: new ValueRef,
-    userTo: new ValueRef,
-    amount: new ValueRef,
-  });
-  const [statement, setStatement] = useState({
-    user: new ValueRef,
-    fromDate: new ValueRef,
-    toDate: new ValueRef,
-  });
-  const [output, setOutput] = useState<string>("");
-  // GenParametersValidator.shape
-  const getParamsState = Object.fromEntries(Object.keys(GenParametersValidator.shape).map(
-    (key) => [key, new ValueRef()]
-  )) as Params<GenParameters>
-  // getParamsState.dateFrom.val = "10";
-  const [genParams, setGenParams] = useState(getParamsState);
 
-  // Simulate Kafka call
-  const handleCreateTransaction = () => {
-    // Replace with API call
-    setOutput((prev) =>
-      prev +
-      `Created transaction: ${JSON.stringify(tx)}\n`
-    );
-  };
-  function startGenerate() {
-    
-  }
-  const setPostedStatsTxt = () => {
+
+
+
+
+
+
+
+export default function App() {
+  //------ Post Transaction----------------
+  const [postTransactionParams, setPostTransactionParams] = useState(() => {
+    const res = makeParamsState(PostTransactionValidatorGql)
+    res.date = (new Date()).toISOString().slice(0, 19);
+    res.userFrom = "1";
+    res.userTo = "2";
+    res.amount = "100";
+    return res;
+});
+  const [postedStas, setPostedStats1] = useState({success: 0, failed: 0});
+  const [postButtonState, setPostButtonState] = useState(false);
+  const [postedStasTxt, renderPostedStatsTxt] = useState("");
+  const [startGenTxt, setStartGenTxt] = useState("");
+  const updatePostedStatsTxt = () => {
     if (postedStas.success === 0 && postedStas.failed === 0) {
-      postedStasTxt.val = "";
-      setPostedStats({...postedStasTxt});
+      renderPostedStatsTxt("");
       return;
     }
     let txt = `Posted: ${postedStas.success}`;
     if (postedStas.failed > 0) {
       txt += `, Failed: ${postedStas.failed}`;
     }
-    postedStasTxt.val = txt;
-    console.log("Setting posted stats", txt);
-    setPostedStats({...postedStasTxt});
+    renderPostedStatsTxt(txt);
   }
-  const [postedStasTxt, setPostedStats] = useState(new ValueRef);
-  const [lastPostError, setLastPostError] = useState(new ValueRef);
-
   function postTransaction() {
-    const params = PostTransactionValidatorGql.parse({amount: tx.amount.val,
-      userFrom: tx.userFrom.val,
-      userTo: tx.userTo.val,
-      date: Math.floor(new Date(tx.date.val).getTime()).toFixed(0)
-    });
-    gqlp.postTransaction.fetchCall('/graphql', params).then(_ => {
+    setPostButtonState(true);
+    const params = PostTransactionValidatorGql.parse(postTransactionParams);
+    gqlp.postTransaction.fetchCall(GQL_URL, params).then(_ => {
       postedStas.success++;
-      lastPostError.val = "";
+      updatePostedStatsTxt();
     }).catch(err => {
       postedStas.failed++;
-      lastPostError.val = err.message;
+      renderPostedStatsTxt(err.message);
     }).finally(() => {
-      setPostedStatsTxt()
-      setLastPostError({...lastPostError});
+      setPostButtonState(false);
     });
   }
-  function getGenerationProgress() {
-    
+  
+  //------ Generate Transactions----------------
+  const [genParams, setGenParams] = useState(() => {
+    const res = makeParamsState(GenParametersValidator)
+    const now = new Date();
+    const before = new Date();
+    before.setFullYear(before.getFullYear() - 25);
+    res.dateFrom = before.toISOString().slice(0, 19);
+    res.dateTo = now.toISOString().slice(0, 19);
+    res.userCount = "10000";
+    res.transactionCount = "1000000";
+    res.minUserId = "1";
+    res.minTransactionId = "1";
+    res.maxDelayMs = "100";
+    return res;
+  });
+  const [startGenButtonState, setStartGenButtonState] = useState(StartGenButtonStates.NothingHappens);
+  async function startGeneration() {
+    try {
+      if (startGenButtonState === StartGenButtonStates.NothingHappens) {
+        setStartGenTxt(``);
+        // TODO: presense of manual transaction posting and the way progress is 
+        // calculated might produce non critical edge cases which could be addressed
+        // Remark: updating web page during the generation will drop all ui state
+        // without stopping the generation. Startning new one will cancel the old one.
+        // This behavior is decided to be acceptable.
+        setStartGenButtonState(StartGenButtonStates.CalledToStartGeneration);
+        const params = GenParametersValidatorGql.parse(genParams);
+        logger.info(`Starting generation with params: ${JSON.stringify(params)}`);
+        await gqlp.startGen.fetchCall(GQL_URL, params);
+      } else if (startGenButtonState === StartGenButtonStates.CalledToStartGeneration) {
+        // Disable the button until the previously called startGen is finished asynchroniously
+        setStartGenButtonState(StartGenButtonStates.CalledToStopGeneration);
+        await gqlp.stopGen.fetchCall(GQL_URL)
+        return;
+      } else {
+        logger.info("Stop generation already called, waiting for previous Start generation to finish");
+        return;
+      }
+    } catch (err) {
+      // TODO: when stopGen yields error but generation is running last progress report
+      // will overwrite this error message. Fix it (More states?).
+      setStartGenTxt(`Generation eror at state ${startGenButtonState}: ${err}`);
+      return;
+    }
+    let interval = 100;
+    const startTime = Date.now();
+    let runNum = 0;
+    let lastProgressReport: ProgressReport | undefined = undefined;
+    try {
+      while (true) {
+        runNum++;
+        await new Promise(resolve => setTimeout(resolve, interval));
+        lastProgressReport = await gqlp.getProgress.fetchCall(GQL_URL);
+        genParams.minUserId = lastProgressReport.maxUserId.toString();
+        genParams.minTransactionId = lastProgressReport.maxTransactionId.toString();
+        setGenParams({...genParams});
+        const now = Date.now();
+        if (lastProgressReport.isRunning === GenerationState.STOPPED) {
+            setStartGenButtonState(StartGenButtonStates.NothingHappens);
+            setStartGenTxt(`Generation done. Elapsed: ${now - startTime}, generated ${lastProgressReport.generated}.`);
+            break;
+        }
+        const elapsed = Math.max((now - startTime), 1)
+        const completionRate = elapsed / Math.max(1, lastProgressReport.percentComplete);
+        const timeToFinish = completionRate * (100 - lastProgressReport.percentComplete);
+        interval = Math.min(2000, Math.max(1000, timeToFinish));
+        setStartGenTxt(`Progress: ${JSON.stringify(lastProgressReport)}. Elapsed: ${now - startTime}.`);
+      }
+    } catch (err) {
+      // TODO: maybe it is worth sending progress requests non-stop 
+      // and show the real time generation state even when no generation is running
+      setStartGenButtonState(StartGenButtonStates.NothingHappens);
+      setStartGenTxt(`Error during generation. 
+        Last progress report: ${JSON.stringify(lastProgressReport)}.
+        Error: ${err}.`);
+    }
   }
-  function getStatement() {
 
-  }
+
+  //------- Get Statement----------------
+  const [statement, setStatement] = useState(makeParamsState(StatementParametersValidatorGql));
   // Simulate statement fetch
   const handleGetStatement = () => {
-    // Replace with API call
-    setOutput((prev) =>
-      prev +
-      `Fetched statement for ${statement.user} from ${statement.fromDate} to ${statement.toDate}\n`
-    );
+
   };
-  const progress = new ValueRef;
   type UserOption = {
     value: string;
     label: string;
@@ -109,42 +209,7 @@ export default function App() {
   const [options, setOptions] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<UserOption | null>(null);
 
-  const dateTimeInput = (lab: string, str: Object, field: ValueRef, setter: (val: any) => void) => {
-    return <TextField
-      fullWidth
-      label={lab}
-      type="datetime-local"
-      InputLabelProps={{ shrink: true }}
-      inputProps={{
-        step: 1 // allows seconds
-      }}
-      value={field.val}
-      onChange={(e) => {
-        field.val = e.target.value;
-        setter({...str})
-      }}
-    />
-  }
 
-  const [genProgress, setGenProgress] = useState(new ValueRef);
-
-  const textInput = (lab: string, str: Object, field: ValueRef, setter: (val: any) => void, type: 'text' | 'number' =  'text') => {
-    return <TextField
-      fullWidth
-      label={lab}
-      value={field.val}
-      onChange={(e) => {
-        field.val = e.target.value;
-        setter({ ...str })
-      }}
-      type={type}
-    />
-  }
-  function label(dataSrc: ValueRef) {
-    return <Typography sx={{ mt: 2 }}>
-      {dataSrc.val}
-    </Typography>
-  }
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
@@ -154,23 +219,20 @@ export default function App() {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date", tx, tx.date, setTx)}
+            {dateTimeInput("Date", () => postTransactionParams.date, (v) => setPostTransactionParams({ ...postTransactionParams, date: v }))}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User Id From", tx, tx.userFrom, setTx, "number")}
+            {textInput("User Id From", () => postTransactionParams.userFrom, (v) => setPostTransactionParams({ ...postTransactionParams, userFrom: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User Id To", tx, tx.userTo, setTx, "number")}
+            {textInput("User Id To", () => postTransactionParams.userTo, (v) => setPostTransactionParams({ ...postTransactionParams, userTo: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Amount", tx, tx.amount, setTx, "number")}
+            {textInput("Amount", () => postTransactionParams.amount, (v) => setPostTransactionParams({ ...postTransactionParams, amount: v }), "number")}
           </Grid>
           <Grid item xs={12}>
-            <Button variant="contained" onClick={postTransaction}>
-              Send to Kafka
-            </Button>
-            {label(postedStasTxt)}
-            {label(lastPostError)}
+            {makeButton("Create Transaction", () => postButtonState, postTransaction)}
+            {label(() => postedStasTxt)}
           </Grid>
         </Grid>
       </Paper>
@@ -181,27 +243,30 @@ export default function App() {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date From", genParams, genParams.dateFrom, setGenParams)}
+            {dateTimeInput("Date From", () => genParams.dateFrom, (v) => setGenParams({ ...genParams, dateFrom: v }))}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date To", genParams, genParams.dateTo, setGenParams)}
+            {dateTimeInput("Date To", () => genParams.dateTo, (v) => setGenParams({ ...genParams, dateTo: v }))}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User Count", genParams, genParams.userCount, setGenParams, "number")}
+            {textInput("User Count", () => genParams.userCount, (v) => setGenParams({ ...genParams, userCount: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Transactions Count", genParams, genParams.transactionCount, setGenParams, "number")}
+            {textInput("Transactions Count", () => genParams.transactionCount, (v) => setGenParams({ ...genParams, transactionCount: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Min User Id", genParams, genParams.minUserId!, setGenParams, "number")}
+            {textInput("Min User Id",  () => genParams.minUserId, (v) => setGenParams({ ...genParams, minUserId: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Min Transaction Id", genParams, genParams.minTransactionId!, setGenParams, "number")}
+            {textInput("Min Transaction Id",  () => genParams.minTransactionId, (v) => setGenParams({ ...genParams, minTransactionId: v }), "number")}
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            {textInput("Transaction Result Delay Ms.",  () => genParams.maxDelayMs, (v) => setGenParams({ ...genParams, maxDelayMs: v }), "number")}
           </Grid>
           <Grid item xs={12} spacing={2}>
-            <Button variant="contained" onClick={handleCreateTransaction}>
-              Generate
-            </Button>
+            {makeButton(() => startGenButtonStates.get(startGenButtonState)!.buttonLabel, 
+            () => startGenButtonStates.get(startGenButtonState)!.buttonDisabled, startGeneration)}
+            {label(() => startGenTxt)}
           </Grid>
         </Grid>
       </Paper>
@@ -223,6 +288,7 @@ export default function App() {
               }}
               onChange={(newValue, actionMeta) => {
                 console.log(`Value Changed: ${newValue}`, actionMeta);
+                setStatement({ ...statement, userId: newValue? newValue.value : ""});
               }}
               styles={{control: (base: any) => ({
                 ...base,
@@ -231,10 +297,10 @@ export default function App() {
               />
           </Grid>
           <Grid item xs={12} sm={4}>
-            {dateTimeInput("From Date", statement, statement.fromDate, setStatement)}
+            {dateTimeInput("From Date", () => statement.fromm, (v) => setStatement({ ...statement, fromm: v }))}
           </Grid>
           <Grid item xs={12} sm={4}>
-            {dateTimeInput("From Date", statement, statement.toDate, setStatement)}
+            {dateTimeInput("From Date", () => statement.too, (v) => setStatement({ ...statement, too: v }))}
           </Grid>
           <Grid item xs={12}>
             <Button variant="contained" onClick={handleGetStatement}>

@@ -73,10 +73,7 @@ export class GqlType<T extends ZodRawShape> implements BaseGqlType<z.infer<ZodOb
             if (meta == "Int" || meta == "Int!") {
                 return [key, (val: number) => val.toFixed(0)];
             } else {
-                return [key, (val: string) => { 
-
-                console.log(`Using string for ${key} with meta ${meta} fpr val ${val}`);
-                    return `\\"${val}\\"`}];
+                return [key, (val: string) => `\\"${val}\\"`];
             }}));
         this.argValue = (params: z.infer<ZodObject<T>>): string => {
             return `{ ${Object.keys(this.requestMaker).map((key) =>
