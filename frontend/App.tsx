@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useLayoutEffect } from "react";
 import {
   Container,
   Box,
@@ -9,7 +9,7 @@ import {
   Paper
 } from "@mui/material";
 
-import Select, { InputActionMeta } from 'react-select'
+import Select, { InputActionMeta, components } from 'react-select'
 import { GenerationState, GenParametersValidator, GenParametersValidatorGql, PostTransactionValidatorGql, ProgressReport } from "./common/generator_parameters.js";
 import * as gqlp from "./common/gqlDeclarations.js"
 import z, { set, ZodObject } from "zod";
@@ -202,14 +202,93 @@ export default function App() {
   const handleGetStatement = () => {
 
   };
+  // need to do the following:
+  // 1. if i typed a user name...any change while typing looks up top 100 user names
+  // 2. if i scroll the user list, then i need a trigger to upload the next users and populate the whole list as i scroll
+  //  2.1 may test this list repopulation with dummy data - when i scroll to the end of the list, generate last 30 items and remove 30 items from the top
+
   type UserOption = {
     value: string;
     label: string;
   };
-  const [options, setOptions] = useState<UserOption[]>([]);
+  const [foundUserData, setFoundUserData] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<UserOption | null>(null);
 
+  //------- Render statement ----------------
+  const [output, setOutput] = useState<string>("");
+  const [scrollState, setScrollState] = useState(true);
+  
+  const refreshOptionsTop = () => {
+    if (menuRef.current) {
+      // remember scroll before adding
+      scrollPos.current = menuRef.current.scrollTop;
+    }
+    setFoundUserData([
+      { value: `TV${foundUserData.length + 1}`, label: `TL${foundUserData.length + 1}` },
+      { value: `TV${foundUserData.length + 2}`, label: `TL${foundUserData.length + 2}` },
+      { value: `TV${foundUserData.length + 3}`, label: `TL${foundUserData.length + 3}` },
+      ...foundUserData.slice(0, -3)
+    ]);
+  };
+  
+  const refreshOptionsBot = () => {
+    if (menuRef.current) {
+      // remember scroll before adding
+      scrollPos.current = menuRef.current.scrollTop;
+    }
+    setFoundUserData([...foundUserData.slice(3),
+      { value: `bV${foundUserData.length + 1}`, label: `bL${foundUserData.length + 1}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
+      { value: `bV${foundUserData.length + 3}`, label: `bL${foundUserData.length + 3}` },
+    ]);
+  };
+  const [showTopMenu, setShowTopMenu] = useState(true);
+  const [showBottonMenu, setShowBottomMenu] = useState(true);
+  function renderMenuButton(label: string, show: () => boolean, refreshOptions: () => void) {
+    if (!show()) {
+      return <div></div> 
+    } else {
+      return <div
+          style={{
+            borderTop: "1px solid #ccc",
+            padding: "6px 8px",
+            textAlign: "center",
+            background: "#f9f9f9",
+          }}
+        >
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();  // prevent menu from closing
+              refreshOptions();
+            }}
+          >
+            {label}
+          </button>
+        </div>
+      }
+    }
 
+    const [menuOpen, setMenuOpen] = useState(false);
+
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const scrollPos = useRef(0);
+    
+    // restore scroll AFTER options update
+    useLayoutEffect(() => {
+      if (menuOpen && menuRef.current) {
+        menuRef.current.scrollTop = scrollPos.current;
+      }
+    }, [foundUserData, menuOpen]);
+
+  const MenuList = (props: any) => (
+    <components.MenuList {...props} innerRef={menuRef}>
+      {renderMenuButton("🔄 Refresh Options (top)", () => foundUserData.length > 10, refreshOptionsTop)}
+      {props.children} {/* regular options */}
+      {renderMenuButton("🔄 Refresh Options (bot)", () => foundUserData.length > 20, refreshOptionsBot)}
+    </components.MenuList>
+  );
+  
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
@@ -281,19 +360,28 @@ export default function App() {
             <Select 
               value={selected}
               placeholder="Select User"
-              options={options}
+              options={foundUserData}
               onInputChange={(newValue: string, actionMeta: InputActionMeta) => {
-                console.log(`Input Changed: ${newValue}`, actionMeta);
-                setOptions([...options, {value: newValue, label: newValue}])
+                console.log(`onInputChange: ${newValue}`, actionMeta);
+                setFoundUserData([...foundUserData, {value: newValue, label: newValue}])
               }}
               onChange={(newValue, actionMeta) => {
-                console.log(`Value Changed: ${newValue}`, actionMeta);
+                console.log(`onChange: ${newValue}`, actionMeta);
                 setStatement({ ...statement, userId: newValue? newValue.value : ""});
+                setSelected(newValue);
+              }}
+              onMenuScrollToBottom={(event: WheelEvent | TouchEvent) => {
+                console.log(`onMenuScrollToBottom: ${JSON.stringify(event)}`);
               }}
               styles={{control: (base: any) => ({
                 ...base,
                 minHeight: 56
               })}}
+              components={{MenuList}}
+              menuPlacement="auto"
+              menuIsOpen={menuOpen}
+              onMenuOpen={() => setMenuOpen(true)}
+              onMenuClose={() => setMenuOpen(false)}
               />
           </Grid>
           <Grid item xs={12} sm={4}>
