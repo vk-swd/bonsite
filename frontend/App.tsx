@@ -77,7 +77,6 @@ function label(toggler: () => string) {
 
 
 
-
 export default function App() {
   //------ Post Transaction----------------
   const [postTransactionParams, setPostTransactionParams] = useState(() => {
@@ -211,18 +210,28 @@ export default function App() {
     value: string;
     label: string;
   };
-  const [foundUserData, setFoundUserData] = useState<UserOption[]>([]);
-  const [selected, setSelected] = useState<UserOption | null>(null);
+  let idx = 0;
+  const [foundUserData, setFoundUserData] = useState<UserOption[]>([
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`},
+    {value: `someval${idx++}`, label: `somelab${idx++}`}]);
+  const [selected, setSelected] = useState<UserOption | null>(foundUserData[0]);
 
   //------- Render statement ----------------
   const [output, setOutput] = useState<string>("");
   const [scrollState, setScrollState] = useState(true);
   
   const refreshOptionsTop = () => {
-    if (menuRef.current) {
-      // remember scroll before adding
-      scrollPos.current = menuRef.current.scrollTop;
-    }
     setFoundUserData([
       { value: `TV${foundUserData.length + 1}`, label: `TL${foundUserData.length + 1}` },
       { value: `TV${foundUserData.length + 2}`, label: `TL${foundUserData.length + 2}` },
@@ -239,7 +248,12 @@ export default function App() {
     setFoundUserData([...foundUserData.slice(3),
       { value: `bV${foundUserData.length + 1}`, label: `bL${foundUserData.length + 1}` },
       { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 3}`, label: `bL${foundUserData.length + 3}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
+      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` }
     ]);
   };
   const [showTopMenu, setShowTopMenu] = useState(true);
@@ -270,7 +284,110 @@ export default function App() {
     }
 
     const [menuOpen, setMenuOpen] = useState(false);
+    const [isLockedForUserRetrieval, lockUserRetrieval] = useState(false);
+    const [lastInput, setLastInput] = useState("");
+    const [lastInputTime, setLastInputTime] = useState(0);
+    const [lastRequestedUserList, setLastRequestedUserList] = useState("");
+    const [waitingToCommitSelectValue, setWaitingToCommitSelectValue] = useState(false);
+    const [inpuHandleTO, setInpuHandleTO] = useState<NodeJS.Timeout | undefined>(undefined);
+    const [showTopUserMenuButton, setShowTopUserMenuButton] = useState(true);
+    const [showBottomUserMenuButton, setShowBottomUserMenuButton] = useState(true);
+    const DEBOUNCE_INTERVAL_MS = 800;
+    function requestNewUserList() {
+      
+    }
+    function requestUserList() {
+      const filter = lastInput;
+      if (lastRequestedUserList == lastInput) {
+        // already requested this value
+        // but need a different subset of it
 
+      }
+      // need to get the regular expression
+      /*
+        Request can be triggered in the following cases:
+        1. user typed something - then i need to get top 100 users matching the input
+        2. user requested nexxt 100 items with menu button - then i need to get the new top user id and request next 100 users matching the input
+        the user composition could have changed between requests so i need to be ready that i might loose 
+        all the records and get completely new lixt of users. in any case i need to kep some user id in mind,
+        so that when i get it, i can update items and set the scroll position to its new location
+
+        [1,2,3,4,5,6,7,8,9,10]
+
+        i get [1,2,3,4]
+        i want to render next 2 and stay at 4
+        i ask for (startid: 3, count: 4)
+
+        i might get [3,4,5,6] if nothing changes and i navigate to 4
+        i might get [30,31,32,33] if everything changed and i navigate to 30
+        i might get [3,6,10] if something changed and i navigate to 6
+        i might even get [5,9,10,11] and i navigate to 5
+
+
+        3. user scrolled to the top of the list - then i need to get previous 100 users matching the input
+        
+        [1,2,3,4,5,6,7,8,9,10]
+
+
+        i get [7,8,9,10]
+        i want to render previous 2 and stay at 7
+        this is tricky because i don't know the coursor value for the previous value....
+      */
+      lockUserRetrieval(true);
+      // handleinput - request dp
+      new Promise<void>(r => setTimeout(() => { //placeholder promise for data lookup
+        lockUserRetrieval(false);
+        r()
+      }, 3000));
+    }
+    function checkDebouncedUserListRequest() {
+      if (waitingToCommitSelectValue) {
+        if (inpuHandleTO) {
+          //ignore because i wm waiting for user to stop typing
+        } else {
+          // It means the timer has just stopped 
+          //  and now i need to check the current state, 
+          //  which is inaccessible from timer's callback
+          // TODO: should i make a value refrence for the state used for this pacing?
+          const now = Date.now();
+          if (now - lastInputTime >= DEBOUNCE_INTERVAL_MS) {
+            requestUserList();
+          } else {
+            debounce(); // restart the timer
+          }
+        }
+      }
+    }
+    function debounce() {
+      setWaitingToCommitSelectValue(true);
+      setInpuHandleTO(setTimeout(() => {
+        //trigger rerender to check the state
+        setInpuHandleTO(undefined);
+      }, DEBOUNCE_INTERVAL_MS));
+    }
+    async function handleInputChange(newValue: string, actionMeta: InputActionMeta) {
+      if (newValue == actionMeta.prevInputValue) {
+        return;
+      }
+      setLastInput(newValue); // set a timer tomake sure i am not just working on every keystoke
+      setLastInputTime(Date.now());
+      if (inpuHandleTO || isLockedForUserRetrieval) {
+        // Already waiting or extracting users. 
+        // When extraction is done, ignore updated input, wait for new updates + debounce.
+        return; 
+      }
+      debounce();
+    }
+
+    function saveMenuListPos() {
+      if (menuRef.current) {
+        // remember scroll before adding
+        //so scrollTop returns element's position relative to the top of the scrollable area
+        // so i remember pixer position, not the element's actual position.
+        scrollPos.current = menuRef.current.scrollTop;
+      }
+    }
+    checkDebouncedUserListRequest();
     const menuRef = useRef<HTMLDivElement | null>(null);
     const scrollPos = useRef(0);
     
@@ -280,15 +397,17 @@ export default function App() {
         menuRef.current.scrollTop = scrollPos.current;
       }
     }, [foundUserData, menuOpen]);
-
+    
   const MenuList = (props: any) => (
     <components.MenuList {...props} innerRef={menuRef}>
-      {renderMenuButton("🔄 Refresh Options (top)", () => foundUserData.length > 10, refreshOptionsTop)}
+      {renderMenuButton("🔄 Refresh Options (top)", () => showTopUserMenuButton, refreshOptionsTop)}
       {props.children} {/* regular options */}
-      {renderMenuButton("🔄 Refresh Options (bot)", () => foundUserData.length > 20, refreshOptionsBot)}
+      {renderMenuButton("🔄 Refresh Options (bot)", () => showBottomUserMenuButton, refreshOptionsBot)}
     </components.MenuList>
   );
-  
+
+
+
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
@@ -359,13 +478,15 @@ export default function App() {
           <Grid item xs={12} sm={4}>
             <Select 
               value={selected}
+              inputValue={lastInput}
               placeholder="Select User"
-              options={foundUserData}
-              onInputChange={(newValue: string, actionMeta: InputActionMeta) => {
-                console.log(`onInputChange: ${newValue}`, actionMeta);
-                setFoundUserData([...foundUserData, {value: newValue, label: newValue}])
-              }}
+              options={(() => {
+                logger.info(`Rendering select with ${foundUserData.length} options is open ${menuOpen}`);
+                return foundUserData
+              })()}
+              onInputChange={handleInputChange}
               onChange={(newValue, actionMeta) => {
+                //request
                 console.log(`onChange: ${newValue}`, actionMeta);
                 setStatement({ ...statement, userId: newValue? newValue.value : ""});
                 setSelected(newValue);
@@ -377,6 +498,7 @@ export default function App() {
                 ...base,
                 minHeight: 56
               })}}
+              isLoading={isLockedForUserRetrieval}
               components={{MenuList}}
               menuPlacement="auto"
               menuIsOpen={menuOpen}
