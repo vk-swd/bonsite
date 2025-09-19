@@ -21,23 +21,20 @@ export class Logger {
     //     this.logLevel = level;
     // }
 
-    public error(message: string): void {
-        console.error(new Date().toISOString(), message);
+    public error(message: any, ...params: any): void {
+        console.error("%s " + message, new Date().toISOString(), ...params);
     }
-    public warn(message: string): void {
-        console.warn(new Date().toISOString(), message);
+    public warn(message: any, ...params: any): void {
+        console.warn("%s " + message, new Date().toISOString(), ...params);
     }
-    public info(message: string): void {
-        console.info(new Date().toISOString(), message);
+    public info(message: any, ...params: any): void {
+        console.info("%s " + message, new Date().toISOString(), ...params);
     }
-    public debug(message: string): void {
-        console.debug(new Date().toISOString(), message);
+    public debug(message: any, ...params: any): void {
+        console.debug("%s " + message, new Date().toISOString(), ...params);
     }
-    public log(message: string/*, level: LogLevel = LogLevel.INFO*/): void {
-        console.log(new Date().toISOString(), message);
-        // if (level >= this.logLevel) {
-        //     console.log(`[${LogLevel[level]}] ${message}`);
-        // }
+    public log(message: any, ...params: any): void {
+        console.log("%s " + message, new Date().toISOString(), ...params);
     }
 }
 
