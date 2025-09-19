@@ -1,6 +1,6 @@
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
-import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
+import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, StatementType, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
 import { getEnv, last, RangeSet, testRangeSet } from './common/utils.js';
 import { groupId, processConsumedBatch } from './sink.js';
 import { describe, it } from 'mocha'
@@ -89,7 +89,7 @@ async function sendTResults(resBatch: Batch, msg: string) {
 async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
     const expectedReturned = getReturnedTransactions(tBatch, resBatches, user);
     const ts: Transaction[] = [];
-    await db_connection!.getTransactions([{ userId: user }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
+    await db_connection!.getTransactions([{ userId: user, type: StatementType.FS }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
         ts.push(TransactionValidator.parse(transaction.payload));
     })
     compareObjecs(ts, expectedReturned, msg);

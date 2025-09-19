@@ -215,11 +215,12 @@ export function sleep(ms: number): Promise<void> {
 
 export class UserIdPattern {
     constructor(private userCount: number, private maxSideSize: number = 4) {
+        this.remained = this.maxSideSize / 2;
     }
     xpos = 0
     ypos = 0
     horizontal = true;
-    remained = this.maxSideSize / 2;
+    remained: number;
     get from(): number { 
         return this.xpos;
     }

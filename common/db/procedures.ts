@@ -1,5 +1,6 @@
-import { MAX_DATE, MIN_DATE, StatementParameters, TResult } from "../event_types.js";
-import { Column, Columns, IdentityColumn, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
+import { MAX_DATE, MIN_DATE, StatementParameters, TResult, UserDataRequestParameters } from "../event_types.js";
+import { getTopUsersProcedureQuery, getUserProcedureQuery, procedureQuery } from "./queries.js";
+import { Column, Columns, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
 import sql from 'mssql'
 
 
@@ -10,6 +11,23 @@ interface SProc<T> {
     getProcedureQuery(): string;
 }
 
+
+function makeProc<T>(procName: string, columns: Columns<T>, query: (name: string) => string): SProc<T> {
+    const procQuery = query(procName);
+    return {
+        procName,
+        columns: Object.values(columns),
+        getProcedureQuery: () => procQuery
+    };
+}
+
+export const UsersRequestC: Columns<UserDataRequestParameters> = {
+    cursor: makeCol("cursor", usersTable.columns.idx.type),
+    count: makeCol("count", sqlTypes.int),
+    pattern: makeCol("pattern", sqlTypes.nvarchar)    
+};
+export const getUsersProc = makeProc(`${schema}.getUsers`, UsersRequestC, getUserProcedureQuery);
+export const getUsersTopProc = makeProc(`${schema}.getTopUsers`, UsersRequestC, getTopUsersProcedureQuery);
 const tResT = transactionResultsTable;
 
 export type CommitResults = { duds: number; newCount: number };
@@ -71,16 +89,9 @@ class GetTransactionsProc implements SProc<StatementReqParam> {
     }
 }
 export const procGetTransactions = new GetTransactionsProc();
-export function procedureQuery<T, K extends keyof T>(procedureName: string, columns: Column<T,K>[], tail: string): string {
-    return `CREATE PROCEDURE ${procedureName}
-        ${columns.map(c => `${c.parameterName} ${c.type.name}`).join(',\n')}
-        AS
-        SET NOCOUNT ON;
-        ${tail}`;
-}
 
 function fullColumnNamesEqItsProcArgs<T, K extends keyof T>(c: Column<T,K>[], sep: string = ', '): string {
-    return c.map(col =>  `${col.name} = ${col.parameterName}`).join(sep);
+    return c.map(col =>  `${col.inputName} = ${col.parameterName}`).join(sep);
 }
 function ifExistsQuery<T, K extends keyof T>(tableName: string, lookedUpColumns: Column<T,K>[]): string {
     return `EXISTS (SELECT 1
@@ -93,11 +104,11 @@ function updateQuery<T, K extends keyof T>(tableName: string, updatedColumn: Col
             WHERE (${fullColumnNamesEqItsProcArgs(lookedUpColumns, ' AND ')})`
 }
 function columnsToValues<T, K extends keyof T>(columns: Column<T,K>[]): string {
-    return columns.map(c => `${c.name}`).join(', ');
+    return columns.map(c => c.inputName).join(', ');
 }
 function insertQuery<T, K extends keyof T>(name: string, columns: Column<T,K>[]): string {
     return `INSERT INTO ${name} (${columnsToValues(columns)})
-            VALUES (${columns.map(c => `@${c.name}`).join(',')});`
+            VALUES (${columns.map(c => c.parameterName).join(',')});`
 }
 class AddKafkaOffsetProcedure implements SProc<{}> {
     public procName = `${schema}.addKafkaOffset`;

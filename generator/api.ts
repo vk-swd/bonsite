@@ -11,6 +11,7 @@ import { PostTransactionValidator } from './common/generator_parameters.js';
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 
 const metricStats = {
+    incrementApiCallCount: () => mt.metrics?.apiCallCount.inc(),
     updateMaxResponseDelayMs: (ms:number) => mt.updateMaxApiResponseDelayMs(ms),
     incrementFailedApiCallCount: () => mt.metrics?.failedApiCallCount.inc(),
     incrementUnknownApiCallCount: () => mt.metrics?.unknownApiCallCount.inc()
@@ -65,7 +66,7 @@ export class GenApiServer extends EventEmitter {
         super()
         this.server = createServer(async (req, res) => {
             logger.info(`RECEIVING SOME REQUEST ${req.url}`)
-            mt.metrics?.apiCallCount.inc();  
+            metricStats.incrementApiCallCount();  
             if (this.handleStart(req, res)) return;
             if (this.handleStop(req, res)) return;
             if (this.handleGetProgress(req, res)) return;
@@ -73,7 +74,7 @@ export class GenApiServer extends EventEmitter {
             if (this.handlePostTransaction(req, res)) return;
             res.writeHead(404);
             res.end('Not Found');
-            mt.metrics?.unknownApiCallCount.inc();
+            metricStats.incrementUnknownApiCallCount();
         });
         this.server.listen(GENERATOR_PORT, () => {
             logger.info(`Server listening on port ${GENERATOR_PORT}`);

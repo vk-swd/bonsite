@@ -43,7 +43,7 @@ export type TableDescription<T> = {
 
 // function getTP(t: string)
 export type Column<T, K extends keyof T> = {
-    name: string,
+    name: K,
     type: SqlType<any>,
     value: (c: T) => T[K] | string, 
     parse: (s: string) => T[K],
@@ -53,7 +53,7 @@ export type Column<T, K extends keyof T> = {
 };
 export function makeCol<T, K extends keyof T, S>(nameA: K, type: SqlType<S>, extra?: string, value: Column<T,K>["value"] = (c:T) => Object(c)[nameA], parse: Column<T,K>["parse"] = type.defaultParse): Column<T, K> {
     const name = nameA as string;
-    return { name, type, extra, value, parse, parameterName: `@${name}`, inputName: name };
+    return { name: nameA, type, extra, value, parse, parameterName: `@${name}`, inputName: name };
 }
 export type Columns<T>= {
     [K in keyof T]: Column<T, K>;
@@ -80,10 +80,11 @@ export const statTable: TableDescription<IdentityColumnT & { name: string, value
     ]
 }
 
-type UserData = {id: string, name: string};
-export const usersTable: TableDescription<UserData> = {
+type UserData = {id: number, name: string};
+export const usersTable: TableDescription<UserData & IdentityColumnT> = {
     name: `${schema}.users`, 
-    columns: { 
+    columns: {
+        idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         id: makeCol("id", sqlTypes.bigInt), 
         name: makeCol("name", sqlTypes.nvarchar) 
     },
@@ -96,7 +97,7 @@ export const usersTable: TableDescription<UserData> = {
 export const transactionsTable: TableDescription<TransactionStored> = {
     name: `${schema}.transactions`, 
     columns: {
-        idx: makeCol("idx", sqlTypes.bigInt, 'identity(1,1) primary key'),
+        idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         id: makeCol("id", sqlTypes.bigInt, 'UNIQUE', (c) => c.id.toString(), (s) => Number.parseInt(s)),
         userIdFrom: makeCol("userIdFrom", usersTable.columns.id.type),
         userIdTo: makeCol("userIdTo", usersTable.columns.id.type),
@@ -130,7 +131,7 @@ transactionsTable.nonClusteredIndexes = [
 export const transactionResultsTable: TableDescription<TransactionResultStored> ={
     name: `${schema}.transaction_results`, 
     columns: {
-        idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key'),
+        idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         id: makeCol('id', transactionsTable.columns.id.type, 'UNIQUE', (c) => c.id.toString(), (s) => Number.parseInt(s)),
         dateTime: makeCol('dateTime', sqlTypes.dateTime, 'NOT NULL', (c) => new Date(c.dateTime).toISOString(), parse => new Date(parse).getTime()),
         state: makeCol('state', sqlTypes.tinyint, 'NOT NULL'),
@@ -183,7 +184,7 @@ type RawData = IdentityColumnT & { data: ""};
 export const rawDataTable: TableDescription<RawData> = {
     name: `${schema}.raw_data`, 
     columns: {
-        idx: makeCol('idx', sqlTypes.bigInt, 'identity(1,1) primary key'),
+        idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         data: makeCol('data', sqlTypes.nvarcharBig, 'NOT NULL')
     }
     , permissions: [

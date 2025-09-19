@@ -2,7 +2,7 @@
 import { BundleHandler, FileWriter, BaseWorker } from './preparer.js';
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
-import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult } from './common/event_types.js';
+import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult, UserDataValidator } from './common/event_types.js';
 import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
 import {it, describe} from 'mocha'
 import fsp from 'fs/promises';
@@ -12,7 +12,7 @@ import { logger } from './common/logger.js';
 import { connectToDatabase, runQuery } from './common/db/common.js';
 import { Counters, UserCounters } from './common/generator_parameters.js';
 import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
-import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
+import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from './common/db/tables.js';
 import { processLineByLine } from './common/files.js';
 
 chai.use(chaiAsPromised);
@@ -33,6 +33,7 @@ describe('Sanity check', function () {
         db_connection = new UserConnection(pool);
     });
     it(`Sanity check`, async () => {
+        const val = 100;
         const d = new Deferred<number>();
         d.resolve(5);
         expect(d.promise).to.eventually.equal(5);
@@ -254,15 +255,16 @@ describe('Sanity check', function () {
             const dateRange = maxDate - minDate;
             const itemCount = c[1].transactionCount;
             if (itemCount == 0) {
-                return { userId: c[0], fromm: new Date(MIN_DATE).getTime(), too: new Date(MAX_DATE).getTime()};
+                return { userId: c[0], fromm: new Date(MIN_DATE).getTime(), 
+                    too: new Date(MAX_DATE).getTime(), type: StatementType.FS};
             }
             const minDateToGen = Math.floor(minDate - dateRange / itemCount);
             const maxDateToGen = Math.ceil(maxDate + dateRange / itemCount);
             // Add some room for the first and last item to make them more likely to be included
             const dateRangeToGen = maxDateToGen - minDateToGen;
 
-            const fromm = Math.min(maxDate, minDateToGen + Math.floor(Math.random() * dateRangeToGen));
-            const too = Math.max(minDate, fromm + Math.floor(Math.random() * (maxDateToGen - fromm)));
+            const fromm: number | undefined = Math.min(maxDate, minDateToGen + Math.floor(Math.random() * dateRangeToGen));
+            const too: number | undefined = Math.max(minDate, fromm + Math.floor(Math.random() * (maxDateToGen - fromm)));
             return { userId: c[0], fromm, too, type: StatementType.FS };
         });
     }
@@ -342,5 +344,33 @@ describe('Sanity check', function () {
             progressTracker.writeProgress();
         }
         console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)
+    })
+    it(`User request`, async () => {
+        await createSchema(db_connection!.pool, "TestDBStatementGen");
+        await db_connection?.pool.query(`use TestDBStatementGen`);
+        const usersToInsert = [
+            { id: 1, name: 'User1' },
+            { id: 10, name: 'User10' },
+            { id: 100, name: 'User100' },
+            { id: 1000, name: 'User1000' },
+            { id: 10000, name: 'User10000' },
+            { id: 100000, name: 'User100000' },
+            { id: 1000000, name: 'User1005' },
+            { id: 10000000, name: 'User10006' },
+            { id: 100000000, name: 'User100007' },
+            { id: 1000000000, name: 'User1000008' },
+            { id: 2000000000, name: 'User200000' },
+            { id: 3000000000, name: 'User300000' },
+            { id: 4000000000, name: 'User400000' },
+            { id: 5000000000, name: 'User500000' }
+        ]
+        await runQuery(db_connection!.pool, `insert into ${usersTable.name} values 
+            ${usersToInsert.map(u => `(${u.id}, '${u.name}')`).join(',')}
+        `);
+        // const res1 = await runQuery(db_connection!.pool, `select * from ${usersTable.name} 
+        //     where ${usersTable.columns.name.name} like '%'`);
+        // console.log(`Users in DB: ${JSON.stringify(res1)}`);
+        const res = await db_connection!.getUsers({ pattern: '%', count: 4 })
+        console.log(`Got users ${JSON.stringify(res)}`);
     })
 });

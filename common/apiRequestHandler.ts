@@ -3,6 +3,7 @@ import { IncomingMessage, ServerResponse } from 'http';
 import { logger } from './logger.js';
 
 export type MetricStats = {
+    incrementApiCallCount: () => void,
     updateMaxResponseDelayMs: (value: number) => void,
     incrementFailedApiCallCount: () => void,
     incrementUnknownApiCallCount: () => void

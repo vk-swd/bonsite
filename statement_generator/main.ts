@@ -14,7 +14,7 @@ import { UserConnection } from "./common/db/db_defines.js";
 import { StatementGenApiServer } from "./api.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
 import { Preparer } from "./preparer.js";
-import { StatementParameters } from "./common/event_types.js";
+import { StatementParameters, UserDataRequestParameters } from "./common/event_types.js";
 import { getEnv } from "./common/utils.js";
 import { startMonitoring } from "./monitoring_local.js";
 
@@ -22,8 +22,10 @@ import { startMonitoring } from "./monitoring_local.js";
 const statementUser = getEnv('MSSQL_STATEMENT_CREATOR_USERNAME')
 
 await startMonitoring()
-const praparer = new Preparer(await UserConnection.create(statementUser));
-const api = new StatementGenApiServer((p: StatementParameters) => praparer.addTask(p));
+const db_conn = await UserConnection.create(statementUser);
+const praparer = new Preparer(db_conn);
+const api = new StatementGenApiServer((p: StatementParameters) => praparer.addTask(p),
+    (p: UserDataRequestParameters) => db_conn.getUsers(p));
 const healthCheckServer = new HealthCheckSever();
 
 

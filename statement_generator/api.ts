@@ -1,7 +1,7 @@
-import { createServer, Server, ServerResponse } from 'http';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
 import { getEnv } from './common/utils.js';
-import { StatementParameters, StatementParametersValidator, UserDataList, reqStatementUrl, reqUsersUrl } from './common/event_types.js';
+import { StatementParameters, StatementParametersValidator, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, reqStatementUrl, reqUsersUrl } from './common/event_types.js';
 import { rmSync } from 'fs';
 import { metrics, updateMaxResponseDelayMs } from './monitoring_local.js';
 import { handleRequest, MetricStats } from './common/apiRequestHandler.js';
@@ -10,6 +10,7 @@ import { handleRequest, MetricStats } from './common/apiRequestHandler.js';
 const STATEMENT_GENERATOR_PORT = getEnv("STATEMENT_GENERATOR_PORT");
 
 const metricCB: MetricStats = {
+    incrementApiCallCount: () => metrics?.apiCallCount.inc(),
     updateMaxResponseDelayMs: (value: number) => updateMaxResponseDelayMs(value),
     incrementFailedApiCallCount: () => metrics?.apiError.inc(),
     incrementUnknownApiCallCount: () => metrics?.apiUnknown.inc()
@@ -17,53 +18,39 @@ const metricCB: MetricStats = {
 
 export class StatementGenApiServer extends EventEmitter {
     private server: Server;
-    constructor(statementWriter: (p: StatementParameters) => Promise<string[]>) {
+    handleUserReq(req: IncomingMessage, res: ServerResponse) : boolean {
+        return handleRequest('/' + reqUsersUrl, req, res, async (data?: string) => {
+            return this.getUsers(UserDataRequestValidator.parse(JSON.parse(data!)))
+            .then(r => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.write(JSON.stringify(r));
+                res.end();
+                metrics?.apiSuccess.inc();
+            })            
+        }, metricCB);
+    }
+    handleStatementReq(req: IncomingMessage, res: ServerResponse, statementWriter: (p: StatementParameters) => Promise<string[]>) : boolean {
+        return handleRequest('/' + reqStatementUrl, req, res, async (data?: string) => {
+            return statementWriter(StatementParametersValidator.parse(JSON.parse(data!)))
+            .then(r => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.write(JSON.stringify(r));
+                res.end();
+                metrics?.apiSuccess.inc();
+            })            
+        }, metricCB);
+    }
+    constructor(statementWriter: (p: StatementParameters) => Promise<string[]>, 
+    private getUsers: (params: UserDataRequestParameters) => Promise<UserDataResult>) {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.method} ${req.url}`)
             metrics?.apiCallCount.inc();
-            if (handleRequest('/' + reqUsersUrl, req, res, async (data?: string) => {
-                console.log(`Generating users data...${data}`);
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                const res1 = JSON.stringify([{ id: 1, name: `User${1}` }])
-                res.write(res1);
-            }, metricCB)) {
-                return;
-            }
-            if (req.method === 'POST') {
-                if (req.url === '/' + reqStatementUrl) {
-                    let data = '';
-                    req.on('data', chunk => data += chunk);
-                    req.on('end', () => {
-                        const p = StatementParametersValidator.parse(JSON.parse(data))
-                        statementWriter(p).then(rr => {
-                            // TODO: add compression for big responses
-                            res.writeHead(200, { 'Content-Type': 'application/json' });
-                            // TODO: consider handling backpressure for huge datasets
-                            // or save a file and send it link.
-                            rr.forEach(r => res.write(r));
-                            res.end();
-                            metrics?.apiSuccess.inc();
-                        }).catch(err => {
-                            console.error('Error in progressReporter:', err);
-                            // mt.metrics?.failedApiCallCount.inc();
-                            res.writeHead(500);
-                            res.end(`Internal Server Error: ${err}`);
-                            metrics?.apiError.inc();
-                        });
-                    });
-                } else {
-                    // mt.metrics?.failedApiCallCount.inc();
-                    res.writeHead(404);
-                    res.end('Not Found');
-                    metrics?.apiUnknown.inc();
-                }
-            } else {
-                // mt.metrics?.failedApiCallCount.inc();
-                res.writeHead(404);
-                res.end('Not Found');
-                metrics?.apiUnknown.inc();
-            }
+            if (this.handleUserReq(req, res)) return;
+            if (this.handleStatementReq(req, res, statementWriter)) return;
+            res.writeHead(404);
+            res.end('Not Found');
+            metrics?.apiUnknown.inc();
         });
         this.server.listen(STATEMENT_GENERATOR_PORT, () => {
             console.log(`Server listening on port ${STATEMENT_GENERATOR_PORT}`);

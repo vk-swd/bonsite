@@ -1,12 +1,12 @@
 import { roles, sinkRole, statementCreatorRole } from "./auth.js";
 import { database, runQuery } from "./common.js";
-import { addKafkaOffsetProcedure, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
+import { addKafkaOffsetProcedure, getUsersProc, getUsersTopProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
 import { Column, kafkaOffsetTable, rawDataTable, schema, statTable, transactionResultsDumpTable, transactionResultsTable, transactionsDumpTable, transactionsTable, usersTable } from "./tables.js";
 import sql from 'mssql'
 
 
 function columnsToString<T, K extends keyof T>(columns: Column<T,K>[]): string {
-    return columns.map(c => `${c.name} ${c.type.name}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
+    return columns.map(c => `${c.inputName} ${c.type.name}${c.extra ? ' '+ c.extra : ''}`).join(',\n');
 }
 export async function createSchema(pool: sql.ConnectionPool, databaseA: string = database) {
     await runQuery(pool, `use master;`)
@@ -47,15 +47,18 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
             }
         }
   
-        await runQuery(pool, procGetTransactions.getProcedureQuery());
-        await runQuery(pool, `GRANT EXECUTE ON ${procGetTransactions.procName} TO ${statementCreatorRole};`);
+        const statGenProcs = [procGetTransactions, getUsersProc, getUsersTopProc];
+        for (const proc of statGenProcs) {
+                await runQuery(pool, proc.getProcedureQuery());
+                await runQuery(pool, `GRANT EXECUTE ON ${proc.procName} TO ${statementCreatorRole};`);
+        }
 
-        const procs = [ addKafkaOffsetProcedure, 
+        const messageSynkProcs = [ addKafkaOffsetProcedure, 
                         setUpTempTransactionResultsTable.getInsertionProcedure(),
                         setUpTempTransactionResultsTable.getCommitProcedure(),
                         setUpTempTransactionsTable.getCommitProcedure(),
                         setUpTempTransactionsTable.getInsertionProcedure() ];
-        for (const proc of procs) {
+        for (const proc of messageSynkProcs) {
             await runQuery(pool, proc.getProcedureQuery());
             await runQuery(pool, `GRANT EXECUTE ON ${proc.procName} TO ${sinkRole};`);
         }
