@@ -1,139 +1,152 @@
-import z, { ZodObject, ZodRawShape, ZodType } from "zod";
-import { StatementParametersValidatorGql, UserDataRequestValidator, UserDataValidator } from "./event_types.js";
-import { GenParametersValidatorGql, PostTransactionValidatorGql, ProgressReportValidator } from "./generator_parameters.js";
+import z, { util, ZodObject, ZodRawShape, ZodType } from "zod";
+import { StatementParametersValidator, UserDataRequestValidator, UserDataResultValidator } from "./event_types.js";
+import { GenParametersValidator, PostTransactionValidator, ProgressReportValidator } from "./generator_parameters.js";
+import { logger } from "./logger.js";
 
 
-export function gqlFromZod<T extends ZodRawShape>(validator: ZodObject<T>): string {
-    let res = "";
-    Object.entries(validator.shape).forEach(([key, value])=> {
-        res += `${key}: ${(value as ZodObject<any>).meta()?.description}\n`;
-    })
-    return res;
-}
-type FunctionsMap<T extends ZodRawShape> = {
-    [k in keyof z.infer<ZodObject<T>>]: (val: z.infer<ZodObject<T>>[k]) => string
-}
-
-interface BaseGqlType<T> {
-    name(): string
-    fields(): string
-    queryString(params?: T): string
-    validate(data: T): T
-    declaration(): string
-}
-
-class GqlString implements BaseGqlType<string> {
-    constructor() {}
-    name(): string {
-        return "String";
-    }
-    fields(): string {
-        return "";
-    }
-    validate(data: string): string {
-        return data;
-    }
-    queryString(params?: string): string {
-        return params ? `(\"${params}\")` : "";
-    }
-    declaration(): string {
-        return "";
+function createEnumSchema(enumObject: util.EnumLike) {
+    const values = Object.values(enumObject);
+    const hasNumbers = values.some(v => typeof v === 'number');
+    if (hasNumbers) {
+        return z.coerce.number().pipe(z.enum(enumObject) as any);
+    } else {
+        return z.enum(enumObject);
     }
 }
-
-class GqlInt implements BaseGqlType<number> {
-    constructor() {}
-    name(): string {
-        return "Int";
+function createGqlSchema<T extends z.ZodTypeAny>(schema: T): z.ZodTypeAny {
+    if (schema instanceof z.ZodNumber) {
+        return z.coerce.number();
     }
-    validate(data: number): number {
-        return data;
+    if (schema instanceof z.ZodEnum) {
+        logger.log("Enum schema:", schema.enum, typeof(schema.enum));
+        return createEnumSchema(schema.enum) //z.enum(schema.enum);
     }
-    fields(): string {
-        return "";
+    if (schema instanceof z.ZodOptional) {
+        return createGqlSchema((schema as z.ZodOptional).def.innerType as any).optional();
     }
-    queryString(params?: number): string {
-        return params ? `(${params.toFixed(0)})` : "";
+    if (schema instanceof z.ZodNullable) {
+        return createGqlSchema((schema as z.ZodNullable).def.innerType as any).nullable();
     }
-    declaration(): string {
-        return "";
-    }
-}
-export class GqlType<T extends ZodRawShape> implements BaseGqlType<z.infer<ZodObject<T>>> {
-    fieldsRV: string = "";
-    requestMaker: FunctionsMap<T>;
-    argValue: (params: z.infer<ZodObject<T>>) => string
-    name(): string {
-        return this._name;
-    }
-    constructor(public _name: string, public validator: ZodObject<T>, private type: "input" | "type") {
-        this.fieldsRV = "{" + Object.keys(validator.shape).join(' ') + "}";
-        this.requestMaker = Object.fromEntries(Object.entries(validator.shape).map(([key, value]) => {
-            const meta = (value as ZodType<any>).meta()?.description;
-            if (meta == "Int" || meta == "Int!") {
-                return [key, (val: number) => val.toFixed(0)];
-            } else {
-                return [key, (val: string) => `\\"${val}\\"`];
-            }}));
-        this.argValue = (params: z.infer<ZodObject<T>>): string => {
-            return `{ ${Object.keys(this.requestMaker).map((key) =>
-                    `${key}: ${Object(this.requestMaker)[key](Object(params)[key])}`).join(", ")} }`;
+    if (schema instanceof z.ZodObject) {
+        const newShape = {} as any;
+        for (const [key, field] of Object.entries(schema.shape)) {
+            newShape[key] = createGqlSchema(field);
         }
+        return z.object(newShape);
     }
-    validate(data: z.infer<ZodObject<T>>): z.infer<ZodObject<T>> {
-        return this.validator.parse(data);
+    if (schema instanceof z.ZodArray) {
+        return z.array(createGqlSchema((schema as z.ZodArray).def.element as any));
     }
-    queryString(params?: z.infer<ZodObject<T>>): string {
-        return params ? `${this.argValue(params)}` : "";
-    }
-    declaration(): string {
-        return `${this.type} ${this.name()} {\n${gqlFromZod(this.validator)}}\n`;
-    }
-    fields(): string {
-        return this.fieldsRV;
-    }
+    return schema; // Return as-is for other types
 }
 
-export const ProgressReportGqlType = new GqlType("ProgressReport", ProgressReportValidator, "type");
-export const GenParametersGqlType = new GqlType("GenParameters", GenParametersValidatorGql, "input");
-export const StatementParametersGqlType = new GqlType("StatementParameters", StatementParametersValidatorGql, "input");
-export const PostTransactionParamsGqlType = new GqlType("PostTransactionParams", PostTransactionValidatorGql, "input");
-export const UserRecordGqlType = new GqlType("UserRecord", UserDataValidator, "type");
-export const UserRequestGqlType = new GqlType("UserRequest", UserDataRequestValidator, "input");
+export function parseReturnNames<T>(name: string, o: ZodType<T>): string {
+    const lineFirst = name;
+    let lineSecond = "";
+    if (o.type == "object") {
+        const shape = (o as ZodObject).shape
+        lineSecond = `{ ${ Object.entries(shape).map(([key, value]) => 
+            parseReturnNames(key, value)).join(" ")} }`;
+    } else if (o.type == "array") {
+        lineSecond = parseReturnNames("", (o as any).element)
+    }
+    return lineFirst + " " + lineSecond;
+}
 
-class GqlFunction<T, K> {
-    constructor(public name: string, public returnType: BaseGqlType<T>, public paramType?: BaseGqlType<K>) {
+export function getTypeDeclaration<T extends z.ZodRawShape>(val: z.ZodObject<T>): string {
+    const shape = val.shape;
+    return `${val.meta()?.description} {\n${Object.entries(shape).map(([key, value]) => 
+        `${key}: ${getTypeName(value as z.ZodTypeAny)}`).join("\n")}\n}`;
+}
+export function getTypeName(val: z.ZodTypeAny): string {
+    switch (val.type) {
+        case "string": return "String";
+        case "number": return "String"; // <================ use String for 64-bit int
+        case "boolean": return "Boolean";
+        case "object": return val.meta()?.description!;
+        case "array": {
+            return `[${getTypeName((val as z.ZodArray<z.ZodTypeAny>).element)}]`;
+        }
+        default: return "String";
+    }
+}
+export type GqlIfy<T> = T extends Object ? {
+    [K in keyof T]: T[K] extends number | undefined ? string : GqlIfy<T[K]>
+} : T extends number ? string : T;
+
+class GqlFunction1<T, K> {
+    declarationStr: string;
+    queryStr: string;
+    coercedReturnType: ZodType<T>;
+    coercedParamType?: ZodType<K>;
+    constructor(public name: string, 
+        public returnType: ZodType<T>, 
+        public paramType?: ZodType<K>) {
+        this.coercedReturnType = createGqlSchema(returnType) as ZodType<T>;
+        let paramString = "";
+        if (paramType) {
+            if (paramType.type === "object") {
+                paramString = `(params: ${getTypeName(paramType)}!)`;
+            }
+            this.coercedParamType = createGqlSchema(paramType) as ZodType<K>;
+        }
+        let returnString = getTypeName(returnType);
+        this.declarationStr = `${this.name}${paramString} :${returnString}`;
+
+
+        this.queryStr = `query `
+        if (paramType) {
+            this.queryStr += `($input: ${getTypeName(paramType)}!)`
+        }
+        this.queryStr += ` { ${this.name}`;
+        if (paramType) {
+            this.queryStr += `(params: $input)`;
+        }
+        this.queryStr += parseReturnNames("", returnType);
+        this.queryStr += ` }`;
     }
     declaration(): string {
-        return `${this.name}${this.paramType ? `(params: ${this.paramType.name()}!)` : ""} :${this.returnType.name()}`;
+        return this.declarationStr + `\n`;
     }
-    gqlCall(params?: K): string {
-        return `${this.name}${this.paramType ? `(params: ${this.paramType!.queryString(params)})` : ""} ${this.returnType.fields()}`;
+    gqlCall(): string {
+        return this.queryStr;
     }
-    async fetchCall(url: string, params?: K): Promise<T> {
-        const body = `{ "query": "{ ${this.gqlCall(params)} }" }`;
-        try { 
-            const rewRes = await fetch(url, { method: "POST", headers: { 'Content-Type': 'application/json' }, body });
+    async fetchCall(url: string, params?: z.infer<typeof this.paramType>): Promise<z.infer<typeof this.coercedReturnType>> {
+        const postData = this.gqlCall();
+        const variables = params ? { input: params } : undefined;
+        const body = JSON.stringify({query: postData, variables}, (key: string, value: any) => {
+            // convert numbers to strings for 64-bit int compatibility
+            if (typeof value === 'number') {
+                return value.toString();
+            }
+            return value;
+        });
+        try {
+            const rewRes = await fetch(url, { method: "POST", 
+                headers: { 'Content-Type': 'application/json' }, 
+                body })
+            .catch(e => { throw new Error(`Error in fetch: ${e}`); });
             if (!rewRes.ok) {
                 const text = await rewRes.text();
-                throw new Error(`Bad req status: ${text}`);
+                throw new Error(`Bad req status: ${text} ${rewRes.statusText}`);
             }
-            const raw = await rewRes.json()
+            const raw = await rewRes.json() as any
             if (raw.errors) {
                 throw new Error(`GQL error: ${JSON.stringify(raw.errors)}`);
             }
-            return this.returnType.validate(raw.data[this.name]);
+            logger.log(`GQL raw result:`, raw);
+            return this.coercedReturnType.parse(raw.data[this.name]);
         } catch (e) {
-            throw new Error(`Error in request ${body}:  ${e}`);
+            throw new Error(`Error in ${url} request ${body}:  ${e}`);
         }
     }
 }
 
-export const stopGen = new GqlFunction("stopGen", new GqlString());
-export const startGen = new GqlFunction("startGen", new GqlString(), GenParametersGqlType);
-export const getProgress = new GqlFunction("getProgress", ProgressReportGqlType);
-export const getStatement = new GqlFunction("getStatement", new GqlString(), StatementParametersGqlType);
-export const hello = new GqlFunction("hello", new GqlString());
-export const users = new GqlFunction("users", UserRecordGqlType, UserRequestGqlType);
-export const postTransaction = new GqlFunction("postTransaction", new GqlString(), PostTransactionParamsGqlType);
-export const getGeneratorStats = new GqlFunction("getGeneratorStats", new GqlString());
+export const postTransaction = new GqlFunction1("postTransaction", z.string(), PostTransactionValidator);
+export const startGen = new GqlFunction1("startGen", z.string(), GenParametersValidator);
+export const getStatement = new GqlFunction1("getStatement", z.string(), StatementParametersValidator);
+export const getProgress = new GqlFunction1("getProgress", ProgressReportValidator);
+export const getGeneratorStats = new GqlFunction1("getGeneratorStats", z.string());
+export const stopGen = new GqlFunction1("stopGen", z.string());
+export const hello = new GqlFunction1("hello", z.string())
+export const users = new GqlFunction1("users", UserDataResultValidator, UserDataRequestValidator);

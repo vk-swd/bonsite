@@ -1,46 +1,23 @@
 import { z } from "zod";
-import { getEnum, getInt as getNumber, getIntOptional as getNumberOptional, getString } from "./zodGqlTypes.js";
-
-
-export const GenParametersValidatorGql = z.object({
-    userCount: getString(),
-    dateFrom: getString(),
-    dateTo: getString(),
-    transactionCount: getString(),
-    maxDelayMs: getString(),
-    minUserId: getString(),
-    minTransactionId: getString()
-});
-export type GenParametersGql = z.infer<typeof GenParametersValidatorGql>;
 
 export const GenParametersValidator = z.object({
-    userCount: getNumber(),
-    dateFrom: getNumber(),
-    dateTo: getNumber(),
-    transactionCount: getNumber(),
-    maxDelayMs: getNumberOptional(),
-    minUserId: getNumberOptional(),
-    minTransactionId: getNumberOptional()
-});
-
+    userCount: z.number(),
+    dateFrom: z.number(),
+    dateTo: z.number(),
+    transactionCount: z.number(),
+    maxDelayMs: z.number().optional(),
+    minUserId: z.number().optional(),
+    minTransactionId: z.number().optional()
+}).register(z.globalRegistry, { description: "GeneratorParameters" });
 export type GenParameters = z.infer<typeof GenParametersValidator>;
 
-export const PostTransactionValidatorGql = z.object({
-    userFrom: getString(),
-    userTo: getString(),
-    amount: getString(),
-    date: getString()
-});
-export type PostTransactionParamsGql = z.infer<typeof PostTransactionValidatorGql>;
-
 export const PostTransactionValidator = z.object({
-    userFrom: getNumber(),
-    userTo: getNumber(),
-    amount: getNumber(),
-    date: getNumber()
-});
+    userFrom: z.number(),
+    userTo: z.number(),
+    amount: z.number(),
+    date: z.number()
+}).register(z.globalRegistry, { description: "PostTransactionParameters" });
 export type PostTransactionParams = z.infer<typeof PostTransactionValidator>;
-
 
 export const startUrl = "start"
 export const stopUrl = "stop"
@@ -51,16 +28,16 @@ export enum GenerationState {
     RUNNING = 1,
     STOPPED = 2
 }
-
 export const ProgressReportValidator = z.object({
-    totalSent: getNumber(),
-    isRunning: getEnum(GenerationState, "Int"),
-    percentComplete: getNumber(),
-    maxUserId: getNumber(),
-    maxTransactionId: getNumber(),
-    generated: getNumber()
-});
+    totalSent: z.number(),
+    isRunning: z.enum(GenerationState),
+    percentComplete: z.number(),
+    maxUserId: z.number(),
+    maxTransactionId: z.number(),
+    generated: z.number()
+}).register(z.globalRegistry, { description: "ProgressReport" });
 export type ProgressReport = z.infer<typeof ProgressReportValidator>;
+
 const MAGIC_UNDEFINED = -1;
 export class Counters {
     constructor(

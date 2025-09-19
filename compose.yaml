@@ -89,6 +89,7 @@ services:
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
         - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
+        - ./${COMMON_DIR_NAME}/apiRequestHandler.ts:${WORKDIR}/${COMMON_DIR_NAME}/apiRequestHandler.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:

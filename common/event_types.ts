@@ -1,7 +1,6 @@
-import { date, z } from "zod";
-import { getEnum, getEnumOptional, getInt as getNumber, getIntOptional as getNumberOptional, getString } from "./zodGqlTypes.js";
+import z from "zod";
 
-const IdValidator = getNumber();
+const IdValidator = z.number();
 export const TransactionValidator = z.object({
     id: IdValidator,
     dateTime: z.number(),
@@ -25,7 +24,7 @@ export enum TResult {
 export const TransactionResultValidator = z.object({
     id: IdValidator,
     dateTime: z.number(),
-    state: z.nativeEnum(TResult)
+    state: z.enum(TResult)
 });
 export type TransactionResult = z.infer<typeof TransactionResultValidator>;
 
@@ -37,7 +36,7 @@ const DatePtrValidator = z.object({
 export const MetadataValidator = z.object({
     dateTime: z.number().optional(),
     userDatePtrs: z.array(DatePtrValidator).optional(),
-    state: z.nativeEnum(TResult).optional()
+    state: z.enum(TResult).optional()
 })
 export const MetadataWrapperValidator = z.object({
     metadata: MetadataValidator,
@@ -56,19 +55,26 @@ export const OffsetValidator = z.object({
 })
 export type Offset = z.infer<typeof OffsetValidator>;
 
-export const UserDataValidator = z.object({
-    cursor: IdValidator,
-    name: getString() //edge?
-});
-export const UserDataValidatorList = z.array(UserDataValidator);
-export type UserDataList = z.infer<typeof UserDataValidatorList>;
 
 export const UserDataRequestValidator = z.object({
-    cursor: IdValidator,
-    count: getNumber(),
-    name: getString()
-});
-export type UserDataRequest = z.infer<typeof UserDataRequestValidator>;
+    cursor: z.number().optional(),
+    count: z.number(),
+    pattern: z.string()
+}).register(z.globalRegistry, { description: "UserDataRequest" });
+export type UserDataRequestParameters = z.infer<typeof UserDataRequestValidator>
+export const UserDataValidator = z.object({
+    cursor: z.number(),
+    name: z.string(),
+    id: z.number()
+}).register(z.globalRegistry, { description: "UserData" });
+export type UserData = z.infer<typeof UserDataValidator>;
+export const UserDataResultValidator = z.object({
+    slice: UserDataValidator.array(),
+    totalCount: z.number()
+}).register(z.globalRegistry, { description: "UserDataResult" });
+export type UserDataResult = z.infer<typeof UserDataResultValidator>;
+
+
 
 export const reqStatementUrl = "statements"
 export const reqUsersUrl = "users"
@@ -79,18 +85,10 @@ export enum StatementType {
     FS = 1, // full statement
     DS = 2  // delta statement
 }
-export const StatementParametersValidatorGql = z.object({
-    userId: getString(),
-    fromm: getString(),
-    too: getString(),
-    type: getEnumOptional(StatementType, "Int")
-});
-export type StatementParametersGql = z.infer<typeof StatementParametersValidatorGql>;
-
 export const StatementParametersValidator = z.object({
-    userId: getNumber(),
-    fromm: getNumberOptional(),
-    too: getNumberOptional(),
-    type: getEnumOptional(StatementType, "Int")
-});
+    userId: z.number(),
+    fromm: z.number().optional(),
+    too: z.number().optional(),
+    type: z.enum(StatementType)
+}).register(z.globalRegistry, { description: "StatementParameters" });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;
