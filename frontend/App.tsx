@@ -1,21 +1,21 @@
-import React, { useState, useRef, useLayoutEffect } from "react";
-import {
-  Container,
-  Box,
-  Typography,
-  TextField,
-  Button,
-  Grid,
-  Paper
-} from "@mui/material";
+import React, { Children, useLayoutEffect, useRef } from "react";
+import Container from '@mui/material/Container';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import Grid from '@mui/material/Grid';
+import Paper from '@mui/material/Paper';
 
 import Select, { InputActionMeta, components } from 'react-select'
-import { GenerationState, GenParametersValidator, GenParametersValidatorGql, PostTransactionValidatorGql, ProgressReport } from "./common/generator_parameters.js";
+import { GenerationState, GenParametersValidator, PostTransactionValidator, ProgressReport } from "./common/generator_parameters.js";
 import * as gqlp from "./common/gqlDeclarations.js"
 import z, { set, ZodObject } from "zod";
-import { StatementParametersValidatorGql } from "./common/event_types.js";
-import { fa } from "zod/v4/locales";
 import { logger } from "./common/logger.js";
+import { StatementParametersValidator, StatementType, UserDataRequestParameters } from "./common/event_types.js";
+import { log } from "console";
+import { last } from "./common/utils.js";
+import { MenuListProps } from "@mui/material";
 
 enum StartGenButtonStates {
   NothingHappens,
@@ -35,7 +35,7 @@ function makeParamsState<T extends ZodObject, K extends z.infer<T>>(shape: T): R
 }
 const GQL_URL = "/graphql";
 
-const dateTimeInput = (lab: string, val: () => string, updateVal: (val: string) => void) => {
+function dateTimeInput(lab: string, val: number, updateVal: (val: number) => void) {
   return <TextField
     fullWidth
     label={lab}
@@ -44,16 +44,21 @@ const dateTimeInput = (lab: string, val: () => string, updateVal: (val: string) 
     inputProps={{
       step: 1 // allows seconds
     }}
-    value={val()}
-    onChange={(e) => updateVal(e.target.value)}
+    value={new Date(val).toISOString().slice(0, -1)}
+    onChange={(e) => updateVal(new Date(e.target.value).getTime())}
   />
 }
-const textInput = (lab: string, val: () => string, updateVal: (v: string) => void,  type: 'text' | 'number' =  'text') => {
+function textInput<T>(lab: string, val: T, updateVal: (v: T) => void,  type: 'text' | 'number' =  'text') {
   return <TextField
     fullWidth
     label={lab}
-    value={val()}
-    onChange={(e) => updateVal(e.target.value)}
+    value={typeof val == 'number' ? val.toString() : val}
+    onChange={
+      (e) => {
+        // logger.info(`Date input changed to`, e);
+        updateVal((type == 'number' ? Number.parseInt(e.target.value) : e.target.value) as T)
+      }
+    }
     type={type}
   />
 }
@@ -65,32 +70,23 @@ function makeButton<T>(lab: string|(() => string), toggler: () => boolean, onCli
   </Button>
 }
 function label(toggler: () => string) {
-  return <Typography sx={{ mt: 2, minWidth: 0, whiteSpace: 'normal'}}>
+  return <Typography>
     {toggler()}
   </Typography>
 }
 
-
-
-
-
-
-
-
 export default function App() {
   //------ Post Transaction----------------
-  const [postTransactionParams, setPostTransactionParams] = useState(() => {
-    const res = makeParamsState(PostTransactionValidatorGql)
-    res.date = (new Date()).toISOString().slice(0, 19);
-    res.userFrom = "1";
-    res.userTo = "2";
-    res.amount = "100";
-    return res;
-});
-  const [postedStas, setPostedStats1] = useState({success: 0, failed: 0});
-  const [postButtonState, setPostButtonState] = useState(false);
-  const [postedStasTxt, renderPostedStatsTxt] = useState("");
-  const [startGenTxt, setStartGenTxt] = useState("");
+  const [postTransactionParams, setPostTransactionParams] = React.useState(PostTransactionValidator.parse({
+    date: new Date().getTime(),
+    userFrom: 1,
+    userTo: 1,
+    amount: 100
+  }));
+  const [postedStas, setPostedStats1] = React.useState({success: 0, failed: 0});
+  const [postButtonState, setPostButtonState] = React.useState(false);
+  const [postedStasTxt, renderPostedStatsTxt] = React.useState("");
+  const [startGenTxt, setStartGenTxt] = React.useState("");
   const updatePostedStatsTxt = () => {
     if (postedStas.success === 0 && postedStas.failed === 0) {
       renderPostedStatsTxt("");
@@ -104,8 +100,8 @@ export default function App() {
   }
   function postTransaction() {
     setPostButtonState(true);
-    const params = PostTransactionValidatorGql.parse(postTransactionParams);
-    gqlp.postTransaction.fetchCall(GQL_URL, params).then(_ => {
+    // const params = PostTransactionValidator.parse(postTransactionParams);
+    gqlp.postTransaction.fetchCall(GQL_URL, gqlp.postTransaction.coercedParamType!.parse(postTransactionParams)).then(_ => {
       postedStas.success++;
       updatePostedStatsTxt();
     }).catch(err => {
@@ -117,32 +113,29 @@ export default function App() {
   }
   
   //------ Generate Transactions----------------
-  const [genParams, setGenParams] = useState(() => {
-    const res = makeParamsState(GenParametersValidator)
+  const [genParams, setGenParams] = React.useState(() => {
     const now = new Date();
     const before = new Date();
     before.setFullYear(before.getFullYear() - 25);
-    res.dateFrom = before.toISOString().slice(0, 19);
-    res.dateTo = now.toISOString().slice(0, 19);
-    res.userCount = "10000";
-    res.transactionCount = "1000000";
-    res.minUserId = "1";
-    res.minTransactionId = "1";
-    res.maxDelayMs = "100";
-    return res;
-  });
-  const [startGenButtonState, setStartGenButtonState] = useState(StartGenButtonStates.NothingHappens);
+    return {
+    dateFrom: before.getTime(),
+    dateTo: now.getTime(),
+    userCount: 10000,
+    transactionCount: 1000000,
+    minUserId: 1,
+    minTransactionId: 1,
+    maxDelayMs: 100
+  }});
+  const [startGenButtonState, setStartGenButtonState] = React.useState(StartGenButtonStates.NothingHappens);
   async function startGeneration() {
     try {
       if (startGenButtonState === StartGenButtonStates.NothingHappens) {
         setStartGenTxt(``);
-        // TODO: presense of manual transaction posting and the way progress is 
-        // calculated might produce non critical edge cases which could be addressed
-        // Remark: updating web page during the generation will drop all ui state
-        // without stopping the generation. Startning new one will cancel the old one.
-        // This behavior is decided to be acceptable.
+        // TODO: Updating page looses state
+        // TODO: If fetch fails now it is unclear if the generation started or not.
+        // Keep the button state for now but fix with constant state polling later.
         setStartGenButtonState(StartGenButtonStates.CalledToStartGeneration);
-        const params = GenParametersValidatorGql.parse(genParams);
+        const params = GenParametersValidator.parse(genParams);
         logger.info(`Starting generation with params: ${JSON.stringify(params)}`);
         await gqlp.startGen.fetchCall(GQL_URL, params);
       } else if (startGenButtonState === StartGenButtonStates.CalledToStartGeneration) {
@@ -169,8 +162,8 @@ export default function App() {
         runNum++;
         await new Promise(resolve => setTimeout(resolve, interval));
         lastProgressReport = await gqlp.getProgress.fetchCall(GQL_URL);
-        genParams.minUserId = lastProgressReport.maxUserId.toString();
-        genParams.minTransactionId = lastProgressReport.maxTransactionId.toString();
+        genParams.minUserId = lastProgressReport.maxUserId;
+        genParams.minTransactionId = lastProgressReport.maxTransactionId;
         setGenParams({...genParams});
         const now = Date.now();
         if (lastProgressReport.isRunning === GenerationState.STOPPED) {
@@ -195,69 +188,8 @@ export default function App() {
   }
 
 
-  //------- Get Statement----------------
-  const [statement, setStatement] = useState(makeParamsState(StatementParametersValidatorGql));
-  // Simulate statement fetch
-  const handleGetStatement = () => {
-
-  };
-  // need to do the following:
-  // 1. if i typed a user name...any change while typing looks up top 100 user names
-  // 2. if i scroll the user list, then i need a trigger to upload the next users and populate the whole list as i scroll
-  //  2.1 may test this list repopulation with dummy data - when i scroll to the end of the list, generate last 30 items and remove 30 items from the top
-
-  type UserOption = {
-    value: string;
-    label: string;
-  };
-  let idx = 0;
-  const [foundUserData, setFoundUserData] = useState<UserOption[]>([
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`},
-    {value: `someval${idx++}`, label: `somelab${idx++}`}]);
-  const [selected, setSelected] = useState<UserOption | null>(foundUserData[0]);
-
-  //------- Render statement ----------------
-  const [output, setOutput] = useState<string>("");
-  const [scrollState, setScrollState] = useState(true);
-  
-  const refreshOptionsTop = () => {
-    setFoundUserData([
-      { value: `TV${foundUserData.length + 1}`, label: `TL${foundUserData.length + 1}` },
-      { value: `TV${foundUserData.length + 2}`, label: `TL${foundUserData.length + 2}` },
-      { value: `TV${foundUserData.length + 3}`, label: `TL${foundUserData.length + 3}` },
-      ...foundUserData.slice(0, -3)
-    ]);
-  };
-  
-  const refreshOptionsBot = () => {
-    if (menuRef.current) {
-      // remember scroll before adding
-      scrollPos.current = menuRef.current.scrollTop;
-    }
-    setFoundUserData([...foundUserData.slice(3),
-      { value: `bV${foundUserData.length + 1}`, label: `bL${foundUserData.length + 1}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` },
-      { value: `bV${foundUserData.length + 2}`, label: `bL${foundUserData.length + 2}` }
-    ]);
-  };
-  const [showTopMenu, setShowTopMenu] = useState(true);
-  const [showBottonMenu, setShowBottomMenu] = useState(true);
+  //------- Get Users----------------
+  const [output, setOutput] = React.useState<string>("");
   function renderMenuButton(label: string, show: () => boolean, refreshOptions: () => void) {
     if (!show()) {
       return <div></div> 
@@ -283,130 +215,126 @@ export default function App() {
       }
     }
 
-    const [menuOpen, setMenuOpen] = useState(false);
-    const [isLockedForUserRetrieval, lockUserRetrieval] = useState(false);
-    const [lastInput, setLastInput] = useState("");
-    const [lastInputTime, setLastInputTime] = useState(0);
-    const [lastRequestedUserList, setLastRequestedUserList] = useState("");
-    const [waitingToCommitSelectValue, setWaitingToCommitSelectValue] = useState(false);
-    const [inpuHandleTO, setInpuHandleTO] = useState<NodeJS.Timeout | undefined>(undefined);
-    const [showTopUserMenuButton, setShowTopUserMenuButton] = useState(true);
-    const [showBottomUserMenuButton, setShowBottomUserMenuButton] = useState(true);
+    const userPatternDebounceState = useRef<{timer?: NodeJS.Timeout, lastValue: string, 
+      isLookingUp: boolean, 
+      scheduled?: UserDataRequestParameters
+      menuItems?: {top: number, bot: number}}>({lastValue: "", isLookingUp: false, scheduled: {
+        pattern: "", count: 100
+      }});
+
+    const [selected, setSelected] = React.useState<UserOption | null>(null);
+    type UserOption = {
+      value: string;
+      label: string;
+      cursor: number;
+    };
+    const [optionsUserNames, setFoundUserData] = React.useState<UserOption[]>([]);
+    const [isLockedForUserRetrieval, lockUserRetrieval] = React.useState(false);
+    const [lastInput, setLastInput] = React.useState("");
+
     const DEBOUNCE_INTERVAL_MS = 800;
-    function requestNewUserList() {
-      
+    if (optionsUserNames.length === 0) {
+      requestUserList();
     }
-    function requestUserList() {
-      const filter = lastInput;
-      if (lastRequestedUserList == lastInput) {
-        // already requested this value
-        // but need a different subset of it
-
-      }
-      // need to get the regular expression
-      /*
-        Request can be triggered in the following cases:
-        1. user typed something - then i need to get top 100 users matching the input
-        2. user requested nexxt 100 items with menu button - then i need to get the new top user id and request next 100 users matching the input
-        the user composition could have changed between requests so i need to be ready that i might loose 
-        all the records and get completely new lixt of users. in any case i need to kep some user id in mind,
-        so that when i get it, i can update items and set the scroll position to its new location
-
-        [1,2,3,4,5,6,7,8,9,10]
-
-        i get [1,2,3,4]
-        i want to render next 2 and stay at 4
-        i ask for (startid: 3, count: 4)
-
-        i might get [3,4,5,6] if nothing changes and i navigate to 4
-        i might get [30,31,32,33] if everything changed and i navigate to 30
-        i might get [3,6,10] if something changed and i navigate to 6
-        i might even get [5,9,10,11] and i navigate to 5
 
 
-        3. user scrolled to the top of the list - then i need to get previous 100 users matching the input
-        
-        [1,2,3,4,5,6,7,8,9,10]
-
-
-        i get [7,8,9,10]
-        i want to render previous 2 and stay at 7
-        this is tricky because i don't know the coursor value for the previous value....
-      */
-      lockUserRetrieval(true);
-      // handleinput - request dp
-      new Promise<void>(r => setTimeout(() => { //placeholder promise for data lookup
-        lockUserRetrieval(false);
-        r()
-      }, 3000));
-    }
-    function checkDebouncedUserListRequest() {
-      if (waitingToCommitSelectValue) {
-        if (inpuHandleTO) {
-          //ignore because i wm waiting for user to stop typing
-        } else {
-          // It means the timer has just stopped 
-          //  and now i need to check the current state, 
-          //  which is inaccessible from timer's callback
-          // TODO: should i make a value refrence for the state used for this pacing?
-          const now = Date.now();
-          if (now - lastInputTime >= DEBOUNCE_INTERVAL_MS) {
-            requestUserList();
-          } else {
-            debounce(); // restart the timer
-          }
-        }
-      }
-    }
-    function debounce() {
-      setWaitingToCommitSelectValue(true);
-      setInpuHandleTO(setTimeout(() => {
-        //trigger rerender to check the state
-        setInpuHandleTO(undefined);
-      }, DEBOUNCE_INTERVAL_MS));
-    }
     async function handleInputChange(newValue: string, actionMeta: InputActionMeta) {
       if (newValue == actionMeta.prevInputValue) {
         return;
       }
-      setLastInput(newValue); // set a timer tomake sure i am not just working on every keystoke
-      setLastInputTime(Date.now());
-      if (inpuHandleTO || isLockedForUserRetrieval) {
-        // Already waiting or extracting users. 
-        // When extraction is done, ignore updated input, wait for new updates + debounce.
-        return; 
-      }
+      userPatternDebounceState.current.lastValue = newValue;
+      setLastInput(newValue);
       debounce();
     }
-
-    function saveMenuListPos() {
-      if (menuRef.current) {
-        // remember scroll before adding
-        //so scrollTop returns element's position relative to the top of the scrollable area
-        // so i remember pixer position, not the element's actual position.
-        scrollPos.current = menuRef.current.scrollTop;
-      }
+    function debounce() {
+      clearTimeout(userPatternDebounceState.current.timer);
+      userPatternDebounceState.current.timer = setTimeout(() => {
+        userPatternDebounceState.current.scheduled = {
+          pattern: userPatternDebounceState.current.lastValue,
+          count: 100
+        };
+        requestUserList();
+      }, DEBOUNCE_INTERVAL_MS);
     }
-    checkDebouncedUserListRequest();
-    const menuRef = useRef<HTMLDivElement | null>(null);
-    const scrollPos = useRef(0);
-    
-    // restore scroll AFTER options update
-    useLayoutEffect(() => {
-      if (menuOpen && menuRef.current) {
-        menuRef.current.scrollTop = scrollPos.current;
+    async function requestUserList() {
+      if (userPatternDebounceState.current.isLookingUp || 
+        userPatternDebounceState.current.scheduled === undefined) {
+        return;
       }
-    }, [foundUserData, menuOpen]);
-    
-  const MenuList = (props: any) => (
-    <components.MenuList {...props} innerRef={menuRef}>
-      {renderMenuButton("🔄 Refresh Options (top)", () => showTopUserMenuButton, refreshOptionsTop)}
+      lockUserRetrieval(true);
+      userPatternDebounceState.current.isLookingUp = true;
+      try {
+        while (userPatternDebounceState.current.scheduled) {
+          const params = userPatternDebounceState.current.scheduled;
+          userPatternDebounceState.current.scheduled = undefined;
+          params.pattern = "%" + params.pattern + "%";
+          const res = await gqlp.users.fetchCall(GQL_URL, params);
+          setFoundUserData(res.slice.map(u => ({value: `${u.name} (id: ${u.id})`, label: `${u.name} (${u.id})`, cursor: u.cursor})));
+        }
+      } catch (err) {
+        setOutput(JSON.stringify(err));
+      }
+      lockUserRetrieval(false);
+      userPatternDebounceState.current.isLookingUp = false;
+    }
+    const refreshOptionsTop = () => {
+      userPatternDebounceState.current.scheduled = {
+        pattern: userPatternDebounceState.current.lastValue,
+        count: 100,
+        cursor: userPatternDebounceState.current.menuItems?.top // top displayed value
+      };
+      requestUserList();
+    };
+    const refreshOptionsBot = () => {
+      userPatternDebounceState.current.scheduled = {
+        pattern: userPatternDebounceState.current.lastValue,
+        count: 100,
+        cursor: userPatternDebounceState.current.menuItems?.bot // top displayed value
+      };
+      requestUserList();
+    };
+
+    const scrollRef = React.useRef<HTMLDivElement | null>(null);
+    const scrollPos = React.useRef(0);
+    const scrollHandler = React.useRef<(e: Event) => void>((e: Event) => {
+      scrollPos.current = (e.target as HTMLDivElement).scrollTop;
+    });
+
+  const MenuList = (props: any) => {
+    const children = Children.toArray(props.children);
+    const selected = {
+      top: Object(children[0])?.props?.data?.cursor,
+      bot: Object(last(children))?.props?.data?.cursor
+    };
+    if (selected.top !== undefined && selected.bot !== undefined) {
+      userPatternDebounceState.current.menuItems = selected;
+    }
+    return (
+    <components.MenuList {...props}
+    innerRef={(ref: HTMLDivElement) => {
+      if (ref) {
+        scrollRef.current?.removeEventListener('scroll', scrollHandler.current);
+        scrollRef.current = ref;
+        ref.addEventListener('scroll', scrollHandler.current);
+        ref.scrollTop = scrollPos.current;
+      }
+    }}
+    >
+      {renderMenuButton("🔄 Refresh Options (top)", () => optionsUserNames.length > 0, refreshOptionsTop)}
       {props.children} {/* regular options */}
-      {renderMenuButton("🔄 Refresh Options (bot)", () => showBottomUserMenuButton, refreshOptionsBot)}
+      {renderMenuButton("🔄 Refresh Options (bot)", () => optionsUserNames.length > 0, refreshOptionsBot)}
     </components.MenuList>
-  );
+  )};
 
 
+
+
+
+  
+
+  //------- Render statement ----------------
+  const [statement, setStatement] = React.useState(StatementParametersValidator.parse({userId: 1, type: StatementType.FS}));
+  // Simulate statement fetch
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
@@ -417,16 +345,18 @@ export default function App() {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date", () => postTransactionParams.date, (v) => setPostTransactionParams({ ...postTransactionParams, date: v }))}
+            {dateTimeInput("Date", postTransactionParams.date, (v) => 
+              setPostTransactionParams({ ...postTransactionParams, date: v })
+            )}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User Id From", () => postTransactionParams.userFrom, (v) => setPostTransactionParams({ ...postTransactionParams, userFrom: v }), "number")}
+            {textInput("User Id From", postTransactionParams.userFrom, (v) => setPostTransactionParams({ ...postTransactionParams, userFrom: v}), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User Id To", () => postTransactionParams.userTo, (v) => setPostTransactionParams({ ...postTransactionParams, userTo: v }), "number")}
+            {textInput("User Id To", postTransactionParams.userTo, (v) => setPostTransactionParams({ ...postTransactionParams, userTo: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Amount", () => postTransactionParams.amount, (v) => setPostTransactionParams({ ...postTransactionParams, amount: v }), "number")}
+            {textInput("Amount", postTransactionParams.amount, (v) => setPostTransactionParams({ ...postTransactionParams, amount: v }), "number")}
           </Grid>
           <Grid item xs={12}>
             {makeButton("Create Transaction", () => postButtonState, postTransaction)}
@@ -441,25 +371,25 @@ export default function App() {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date From", () => genParams.dateFrom, (v) => setGenParams({ ...genParams, dateFrom: v }))}
+            {dateTimeInput("Date From", genParams.dateFrom, (v) => setGenParams({ ...genParams, dateFrom: v }))}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date To", () => genParams.dateTo, (v) => setGenParams({ ...genParams, dateTo: v }))}
+            {dateTimeInput("Date To", genParams.dateTo, (v) => setGenParams({ ...genParams, dateTo: v }))}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("User Count", () => genParams.userCount, (v) => setGenParams({ ...genParams, userCount: v }), "number")}
+            {textInput("User Count", genParams.userCount, (v) => setGenParams({ ...genParams, userCount: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Transactions Count", () => genParams.transactionCount, (v) => setGenParams({ ...genParams, transactionCount: v }), "number")}
+            {textInput("Transactions Count", genParams.transactionCount, (v) => setGenParams({ ...genParams, transactionCount: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Min User Id",  () => genParams.minUserId, (v) => setGenParams({ ...genParams, minUserId: v }), "number")}
+            {textInput("Min User Id",  genParams.minUserId, (v) => setGenParams({ ...genParams, minUserId: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Min Transaction Id",  () => genParams.minTransactionId, (v) => setGenParams({ ...genParams, minTransactionId: v }), "number")}
+            {textInput("Min Transaction Id",  genParams.minTransactionId, (v) => setGenParams({ ...genParams, minTransactionId: v }), "number")}
           </Grid>
           <Grid item xs={12} sm={6}>
-            {textInput("Transaction Result Delay Ms.",  () => genParams.maxDelayMs, (v) => setGenParams({ ...genParams, maxDelayMs: v }), "number")}
+            {textInput("Transaction Result Delay Ms.",  genParams.maxDelayMs, (v) => setGenParams({ ...genParams, maxDelayMs: v }), "number")}
           </Grid>
           <Grid item xs={12} spacing={2}>
             {makeButton(() => startGenButtonStates.get(startGenButtonState)!.buttonLabel, 
@@ -480,37 +410,26 @@ export default function App() {
               value={selected}
               inputValue={lastInput}
               placeholder="Select User"
-              options={(() => {
-                logger.info(`Rendering select with ${foundUserData.length} options is open ${menuOpen}`);
-                return foundUserData
-              })()}
+              options={optionsUserNames}
               onInputChange={handleInputChange}
               onChange={(newValue, actionMeta) => {
-                //request
-                console.log(`onChange: ${newValue}`, actionMeta);
-                setStatement({ ...statement, userId: newValue? newValue.value : ""});
+                setStatement({ ...statement, userId: newValue? Number.parseInt(newValue.value) : 0});
                 setSelected(newValue);
-              }}
-              onMenuScrollToBottom={(event: WheelEvent | TouchEvent) => {
-                console.log(`onMenuScrollToBottom: ${JSON.stringify(event)}`);
               }}
               styles={{control: (base: any) => ({
                 ...base,
                 minHeight: 56
-              })}}
+              })
+            }}
               isLoading={isLockedForUserRetrieval}
               components={{MenuList}}
-              menuPlacement="auto"
-              menuIsOpen={menuOpen}
-              onMenuOpen={() => setMenuOpen(true)}
-              onMenuClose={() => setMenuOpen(false)}
               />
           </Grid>
           <Grid item xs={12} sm={4}>
-            {dateTimeInput("From Date", () => statement.fromm, (v) => setStatement({ ...statement, fromm: v }))}
+            {dateTimeInput("From Date", statement.fromm??0, (v) => setStatement({ ...statement, fromm: v }))}
           </Grid>
           <Grid item xs={12} sm={4}>
-            {dateTimeInput("From Date", () => statement.too, (v) => setStatement({ ...statement, too: v }))}
+            {dateTimeInput("From Date", statement.too??0, (v) => setStatement({ ...statement, too: v }))}
           </Grid>
           <Grid item xs={12}>
             <Button variant="contained" onClick={handleGetStatement}>
