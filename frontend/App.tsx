@@ -1,4 +1,4 @@
-import React, { Children, useLayoutEffect, useRef } from "react";
+import React, { Children, useRef, useState } from "react";
 import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -10,12 +10,10 @@ import Paper from '@mui/material/Paper';
 import Select, { InputActionMeta, components } from 'react-select'
 import { GenerationState, GenParametersValidator, PostTransactionValidator, ProgressReport } from "./common/generator_parameters.js";
 import * as gqlp from "./common/gqlDeclarations.js"
-import z, { set, ZodObject } from "zod";
+import z, { ZodObject } from "zod";
 import { logger } from "./common/logger.js";
 import { StatementParametersValidator, StatementType, UserDataRequestParameters } from "./common/event_types.js";
-import { log } from "console";
 import { last } from "./common/utils.js";
-import { MenuListProps } from "@mui/material";
 
 enum StartGenButtonStates {
   NothingHappens,
@@ -77,24 +75,24 @@ function label(toggler: () => string) {
 
 export default function App() {
   //------ Post Transaction----------------
-  const [postTransactionParams, setPostTransactionParams] = React.useState(PostTransactionValidator.parse({
+  const [postTransactionParams, setPostTransactionParams] = useState(PostTransactionValidator.parse({
     date: new Date().getTime(),
     userFrom: 1,
     userTo: 1,
     amount: 100
   }));
-  const [postedStas, setPostedStats1] = React.useState({success: 0, failed: 0});
-  const [postButtonState, setPostButtonState] = React.useState(false);
-  const [postedStasTxt, renderPostedStatsTxt] = React.useState("");
-  const [startGenTxt, setStartGenTxt] = React.useState("");
+  const postedStas = useRef({success: 0, failed: 0});
+  const [postButtonState, setPostButtonState] = useState(false);
+  const [postedStasTxt, renderPostedStatsTxt] = useState("");
+  const [startGenTxt, setStartGenTxt] = useState("");
   const updatePostedStatsTxt = () => {
-    if (postedStas.success === 0 && postedStas.failed === 0) {
+    if (postedStas.current.success === 0 && postedStas.current.failed === 0) {
       renderPostedStatsTxt("");
       return;
     }
-    let txt = `Posted: ${postedStas.success}`;
-    if (postedStas.failed > 0) {
-      txt += `, Failed: ${postedStas.failed}`;
+    let txt = `Posted: ${postedStas.current.success}`;
+    if (postedStas.current.failed > 0) {
+      txt += `, Failed: ${postedStas.current.failed}`;
     }
     renderPostedStatsTxt(txt);
   }
@@ -102,10 +100,10 @@ export default function App() {
     setPostButtonState(true);
     // const params = PostTransactionValidator.parse(postTransactionParams);
     gqlp.postTransaction.fetchCall(GQL_URL, gqlp.postTransaction.coercedParamType!.parse(postTransactionParams)).then(_ => {
-      postedStas.success++;
+      postedStas.current.success++;
       updatePostedStatsTxt();
     }).catch(err => {
-      postedStas.failed++;
+      postedStas.current.failed++;
       renderPostedStatsTxt(err.message);
     }).finally(() => {
       setPostButtonState(false);
@@ -113,7 +111,7 @@ export default function App() {
   }
   
   //------ Generate Transactions----------------
-  const [genParams, setGenParams] = React.useState(() => {
+  const [genParams, setGenParams] = useState(() => {
     const now = new Date();
     const before = new Date();
     before.setFullYear(before.getFullYear() - 25);
@@ -126,7 +124,7 @@ export default function App() {
     minTransactionId: 1,
     maxDelayMs: 100
   }});
-  const [startGenButtonState, setStartGenButtonState] = React.useState(StartGenButtonStates.NothingHappens);
+  const [startGenButtonState, setStartGenButtonState] = useState(StartGenButtonStates.NothingHappens);
   async function startGeneration() {
     try {
       if (startGenButtonState === StartGenButtonStates.NothingHappens) {
@@ -189,7 +187,7 @@ export default function App() {
 
 
   //------- Get Users----------------
-  const [output, setOutput] = React.useState<string>("");
+  const [output, setOutput] = useState<string>("");
   function renderMenuButton(label: string, show: () => boolean, refreshOptions: () => void) {
     if (!show()) {
       return <div></div> 
@@ -222,15 +220,19 @@ export default function App() {
         pattern: "", count: 100
       }});
 
-    const [selected, setSelected] = React.useState<UserOption | null>(null);
+    const [ selected, setSelected] = useState<UserOption[] | null>(null);
     type UserOption = {
       value: string;
       label: string;
       cursor: number;
     };
-    const [optionsUserNames, setFoundUserData] = React.useState<UserOption[]>([]);
-    const [isLockedForUserRetrieval, lockUserRetrieval] = React.useState(false);
-    const [lastInput, setLastInput] = React.useState("");
+    const [optionsUserNames, setFoundUserData] = useState<UserOption[]>([]);
+    const [isLockedForUserRetrieval, lockUserRetrieval] = useState(false);
+    const globalIdx = useRef<number>(0);
+    const defUseStat = useRef<() => string>(() => { 
+      logger.error("Creating new last Input!", globalIdx.current++);
+      return "";});
+    const [lastInput, setLastInput] = useState(defUseStat.current());
 
     const DEBOUNCE_INTERVAL_MS = 800;
     if (optionsUserNames.length === 0) {
@@ -239,7 +241,10 @@ export default function App() {
 
 
     async function handleInputChange(newValue: string, actionMeta: InputActionMeta) {
-      if (newValue == actionMeta.prevInputValue) {
+      if ( actionMeta.action === 'input-blur' 
+        || actionMeta.action === 'menu-close' 
+        || actionMeta.action === 'set-value'
+        || newValue == actionMeta.prevInputValue) {
         return;
       }
       userPatternDebounceState.current.lastValue = newValue;
@@ -294,13 +299,13 @@ export default function App() {
       requestUserList();
     };
 
-    const scrollRef = React.useRef<HTMLDivElement | null>(null);
-    const scrollPos = React.useRef(0);
-    const scrollHandler = React.useRef<(e: Event) => void>((e: Event) => {
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const scrollPos = useRef(0);
+    const scrollHandler = useRef<(e: Event) => void>((e: Event) => {
       scrollPos.current = (e.target as HTMLDivElement).scrollTop;
     });
 
-  const MenuList = (props: any) => {
+    const MenuList = (props: any) => {
     const children = Children.toArray(props.children);
     const selected = {
       top: Object(children[0])?.props?.data?.cursor,
@@ -330,10 +335,10 @@ export default function App() {
 
 
 
-  
+
 
   //------- Render statement ----------------
-  const [statement, setStatement] = React.useState(StatementParametersValidator.parse({userId: 1, type: StatementType.FS}));
+  const [statement, setStatement] = useState(StatementParametersValidator.parse({userId: 1, type: StatementType.FS}));
   // Simulate statement fetch
 
   return (
@@ -410,11 +415,26 @@ export default function App() {
               value={selected}
               inputValue={lastInput}
               placeholder="Select User"
+              isMulti={true}
+              isClearable={false}
               options={optionsUserNames}
               onInputChange={handleInputChange}
+              closeMenuOnSelect={false}
               onChange={(newValue, actionMeta) => {
-                setStatement({ ...statement, userId: newValue? Number.parseInt(newValue.value) : 0});
-                setSelected(newValue);
+                // Using isMulti={true} and taking only last item is a hack to keep 
+                // the input text in the input field after the menu is closed in any way.
+                // Doing it with single selection hides the selected value on the second
+                // manual menu close
+                // Reproduction with isMulti={false}: 
+                // 1) Type some input
+                // 2) Select item with input text still there
+                // 3) close-open-close the menu with mouse click
+                // Now any text is gone amd only "x" mark remains.
+                if (newValue.length === 0) {
+                  setSelected(null);
+                  return;
+                }
+                setSelected([last(newValue as UserOption[])!]);
               }}
               styles={{control: (base: any) => ({
                 ...base,
@@ -432,7 +452,7 @@ export default function App() {
             {dateTimeInput("From Date", statement.too??0, (v) => setStatement({ ...statement, too: v }))}
           </Grid>
           <Grid item xs={12}>
-            <Button variant="contained" onClick={handleGetStatement}>
+            <Button variant="contained" onClick={() => {}}>
               Fetch Statement
             </Button>
           </Grid>
