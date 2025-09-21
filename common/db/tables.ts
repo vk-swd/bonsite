@@ -117,11 +117,11 @@ transactionsTable.foreignKeys = [
 transactionsTable.nonClusteredIndexes = [
     {
         name: 'idx_c_transactions_userIdFrom_dateTime',
-        columns: [transactionsTable.columns.userIdFrom.name, transactionsTable.columns.dateTime.name]
+        columns: [transactionsTable.columns.dateTime.name, transactionsTable.columns.userIdFrom.name]
     },
     {
         name: 'idx_c_transactions_userIdTo_dateTime',
-        columns: [transactionsTable.columns.userIdTo.name, transactionsTable.columns.dateTime.name]
+        columns: [transactionsTable.columns.dateTime.name, transactionsTable.columns.userIdTo.name]
     },
     {
         name: 'idx_c_transactions_id',

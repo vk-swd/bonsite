@@ -10,8 +10,9 @@ export class Writer {
     writing = false;
     stopping = false;
     closed = false;
-    deferred = new Deferred<void>();
+    deferred = new Deferred<number>();
     pos = 0;
+    writtenLines = 0;
     constructor(private fileName: string) {
         //TODO: make it open file only if there is something to write (on the 1st line)
         fsp.open(fileName, 'a').then(h => {
@@ -24,7 +25,7 @@ export class Writer {
     abort() {
         return this.flushAndStop(true);
     }
-    flushAndStop(abort = false): Promise<void> {
+    flushAndStop(abort = false): Promise<number> {
         if (!this.stopping && !this.closed) {
             this.stopping = true;
             if (abort) {
@@ -47,7 +48,7 @@ export class Writer {
                         // ???: what if throws here?
                         // ???: does catch wait for this to comlete?
                     }
-                }).catch(_ => { }).finally(() => this.deferred.resolve());
+                }).catch(_ => { }).finally(() => this.deferred.resolve(this.writtenLines));
             } else {
                 this.deferred.reject("File handle not opened");
             }
@@ -66,12 +67,15 @@ export class Writer {
         }
         this.writing = true;
         let buffer = "";
+        let lineCount = 0;
         while (this.pos < this.messages.length && buffer.length < 256 * 1024) {
+            lineCount++;
             buffer += this.messages[this.pos++] + "\n";
         }
         this.messages.splice(0, this.pos);
         this.pos = 0;
         this.handle.write(buffer).then(_ => {
+            this.writtenLines += lineCount;
             this.writing = false;
             if (this.stopping && this.messages.length == 0) {
                 this.close();

@@ -89,6 +89,8 @@ export const StatementParametersValidator = z.object({
     userId: z.number(),
     fromm: z.number().optional(),
     too: z.number().optional(),
-    type: z.enum(StatementType)
+    type: z.enum(StatementType),
+    offset: z.number().optional(),
+    count: z.number().optional()
 }).register(z.globalRegistry, { description: "StatementParameters" });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;

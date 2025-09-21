@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "scripts": {
       "deploy": "tsc && node --prof build/main.js",
-      "test": "tsc && mocha build/test.js --exit"
+      "test": "tsc && mocha build/test.js --trace-warnings --exit"
     },
     "private": true,
     "license": "UNLICENSED",

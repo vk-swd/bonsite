@@ -36,7 +36,7 @@ export const CommitResultsC: Columns<CommitResults> = {
     newCount: makeCol("newCount", sqlTypes.int)
 };
 
-type StatementReqParam = Omit<{ idx: number } & StatementParameters, "type">
+type StatementReqParam = Omit<{ idx: number } & StatementParameters, "type"|"offset"|"count">;
 export const StatmentParamTable: TableDescription<StatementReqParam> = {
     name: `#tempParamTable`,
     columns: {

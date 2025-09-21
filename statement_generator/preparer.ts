@@ -9,21 +9,33 @@ import { last } from './common/utils.js';
 
 const SHARED_DIR = getEnv('SHARED_DIR');
 
-const ABORT_CHECK_MIN_INTERVAL_MS = 1000;
+const TASK_DELAY_REPORT_INTERVAL_MS = 5000;
 const ABORT_INTERVAL_MS = 60000;
 
 
-interface Worker<O> {
+export interface Worker<O> {
     deferred: Deferred<O>;
-    work(input: InKafkaMessage[]): Promise<O>;
+    creationTime: number;
+    get created(): number
+    handle(t: InKafkaMessage): void;
+    finish(): Promise<void>;
     cancel(why:string): void;
+    test(): string
     get result(): Promise<O>;
     get done(): boolean;
 }
 export class BaseWorker<O> implements Worker<O> {
     deferred = new Deferred<O>();
-    work(lines: InKafkaMessage[]): Promise<O> {
-        throw new Error("Method not implemented.");
+    creationTime = Date.now();
+    get created() {
+        return this.creationTime;
+    }
+    test(): string {
+        return "test";
+    }
+    handle(_: InKafkaMessage): void {}
+    finish(): Promise<void> {
+        throw new Error("Method 'finish' not implemented.");
     }
     get result() {
         return this.deferred.promise;
@@ -35,55 +47,74 @@ export class BaseWorker<O> implements Worker<O> {
         return false;
     }
 }
-export class Serialiser extends BaseWorker<string[]> {
-    deferred = new Deferred<string[]>();
-    creationTime = Date.now();
-    constructor() {
+export class Serialiser extends BaseWorker<string[]> implements Worker<string[]> {
+    rresult: string[] = [];
+    finished = false;
+    offsetCounter = 0;
+    constructor(private params: StatementParameters) {
         super();
     }
-    work(lines: InKafkaMessage[]): Promise<string[]> {
-        this.deferred.resolve(lines.map(l => JSON.stringify(l)));
+    test(): string {
+        return "Serialiser";
+    }
+    finish(): Promise<void> {
+        if (this.finished) {
+            return Promise.resolve();
+        }
+        this.finished = true;
         metrics?.servedStatementsCount.inc();
-        metrics?.servedTransactionRecords.inc(lines.length);
+        metrics?.servedTransactionRecords.inc(this.rresult.length);
         updateMaxResponseDelayMs(Date.now() - this.creationTime);
-        return this.deferred.promise;
+        this.deferred.resolve(this.rresult);
+        return Promise.resolve();
+    }
+    handle(t: InKafkaMessage): void {
+        if (!this.params.count) {
+            this.rresult.push(JSON.stringify(t));
+            return;
+        }
+        if (this.rresult.length >= this.params.count) {
+            return;
+        }
+        if (!this.params.offset) {
+            this.rresult.push(JSON.stringify(t));
+            return;
+        }
+        if (this.params.offset > this.offsetCounter) {
+            this.offsetCounter++;
+            return;
+        }
+        this.rresult.push(JSON.stringify(t));
     }
 }
-export class FileWriter extends BaseWorker<string[]> {
-    deferred = new Deferred<string[]>();
+export class FileWriter extends BaseWorker<string[]> implements Worker<string[]> {
     writer: Writer;
-    creationTime = Date.now();
+    finished = false;
     constructor(private fileName: string, private p : StatementParameters, baseDir: string = SHARED_DIR) {
         super();
         this.writer = new Writer(baseDir + '/' + fileName);
-        this.timeout = setTimeout(() => this.trackTime(), 5000);
     }
-    timeout: NodeJS.Timeout | undefined = undefined;
-    trackTime() {
-        logger.warn(`Task hanging for to long ${JSON.stringify(this.p)} filename ${this.fileName}`);
-        clearTimeout(this.timeout);
-        this.timeout = setTimeout(() => this.trackTime(), 5000);
+    handle(t: InKafkaMessage): void {
+        this.writer.addMessage(JSON.stringify(t));
     }
-    work(lines: InKafkaMessage[]): Promise<string[]> {
-        //TODO: for 0 lines return empty file name array
-        //TODOTODO: make a more informative result structure
-        lines.forEach(l => this.writer.addMessage(JSON.stringify(l)));
-        this.writer.flushAndStop().then(async () => {
+    test(): string {
+        return "FileWriter";
+    }
+    finish(): Promise<void> {
+        if (this.finished) {
+            return Promise.resolve();
+        }
+        this.finished = true;
+        return this.writer.flushAndStop().then(async (lineCount) => {
             metrics?.filesGenerated.inc();
             metrics?.servedStatementsCount.inc();
-            metrics?.servedTransactionRecords.inc(lines.length);
+            metrics?.servedTransactionRecords.inc(lineCount);
             updateMaxResponseDelayMs(Date.now() - this.creationTime);
             this.deferred.resolve([this.fileName]);
         }).catch(e => {
             metrics?.fileWriteErrors.inc();
             this.deferred.reject(e);
-        }).finally(() => {
-            if (this.timeout) {
-                clearTimeout(this.timeout);
-                this.timeout = undefined;
-            }
-        });
-        return this.deferred.promise;
+        })
     }
     cancel(reason?: any): void {
         this.writer.abort().then(() => {
@@ -99,9 +130,42 @@ export class BundleHandler<O> {
     statementParams: StatementParameters[] = [];
     bundleTimer: NodeJS.Timeout | undefined = undefined;
     inFlightResuests = 0;
+    taskDelayReportTO: NodeJS.Timeout;
     constructor(private maxInFlight: number, // consider making this dynamic
                 private db_connection: UserConnection,
                 private workerFactory: (p:StatementParameters) => Worker<O>){
+        const report = new Map<number, {val: number}>();
+        this.taskDelayReportTO = setTimeout(() => {
+            const now = Date.now();
+            const divisor = TASK_DELAY_REPORT_INTERVAL_MS;
+            this.waitingList.forEach(w => {
+                const elapsed = now - w.task.created;
+                const hystoBlock = elapsed - (elapsed % divisor);
+                const key = hystoBlock
+                if (!report.has(key)) {
+                    report.set(key, {val: 1});
+                } else {
+                    report.get(key)!.val++;
+                }
+            })
+            let reportStr = "";
+            report.forEach((v,k) => {
+                if (k == 0) {
+                    return;
+                }
+                if (reportStr.length) {
+                    reportStr += ", ";
+                }
+                reportStr += `${k}:${v.val}`;
+            })
+            if (reportStr.length) {
+                logger.warn(`There are ${this.waitingList.length} waiting tasks. Delayed tasks by age (ms): ${reportStr}`);
+            }
+            if (!this.stopped) {
+                this.taskDelayReportTO.refresh();
+            }
+            report.clear();
+        }, TASK_DELAY_REPORT_INTERVAL_MS);
     }
     addTask(p: StatementParameters): Promise<O> {
         const task: Worker<O> = this.workerFactory(p);
@@ -112,14 +176,18 @@ export class BundleHandler<O> {
         }
         return task.result;
     }
+    stopped = false;
+    stop() {
+        this.stopped = true;
+        clearTimeout(this.bundleTimer!);
+        clearTimeout(this.taskDelayReportTO);
+    }
     start() {
-        if (this.bundleTimer) {
+        if (this.bundleTimer || this.stopped) {
             return;
         }
         // TODO: A balanced task bundling to minimize latency and maximize throughput
         this.bundleTimer = setTimeout(async () => {
-            // TODO: track max delay between runs and number of processed records
-            // process all waiting tasks in a bundle
             if (!this.bundleTimer) {
                 return;
             }
@@ -132,66 +200,70 @@ export class BundleHandler<O> {
                 this.bundleTimer.refresh();
                 return;
             }
-            // TODO: consider resolving tasks and params in chunks
-            
             const tasks = this.waitingList.splice(0, toProcess);
             this.inFlightResuests += toProcess;
-            let currentResult: [InKafkaMessage,number][] = [];
             let lastReqId: number | undefined = undefined;
-            try {
-                metrics?.databaseRequests.inc();
-                await this.db_connection!.getTransactions(tasks.map(t => t.param), async (user: number, reqId: number, line: InKafkaMessage) => {
-                    /* An assumprion here that "db_connection.getTransactions" will asssign
-                        "idx" column to the parameter locatein in the "params" array
-                        That's why the "params" index - listIdx - is used as request identifier
-                    */
-                    if (reqId > tasks.length || tasks[reqId].user !== user 
-                        || ((lastReqId !== undefined) && (reqId < lastReqId))) {
-                        throw `Unexpected output in a transactions request.
-                        reqId: ${reqId}, user: ${user}, 
-                        lastReqId ${lastReqId}, ${lastReqId ? `last user ${tasks[lastReqId].user}` : ``}
-                        Ignoring ${tasks.length} tasks from ${tasks[0].user} to ${last(tasks)?.user}.`
+            metrics?.databaseRequests.inc();
+            // Can't await - async error handling is inside streamTransactions
+            this.db_connection!.streamTransactions(tasks.map(t => t.param), async (user: number, reqId: number, line: InKafkaMessage) => {
+                /* reqId - index for "tasks" bundle / identifier for the statement request parameters
+                    Transactions are expected to come in the order of request parameters:
+                    [reqId1, user1, from1, to1], [reqId2, user2, from2, to2] .... => 
+                    [t11, t12,..., t1n], [t21, t22,..., t2m] ....
+                    All transactions in 1 bundle carry the "reqId" = 1, and in another - "reqId" = 2, etc...
+                */
+                if (reqId >= tasks.length || tasks[reqId].user !== user 
+                    || ((lastReqId !== undefined) && (reqId < lastReqId))) {
+                    throw `Unexpected output in a transactions request.
+                    reqId: ${reqId}, user: ${user}, 
+                    lastReqId ${lastReqId}, ${lastReqId ? `last user ${tasks[lastReqId].user}` : ``}
+                    Ignoring ${tasks.length} tasks from ${tasks[0].user} to ${last(tasks)?.user}.`
+                }
+                if (lastReqId === undefined) {
+                    // If transactions started not from the first task.
+                    lastReqId = reqId;
+                    for (let i = 0; i < lastReqId; i++) {
+                        tasks[i].task.finish().then(() => {
+                            this.inFlightResuests--;
+                        });
                     }
-                    if (lastReqId === undefined) {
-                        //if transactions started not from the first task.
-                        lastReqId = reqId;
-                        for (let i = 0; i < lastReqId; i++) {
-                                    tasks[i].task.work([]);
-                        }
-                    } else if (lastReqId !== reqId) {
-                        tasks[lastReqId].task.work(currentResult.map(r => r[0]));
-                        currentResult = [];
-                        // Some users may be skipped if dates didn't include any transactions
-                        // listIdx < params.length && params[listIdx].userId != user; listIdx++)
-                        for (let i = lastReqId + 1; i < reqId; i++ ) {
-                            tasks[i].task.work([]);
-                        }
-                        lastReqId = reqId;
+                } else if (lastReqId !== reqId) {
+                    // Some users may be skipped if dates didn't include any transactions
+                    // listIdx < params.length && params[listIdx].userId != user; listIdx++)
+                    for (let i = lastReqId; i < reqId; i++ ) {
+                        tasks[i].task.finish().then(() => {
+                            this.inFlightResuests--;
+                        });
                     }
-                    currentResult.push([line, reqId]);
-                })
-            } catch(e) {
+                    lastReqId = reqId;
+                }
+                tasks[lastReqId].task.handle(line);
+            })
+            .then(() => {
+                if (lastReqId == undefined) {
+                    // In case if no transactions were returned for any user
+                    lastReqId = 0;
+                }
+                for (; lastReqId < tasks.length; lastReqId++) {
+                    tasks[lastReqId].task.finish().then(() => {
+                        this.inFlightResuests--;
+                    });
+                }
+            })
+            .catch(e => {
                 metrics?.databaseRequestErrors.inc();
                 if (lastReqId !== undefined) {
                     for (let i = lastReqId; i < tasks.length; i++) {
+                        // TODO: make a more explicit error state
                         tasks[i].task.cancel(`Error processing user ${tasks[i].user} : ${e}`);
+                        this.inFlightResuests--;
                     }
-                    // TODO: make a more explicit error state
-                    lastReqId = tasks.length;
                 }
-            }
-            if (lastReqId == undefined) {
-                lastReqId = 0;
-            }
-            for (; lastReqId < tasks.length; lastReqId++) {
-                tasks[lastReqId].task.work(currentResult.map(r => r[0]));
-
-                currentResult = [];
-            }
-            await Promise.all(tasks.map(t => t.task.result.catch(_ => {}).finally(() => {
-                this.inFlightResuests--;
-            })));
-            this.bundleTimer.refresh();
+            }).finally(() => {
+                if (!this.stopped) {
+                    this.bundleTimer!.refresh();
+                }
+            })
         }, 100);
     }
 }
@@ -204,7 +276,7 @@ export class Preparer extends BundleHandler<string[]> {
                 const fileName = `statement-${p.userId}-${p.fromm}-${p.too}-${new Date().toISOString()}-${this.salt++}.json`;
                 return new FileWriter(fileName, p);
             } else {
-                return new Serialiser();
+                return new Serialiser(p);
             }
         });
     }

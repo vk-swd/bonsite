@@ -181,12 +181,16 @@ export class UserConnection {
             (${rawDataTable.columns.data.name})
             VALUES (@${placeholder});`);
     }
-    async getTransactions(p: StatementParameters[], processor: (user: number, reqId: number, line: InKafkaMessage) => Promise<void>): Promise<void> {
+    async streamTransactions(p: StatementParameters[], processor: (user: number, reqId: number, line: InKafkaMessage) => Promise<void>): Promise<void> {
         const request = this.pool.request();
-        await request.query(`DROP TABLE IF EXISTS ${StatmentParamTable.name}`);
-        const rrr = await request.batch(`create table ${StatmentParamTable.name} (
-            ${procGetTransactions.columns
-                .map((c, idx) => `${c.name} ${c.type.name}`).join(', ')})`)
+        try {
+            await request.query(`DROP TABLE IF EXISTS ${StatmentParamTable.name}`);
+            await request.batch(`create table ${StatmentParamTable.name} (
+                ${procGetTransactions.columns
+                    .map((c, idx) => `${c.name} ${c.type.name}`).join(', ')})`)
+        } catch(e) {
+            throw `Error creating statement parameter table ${JSON.stringify(p)}: ${e}`;
+        }
         const table = new sql.Table(StatmentParamTable.name);
         const dataColumns = procGetTransactions.columns;
         try {
@@ -207,6 +211,9 @@ export class UserConnection {
         const deferred = new Deferred<void>();
         let inFlight = 0;
         let done = false;
+        request.on('error', err => {
+            logger.error(`Caught Error in streamTransactions for`, p, `:`, err);
+        });
         request.on('row', async (row: any) => {
             const parsed = parseQueryRes(row, transactionsTable.columns);
             const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;            
@@ -214,7 +221,7 @@ export class UserConnection {
             processor(Number.parseInt(row.pid),Number.parseInt(row.pidx), res)
             .catch(e => {
                 request.cancel();
-                deferred.reject(`Error processing transaction for) user ${row.pid} : ${e}`);
+                deferred.reject(`Error processing transaction for user ${row.pid} : ${e}`);
             }).finally(() => {
                 inFlight--
                 if (inFlight == 0 && done) {
@@ -231,7 +238,7 @@ export class UserConnection {
         if (inFlight == 0) {
             deferred.resolve();
         }
-        await deferred.promise;
+        return deferred.promise;
     }
     async getRawData(count: number, table: RawTables): Promise<any[]> {
         const request = this.pool.request();
@@ -256,24 +263,6 @@ export class UserConnection {
         request.stream = true; // Enable streaming
         request.on('row', (row : any) => processor(row, count))
         await request.query(`SELECT * FROM ${name}`);
-    }
-    async streamTransactions(processor: (metadata: Metadata, userId?: number) => void): Promise<void> {
-        const tables:[TableDescription<any>, (row: any) => void][] = [
-            [transactionsTable,(row: any) => processor(MetadataValidator.parse(JSON.parse(row.metadata)), row.userIdFrom)],
-            [transactionResultsTable, (row:any) => processor(MetadataValidator.parse(JSON.parse(row.metadata)), -1)],
-            [rawDataTable, (row: any) => processor(MetadataValidator.parse(JSON.parse(JSON.parse(row.data).metadata)))]];
-        for (const table of tables) {
-            await new Promise<void>((resolve, reject) => {
-                const request = this.pool.request();
-                request.stream = true; // Enable streaming
-                request.on('row', (row : any) => table[1](row))
-                request.on('done', (row : any) => {
-                    logger.debug(`Pausing stream: ${JSON.stringify(row)}`);
-                    resolve();
-                })
-                request.query(`SELECT * FROM ${table[0].name}`);
-            })
-        }
     }
     close(): Promise<void> {
         return this.pool.close();

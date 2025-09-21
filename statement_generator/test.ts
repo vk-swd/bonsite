@@ -86,7 +86,7 @@ describe('Sanity check', function () {
         await createSchema(db_connection!.pool, "TestDBStatementGen");
         const batchSize = 10000;
         const transactions: MsgOffset[] = [];
-        const cycles = 600000;
+        const cycles = 800000;
         const time = Date.now();
         const userIdPattern = new UserIdPattern(userCount);
         const timeIncrement = 100;
@@ -194,15 +194,19 @@ describe('Sanity check', function () {
             constructor(private params: StatementParameters) {
                 super();
             }
-            async work(lines: InKafkaMessage[]): Promise<number> {
+            buffer: InKafkaMessage[] = [];
+            handle(_: InKafkaMessage): void {
+                this.buffer.push(_);
+            }
+            finish(): Promise<void> {
                 try {
-                    analyzeUser(lines, this.params);
-                    this.deferred.resolve(lines.length);
+                    analyzeUser(this.buffer, this.params);
+                    this.deferred.resolve(this.buffer.length);
                 } catch(e) {
                     errors.push(`\nError processing user ${this.params.userId} : ${e}`);
                     this.deferred.reject(e);
                 }
-                return this.deferred.promise;
+                return Promise.resolve();
             }
         }
         const preparer1 = new BundleHandler<number>(100000, db_connection!, (p: StatementParameters) => {
@@ -218,7 +222,7 @@ describe('Sanity check', function () {
     const testParametersWrites = async (p: StatementParameters[]) => {
         // Produce "n.length" satement files, then read them all, analyze and delete
         let analyzedTransactions = 0;
-        const preparer1 = new BundleHandler<string[]>(100000, db_connection!, (p: StatementParameters) => {
+        const preparer1 = new BundleHandler<string[]>(1000, db_connection!, (p: StatementParameters) => {
             const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
             return new FileWriter(fileName, p);
         });

@@ -13,7 +13,8 @@ function createEnumSchema(enumObject: util.EnumLike) {
         return z.enum(enumObject);
     }
 }
-function createGqlSchema<T extends z.ZodTypeAny>(schema: T): z.ZodTypeAny {
+function createStrToIntCoercedGqlSchema<T extends z.ZodTypeAny>(schema: T): z.ZodTypeAny {
+    // Creates coerced types which force convert strings into numbers where numbers are expected
     if (schema instanceof z.ZodNumber) {
         return z.coerce.number();
     }
@@ -22,20 +23,20 @@ function createGqlSchema<T extends z.ZodTypeAny>(schema: T): z.ZodTypeAny {
         return createEnumSchema(schema.enum) //z.enum(schema.enum);
     }
     if (schema instanceof z.ZodOptional) {
-        return createGqlSchema((schema as z.ZodOptional).def.innerType as any).optional();
+        return createStrToIntCoercedGqlSchema((schema as z.ZodOptional).def.innerType as any).optional();
     }
     if (schema instanceof z.ZodNullable) {
-        return createGqlSchema((schema as z.ZodNullable).def.innerType as any).nullable();
+        return createStrToIntCoercedGqlSchema((schema as z.ZodNullable).def.innerType as any).nullable();
     }
     if (schema instanceof z.ZodObject) {
         const newShape = {} as any;
         for (const [key, field] of Object.entries(schema.shape)) {
-            newShape[key] = createGqlSchema(field);
+            newShape[key] = createStrToIntCoercedGqlSchema(field);
         }
         return z.object(newShape);
     }
     if (schema instanceof z.ZodArray) {
-        return z.array(createGqlSchema((schema as z.ZodArray).def.element as any));
+        return z.array(createStrToIntCoercedGqlSchema((schema as z.ZodArray).def.element as any));
     }
     return schema; // Return as-is for other types
 }
@@ -77,18 +78,19 @@ export type GqlIfy<T> = T extends Object ? {
 class GqlFunction1<T, K> {
     declarationStr: string;
     queryStr: string;
+    //Coerced types force convert strings into numbers where numbers are expected
     coercedReturnType: ZodType<T>;
     coercedParamType?: ZodType<K>;
     constructor(public name: string, 
         public returnType: ZodType<T>, 
         public paramType?: ZodType<K>) {
-        this.coercedReturnType = createGqlSchema(returnType) as ZodType<T>;
+        this.coercedReturnType = createStrToIntCoercedGqlSchema(returnType) as ZodType<T>;
         let paramString = "";
         if (paramType) {
             if (paramType.type === "object") {
                 paramString = `(params: ${getTypeName(paramType)}!)`;
             }
-            this.coercedParamType = createGqlSchema(paramType) as ZodType<K>;
+            this.coercedParamType = createStrToIntCoercedGqlSchema(paramType) as ZodType<K>;
         }
         let returnString = getTypeName(returnType);
         this.declarationStr = `${this.name}${paramString} :${returnString}`;
@@ -134,7 +136,6 @@ class GqlFunction1<T, K> {
             if (raw.errors) {
                 throw new Error(`GQL error: ${JSON.stringify(raw.errors)}`);
             }
-            logger.log(`GQL raw result:`, raw);
             return this.coercedReturnType.parse(raw.data[this.name]);
         } catch (e) {
             throw new Error(`Error in ${url} request ${body}:  ${e}`);
