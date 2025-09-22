@@ -18,10 +18,10 @@ export class KProducer extends EventEmitter {
     inFlight = 0;
     producer: kf.Producer;
 
-    /*  "outbox" is a simplified version of reliability guarantee 
+    /*  "outbox" is a simplified version of reliability guarantee
           during the delivery.
-        For delivery of critical information some redundant storage 
-          would have to be implemented with ensuring 
+        For delivery of critical information some redundant storage
+          would have to be implemented with ensuring
           "exactly once delivery" but it was avoided in this demo.
         Also using array for simplicity (could be an adjustable ring buffer).
         Can automatically batch requests using "linger" and "max_batch_size"
@@ -82,7 +82,7 @@ export class KProducer extends EventEmitter {
         /* Decided not to overcomplicate things and not to do manual batching,
               because according to documentation Kafka already does this
               + optmising without strong prompting evidence can be unreasonable.
-            With high latency and message bandwidth data can be lost if the 
+            With high latency and message bandwidth data can be lost if the
               outbox structure is not backed up properly, but such guarantees are
               beyond the scope of this project.
         */

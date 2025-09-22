@@ -11,7 +11,7 @@ job() {
 }
 
 echo "scrape_configs:"
-job prometheus localhost 9090 
+job prometheus localhost 9090
 for svc in $services; do
     job "$svc" "$svc" "$MONITORING_PORT"
 done

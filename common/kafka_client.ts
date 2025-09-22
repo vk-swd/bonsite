@@ -11,7 +11,7 @@ export type KClientConfig = {
 
 export class KClient {
   /*  Single consume/producer per client because
-        there is no point running multiple producers/consumers 
+        there is no point running multiple producers/consumers
         on a single machine with a shared IO (network card and storage device)
       And hardware parallelism is best addressed with extra process in the consumer group.
   */

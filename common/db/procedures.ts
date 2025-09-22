@@ -1,5 +1,5 @@
-import { MAX_DATE, MIN_DATE, StatementParameters, TResult, UserDataRequestParameters } from "../event_types.js";
-import { getTopUsersProcedureQuery, getUserProcedureQuery, procedureQuery } from "./queries.js";
+import { MAX_DATE, MIN_DATE, ServerState, StatementParameters, TResult, UserDataRequestParameters } from "../event_types.js";
+import { getDBState, getTopUsersProcedureQuery, getUserProcedureQuery, procedureQuery } from "./queries.js";
 import { Column, Columns, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
 import sql from 'mssql'
 
@@ -24,11 +24,10 @@ function makeProc<T>(procName: string, columns: Columns<T>, query: (name: string
 export const UsersRequestC: Columns<UserDataRequestParameters> = {
     cursor: makeCol("cursor", usersTable.columns.idx.type),
     count: makeCol("count", sqlTypes.int),
-    pattern: makeCol("pattern", sqlTypes.nvarchar)    
+    pattern: makeCol("pattern", sqlTypes.nvarchar)
 };
 export const getUsersProc = makeProc(`${schema}.getUsers`, UsersRequestC, getUserProcedureQuery);
 export const getUsersTopProc = makeProc(`${schema}.getTopUsers`, UsersRequestC, getTopUsersProcedureQuery);
-const tResT = transactionResultsTable;
 
 export type CommitResults = { duds: number; newCount: number };
 export const CommitResultsC: Columns<CommitResults> = {

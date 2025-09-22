@@ -66,7 +66,7 @@ export class GenApiServer extends EventEmitter {
         super()
         this.server = createServer(async (req, res) => {
             logger.info(`RECEIVING SOME REQUEST ${req.url}`)
-            metricStats.incrementApiCallCount();  
+            metricStats.incrementApiCallCount();
             if (this.handleStart(req, res)) return;
             if (this.handleStop(req, res)) return;
             if (this.handleGetProgress(req, res)) return;

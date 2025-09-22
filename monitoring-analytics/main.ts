@@ -11,7 +11,7 @@ const PORT = getEnv("M_PORT");
 
 const cnt1 = new prom.Counter({name: "testCounter", help: "beresh i countish"});
 setInterval(() => {
-    cnt1.inc(3);    
+    cnt1.inc(3);
 }, 100);
 
 
@@ -19,7 +19,7 @@ setInterval(() => {
 // reg.registerMetric(cnt1)
 
 // setInterval(() => {
-    
+
 //     prom.register.metrics().then(r => {
 //     console.log(`Regustered metrics: ${r}`)
 //     });

@@ -35,7 +35,7 @@ export async function connectToKafka(getOffsets: (event: kf.ConsumerGroupJoinEve
     }
     const consumer = kafka_client.consumer(consumer_config);
     consumer.on(`consumer.disconnect`, () => {
-        // when the application is stopped normally, 
+        // when the application is stopped normally,
         // this metric will not be saved or read, so don't
         // differenciate between (un)expected disconnects.
         logger.log(`Consumer lost connection`);

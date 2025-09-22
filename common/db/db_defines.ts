@@ -1,13 +1,13 @@
-import { InKafkaMessage, Metadata, MetadataValidator, Offset, OffsetValidator, StatementParameters, UserData, UserDataRequestParameters, UserDataResult, UserDataResultValidator, UserDataValidator } from '../event_types.js'
+import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Offset, OffsetValidator, ServerState, ServerStateValidator, StatementParameters, Transaction, TransactionResultValidator, TransactionValidator, UserData, UserDataRequestParameters, UserDataResult, UserDataResultValidator, UserDataValidator } from '../event_types.js'
 
 import sql from 'mssql'
 import { logger } from '../logger.js'
-import { Column, IdentityColumn, IdentityColumnT, kafkaOffsetTable, parseQueryRes, QueryRecordSet, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from './tables.js'
+import { Column, IdentityColumn, kafkaOffsetTable, parseQueryRes, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from './tables.js'
 import { connectToDatabase, database, runQuery } from './common.js'
-import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, getUsersProc, getUsersTopProc, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable, UsersRequestC } from './procedures.js'
+import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, getDBStatProc, getUsersProc, getUsersTopProc, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable, UsersRequestC } from './procedures.js'
 import { Deferred } from '../utils.js'
 
-function setQueryInput<T, K extends keyof T>(request: sql.Request, 
+function setQueryInput<T, K extends keyof T>(request: sql.Request,
     column: Column<T, K>, value: T, arg?: string): void {
     request.input(arg ? arg : column.inputName!, column.type.type(), column.value(value));
 }
@@ -166,11 +166,11 @@ export class UserConnection {
         if (!(res.recordsets instanceof Array) || res.recordsets.length < 2) {
             throw new Error(`getUsers returned invalid result: ${JSON.stringify(res.recordsets)}`);
         }
-        return UserDataResultValidator.parse({ 
+        return UserDataResultValidator.parse({
             slice: res.recordsets[0].map(r => {
                 const parsed = parseQueryRes(r, usersTable.columns)
                 return { cursor: parsed.idx, name: parsed.name, id: parsed.id };
-            }), 
+            }),
             totalCount: res.recordsets[1][0].totalCount });
     }
     async saveRawData(data: string, request: sql.Request): Promise<void> {

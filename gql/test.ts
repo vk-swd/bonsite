@@ -38,7 +38,7 @@ const userRequestParams: UserDataRequestParameters = {
     pattern: "user_"
 };
 function makeHandler<T, K>(url: string, result: K, argCheckers?: {v: z.ZodType<T>, val: T}) {
-    return (req: IncomingMessage, res: ServerResponse) => 
+    return (req: IncomingMessage, res: ServerResponse) =>
         handleRequest('/' + url, req, res, async (data?: string) => {
             if (argCheckers) {
                 const params = argCheckers.v.parse(JSON.parse(data!))

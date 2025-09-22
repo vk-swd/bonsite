@@ -58,8 +58,8 @@ export class Counters {
         }
     }
     serialise(): string {
-        return [this.userId, Math.floor(this.amountSum), 
-            this.transactionCount, 
+        return [this.userId, Math.floor(this.amountSum),
+            this.transactionCount,
             this.minDate??MAGIC_UNDEFINED, this.maxDate??MAGIC_UNDEFINED].join(",");
     }
     static deserialise(data: string): Counters {

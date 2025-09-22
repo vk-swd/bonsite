@@ -17,7 +17,7 @@ services:
       environment:
         - NODE_PRESERVE_SYMLINKS=1
         - HEALTHCHECK_PORT=${HEALTHCHECK_PORT}
-      networks: 
+      networks:
         - backend_net
       tty: true
       stdin_open: true
@@ -33,7 +33,7 @@ services:
         start_interval: 1s
 
   node_monitored_app:
-    extends: 
+    extends:
       service: node_app
     volumes:
       - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
@@ -75,5 +75,5 @@ services:
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-    networks: 
+    networks:
         - backend_net

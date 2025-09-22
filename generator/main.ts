@@ -28,11 +28,11 @@ const api = new GenApiServer(() => sender.progress(), () => {
     });
 });
 api.on(GenApiServer.event.postTransaction, (p: PostTransactionParams) => {
-    sender.postTransaction(p);  
+    sender.postTransaction(p);
 });
 api.on(GenApiServer.event.startGen, (p: GenParameters) => {
     logger.log("Starting sender signaled by API with params" + JSON.stringify(p));
-    sender.start(p);  
+    sender.start(p);
 });
 api.on(GenApiServer.event.stopGen, () => {sender.stop();});
 

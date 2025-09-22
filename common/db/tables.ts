@@ -45,7 +45,7 @@ export type TableDescription<T> = {
 export type Column<T, K extends keyof T> = {
     name: K,
     type: SqlType<any>,
-    value: (c: T) => T[K] | string, 
+    value: (c: T) => T[K] | string,
     parse: (s: string) => T[K],
     parameterName?: string, // optional, used to batch stored procedures
     inputName?: string,// optional, used to exec stored procedures
@@ -82,11 +82,11 @@ export const statTable: TableDescription<IdentityColumnT & { name: string, value
 
 type UserData = {id: number, name: string};
 export const usersTable: TableDescription<UserData & IdentityColumnT> = {
-    name: `${schema}.users`, 
+    name: `${schema}.users`,
     columns: {
         idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
-        id: makeCol("id", sqlTypes.bigInt), 
-        name: makeCol("name", sqlTypes.nvarchar) 
+        id: makeCol("id", sqlTypes.bigInt),
+        name: makeCol("name", sqlTypes.nvarchar)
     },
     permissions: [
         { role: sinkRole, permissions: ['SELECT', 'INSERT'] },
@@ -95,7 +95,7 @@ export const usersTable: TableDescription<UserData & IdentityColumnT> = {
 }
 
 export const transactionsTable: TableDescription<TransactionStored> = {
-    name: `${schema}.transactions`, 
+    name: `${schema}.transactions`,
     columns: {
         idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         id: makeCol("id", sqlTypes.bigInt, 'UNIQUE', (c) => c.id.toString(), (s) => Number.parseInt(s)),
@@ -129,14 +129,14 @@ transactionsTable.nonClusteredIndexes = [
     }
 ]
 export const transactionResultsTable: TableDescription<TransactionResultStored> ={
-    name: `${schema}.transaction_results`, 
+    name: `${schema}.transaction_results`,
     columns: {
         idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         id: makeCol('id', transactionsTable.columns.id.type, 'UNIQUE', (c) => c.id.toString(), (s) => Number.parseInt(s)),
         dateTime: makeCol('dateTime', sqlTypes.dateTime, 'NOT NULL', (c) => new Date(c.dateTime).toISOString(), parse => new Date(parse).getTime()),
         state: makeCol('state', sqlTypes.tinyint, 'NOT NULL'),
         metadata: makeCol('metadata', sqlTypes.nvarcharBig)
-    },    
+    },
     permissions: [
         { role: sinkRole, permissions: ['SELECT', 'INSERT'] },
         { role: statementCreatorRole, permissions: ['SELECT'] }
@@ -167,7 +167,7 @@ function makeDumpTable<T extends TransactionStored | TransactionResultStored>(ta
 export const transactionsDumpTable = makeDumpTable(transactionsTable);
 export const transactionResultsDumpTable = makeDumpTable(transactionResultsTable);
 export const kafkaOffsetTable: TableDescription<Offset> = {
-    name: `${schema}.kafka_offsets`, 
+    name: `${schema}.kafka_offsets`,
     columns: {
         groupId: makeCol('groupId', sqlTypes.nvarcharSmall, 'NOT NULL'),
         topic: makeCol('topic', sqlTypes.nvarchar, 'NOT NULL'),
@@ -182,7 +182,7 @@ kafkaOffsetTable.primaryKey = [kafkaOffsetTable.columns.groupId.name, kafkaOffse
 
 type RawData = IdentityColumnT & { data: ""};
 export const rawDataTable: TableDescription<RawData> = {
-    name: `${schema}.raw_data`, 
+    name: `${schema}.raw_data`,
     columns: {
         idx: makeCol("idx", IdentityColumn.idx.type, IdentityColumn.idx.extra),
         data: makeCol('data', sqlTypes.nvarcharBig, 'NOT NULL')

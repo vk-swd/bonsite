@@ -239,7 +239,7 @@ describe('Sanity check', function () {
             });
             return messages;
         }
-        const progressRead = new ProgressPrinter(p.length, (pc) => `files written 100%, files read ${pc}%`); 
+        const progressRead = new ProgressPrinter(p.length, (pc) => `files written 100%, files read ${pc}%`);
         for (let i = 0; i < files.length; i++) {
             const fileName = SHARED_DIR + "/" + files[i];
             const messages = await getMessages(fileName);
@@ -259,7 +259,7 @@ describe('Sanity check', function () {
             const dateRange = maxDate - minDate;
             const itemCount = c[1].transactionCount;
             if (itemCount == 0) {
-                return { userId: c[0], fromm: new Date(MIN_DATE).getTime(), 
+                return { userId: c[0], fromm: new Date(MIN_DATE).getTime(),
                     too: new Date(MAX_DATE).getTime(), type: StatementType.FS};
             }
             const minDateToGen = Math.floor(minDate - dateRange / itemCount);
@@ -275,7 +275,7 @@ describe('Sanity check', function () {
     const readStats = async () => {
         const userCounterMap = new UserCounters();
         let streamedLines = 0;
-        let progressRead: ProgressPrinter | undefined = undefined; 
+        let progressRead: ProgressPrinter | undefined = undefined;
         await db_connection?.streamTable(transactionsTable.name, (row, count) => {
             const res = parseQueryRes(row, transactionsTable.columns);
             const meta = MetadataValidator.parse(JSON.parse(res.metadata));
@@ -368,10 +368,10 @@ describe('Sanity check', function () {
             { id: 4000000000, name: 'User400000' },
             { id: 5000000000, name: 'User500000' }
         ]
-        await runQuery(db_connection!.pool, `insert into ${usersTable.name} values 
+        await runQuery(db_connection!.pool, `insert into ${usersTable.name} values
             ${usersToInsert.map(u => `(${u.id}, '${u.name}')`).join(',')}
         `);
-        // const res1 = await runQuery(db_connection!.pool, `select * from ${usersTable.name} 
+        // const res1 = await runQuery(db_connection!.pool, `select * from ${usersTable.name}
         //     where ${usersTable.columns.name.name} like '%'`);
         // console.log(`Users in DB: ${JSON.stringify(res1)}`);
         const res = await db_connection!.getUsers({ pattern: '%', count: 4 })

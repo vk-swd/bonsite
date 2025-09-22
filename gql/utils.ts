@@ -3,7 +3,7 @@
 
 
 // function setVal<T>(someMap: Map<string, T>, key: string) {
-    
+   
 // }
 
 
@@ -77,23 +77,23 @@
 // }
 
 // /* Cases to test:
-//     1) 
+//     1)
 //         * add topic with 3 partitions
 //         * make 3 users writing to all of them
 //         * make 1 user consuming from all of them
-//         *   take note of how he chooses partitions 
+//         *   take note of how he chooses partitions
 //         *       check order
-//         *       check that one partition is cleared before another is read    
+//         *       check that one partition is cleared before another is read   
 //         * make 2 users consuming from all of them
 //         *   take note of the order.
-//         * 
-//     2)  
-//         * U1 ocnsumes P1, 
-//         * U2 consumes P2, 
-//         * U2 seeks to the start of P1, 
-//         * U1 consumes P1 
+//         *
+//     2) 
+//         * U1 ocnsumes P1,
+//         * U2 consumes P2,
+//         * U2 seeks to the start of P1,
+//         * U1 consumes P1
 //         * see if the P offset is for the whole group.
-     
+    
 
 // */
 // // process.stdin.on("data", (data: string) => {

@@ -23,7 +23,7 @@ const DB_USER = getEnv("MSSQL_CONSUMER_USERNAME");
 
 /**
  * Parses messages from Kafka and validates them against the provided Zod schema.
- * There are two types of messages: Transaction and TransactionResult, 
+ * There are two types of messages: Transaction and TransactionResult,
  *  both have Zod schemas defined in common/event_types.ts.
  * @param msgs - Array of Kafka messages to parse.
  * @param validator - Zod schema to validate the parsed messages.
@@ -36,30 +36,30 @@ function parseMsgs<T>(msgs: string[], validator: ZodSchema<T>): T[] {
 
 /**
  * One of callbacks provided on consumer subscription.
- * 
- * Its purpose is to 
+ *
+ * Its purpose is to
  *  1) Gather topic partition numbers assigned during Kafka rebalancing
  *  2) Request last saved offsets in the database
  *  3) Return offsets information.
  * Partitions can be assigned manually with custom assigner,
  * but this approach is less centralized and potentially unreliable.
  * It is not used in this demo.
- * 
+ *
  * Normally Kafka controller manages offsets himself, but in this demo
  * offsets are stored in the same database the consumer writes to for faster writes.
- * 
+ *
  * If no offset is provided, it will start from the beginning.
- * It might cause overconsumption if the offsets failed 
+ * It might cause overconsumption if the offsets failed
  * to be read and the message log is very long.
  * This can be fixed if offsets are commited to kafka occasionally,
  * but this is not going to be implemented in the demo.
  * Especially because this is an unlikely scenario in a controlled setup like this.
- * 
- * @param partitions - Array of KConsumerOffsetInfo objects received after 
+ *
+ * @param partitions - Array of KConsumerOffsetInfo objects received after
  * rebalancing, for which offsets should be provided.
  * @returns Updated "partitions" argument with offsets.
- * 
- * @exceptions This function is provided as a callback, so there is no way to 
+ *
+ * @exceptions This function is provided as a callback, so there is no way to
  * explicitly handle exceptions generated from here. Yet this application
  * is expected to close and restart when any database connectivity errors occur.
  * "getOffsets" might also throw for other reasons, like database schema mismatch,
@@ -80,8 +80,8 @@ export async function getOffsetsWhenPartitionsAssigned(
  * The callback function a Kafka consumer uses to process each batch of messages.
  * Used by {@link runConsumption}.
  * @param pl - EachBatchPayload object received from Kafka consumer.
- * @returns 
- * 
+ * @returns
+ *
  *  if the srevice is unable to write data to the database, then
  * it will log the error and crash the service.
  */
@@ -105,7 +105,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         logger.error(`Failed to parse ${batchInfo()}: ${e}`);
     }
     const sendAsRaw = async () => {
-        // Not handling sendAsRaw exceptions, because raw table is a critical 
+        // Not handling sendAsRaw exceptions, because raw table is a critical
         // fallback storage and failure to write to it means something is very wrong
         try {
             await db_connection.writeRawMessages(messages,
@@ -147,7 +147,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
 }
 
 /** Starts consuming messages from Kafka and processing them.
-    The whole consumption is implemented as 
+    The whole consumption is implemented as
         1) connect to sql
         2) connect to kafka
         3) get partition offsets @see getOffsetsWhenPartitionsAssigned
@@ -160,7 +160,7 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         3) Wrong messages arrive - save them for later in raw text and notify -
                                     don't block other message/partition processing
         4) Can't write to database - means even raw data write failed,
-                                    most likely a critical schema mismatch, 
+                                    most likely a critical schema mismatch,
                                     the service or the database must be redeployed.
     When processing critical information, like financial transactions, handling data inconsistencies
     automatically may cause data loss or corruption, hence raw data is saved for later inspection.
@@ -198,9 +198,8 @@ export class Sink {
         });
         return new Sink(db_connection, consumer, healthServer);
     }
-    private constructor(public db_connection: UserConnection, 
+    private constructor(public db_connection: UserConnection,
         public consumer: kf.Consumer,
         public healthcheckServer: HealthCheckSever) {}
 }
 
-    

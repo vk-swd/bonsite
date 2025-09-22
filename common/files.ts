@@ -32,7 +32,7 @@ export async function processLineByLine(fileName: string, processor: (line: stri
             if ((done && lineQueue.length == 0) || failed) {
                 return;
             }
-            setTimer(); 
+            setTimer();
         }, 10000);
     }
     const processedQueued = () => {

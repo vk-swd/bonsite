@@ -208,14 +208,14 @@ export class BundleHandler<O> {
             this.db_connection!.streamTransactions(tasks.map(t => t.param), async (user: number, reqId: number, line: InKafkaMessage) => {
                 /* reqId - index for "tasks" bundle / identifier for the statement request parameters
                     Transactions are expected to come in the order of request parameters:
-                    [reqId1, user1, from1, to1], [reqId2, user2, from2, to2] .... => 
+                    [reqId1, user1, from1, to1], [reqId2, user2, from2, to2] .... =>
                     [t11, t12,..., t1n], [t21, t22,..., t2m] ....
                     All transactions in 1 bundle carry the "reqId" = 1, and in another - "reqId" = 2, etc...
                 */
-                if (reqId >= tasks.length || tasks[reqId].user !== user 
+                if (reqId >= tasks.length || tasks[reqId].user !== user
                     || ((lastReqId !== undefined) && (reqId < lastReqId))) {
                     throw `Unexpected output in a transactions request.
-                    reqId: ${reqId}, user: ${user}, 
+                    reqId: ${reqId}, user: ${user},
                     lastReqId ${lastReqId}, ${lastReqId ? `last user ${tasks[lastReqId].user}` : ``}
                     Ignoring ${tasks.length} tasks from ${tasks[0].user} to ${last(tasks)?.user}.`
                 }

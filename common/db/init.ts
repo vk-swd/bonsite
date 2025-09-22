@@ -1,6 +1,6 @@
 import { roles, sinkRole, statementCreatorRole } from "./auth.js";
 import { database, runQuery } from "./common.js";
-import { addKafkaOffsetProcedure, getUsersProc, getUsersTopProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
+import { addKafkaOffsetProcedure, getDBStatProc, getUsersProc, getUsersTopProc, procGetTransactions, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./procedures.js";
 import { Column, kafkaOffsetTable, rawDataTable, schema, statTable, transactionResultsDumpTable, transactionResultsTable, transactionsDumpTable, transactionsTable, usersTable } from "./tables.js";
 import sql from 'mssql'
 
@@ -13,7 +13,7 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
     try {
         await runQuery(pool, `IF DB_ID('${databaseA}') IS not NULL
                 drop database [${databaseA}];
-        `)       
+        `)
         await runQuery(pool, `create database [${databaseA}]`)
         await runQuery(pool, `use ${databaseA};`)
         await runQuery(pool, `create schema [${schema}]`)
@@ -37,8 +37,8 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
             `)
             if (table.nonClusteredIndexes) {
                 for (const index of table.nonClusteredIndexes) {
-                    await runQuery(pool, `CREATE NONCLUSTERED INDEX ${index.name} 
-                        ON ${table.name} (${index.columns.join(', ')}) 
+                    await runQuery(pool, `CREATE NONCLUSTERED INDEX ${index.name}
+                        ON ${table.name} (${index.columns.join(', ')})
                         ${index.include ? `INCLUDE (${index.include.join(', ')})` : ''};`);
                 }
             }
@@ -46,14 +46,14 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
                 await runQuery(pool, `GRANT ${p.permissions.join(', ')} ON ${table.name} TO ${p.role};`);
             }
         }
-  
-        const statGenProcs = [procGetTransactions, getUsersProc, getUsersTopProc];
+
+        const statGenProcs = [procGetTransactions, getUsersProc, getUsersTopProc, getDBStatProc];
         for (const proc of statGenProcs) {
                 await runQuery(pool, proc.getProcedureQuery());
                 await runQuery(pool, `GRANT EXECUTE ON ${proc.procName} TO ${statementCreatorRole};`);
         }
 
-        const messageSynkProcs = [ addKafkaOffsetProcedure, 
+        const messageSynkProcs = [ addKafkaOffsetProcedure,
                         setUpTempTransactionResultsTable.getInsertionProcedure(),
                         setUpTempTransactionResultsTable.getCommitProcedure(),
                         setUpTempTransactionsTable.getCommitProcedure(),

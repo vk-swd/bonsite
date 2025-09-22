@@ -8,7 +8,7 @@ export type MetricStats = {
     incrementFailedApiCallCount: () => void,
     incrementUnknownApiCallCount: () => void
 }
-export function handleRequest<T>(url: string, req: IncomingMessage, res: ServerResponse, 
+export function handleRequest<T>(url: string, req: IncomingMessage, res: ServerResponse,
     process: (data?: string) => Promise<T>, metrics: MetricStats): boolean {
     if (url != req.url) {
         return false;

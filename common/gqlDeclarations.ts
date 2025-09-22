@@ -46,7 +46,7 @@ export function parseReturnNames<T>(name: string, o: ZodType<T>): string {
     let lineSecond = "";
     if (o.type == "object") {
         const shape = (o as ZodObject).shape
-        lineSecond = `{ ${ Object.entries(shape).map(([key, value]) => 
+        lineSecond = `{ ${ Object.entries(shape).map(([key, value]) =>
             parseReturnNames(key, value)).join(" ")} }`;
     } else if (o.type == "array") {
         lineSecond = parseReturnNames("", (o as any).element)
@@ -56,7 +56,7 @@ export function parseReturnNames<T>(name: string, o: ZodType<T>): string {
 
 export function getTypeDeclaration<T extends z.ZodRawShape>(val: z.ZodObject<T>): string {
     const shape = val.shape;
-    return `${val.meta()?.description} {\n${Object.entries(shape).map(([key, value]) => 
+    return `${val.meta()?.description} {\n${Object.entries(shape).map(([key, value]) =>
         `${key}: ${getTypeName(value as z.ZodTypeAny)}`).join("\n")}\n}`;
 }
 export function getTypeName(val: z.ZodTypeAny): string {
@@ -81,8 +81,8 @@ class GqlFunction1<T, K> {
     //Coerced types force convert strings into numbers where numbers are expected
     coercedReturnType: ZodType<T>;
     coercedParamType?: ZodType<K>;
-    constructor(public name: string, 
-        public returnType: ZodType<T>, 
+    constructor(public name: string,
+        public returnType: ZodType<T>,
         public paramType?: ZodType<K>) {
         this.coercedReturnType = createStrToIntCoercedGqlSchema(returnType) as ZodType<T>;
         let paramString = "";
@@ -124,8 +124,8 @@ class GqlFunction1<T, K> {
             return value;
         });
         try {
-            const rewRes = await fetch(url, { method: "POST", 
-                headers: { 'Content-Type': 'application/json' }, 
+            const rewRes = await fetch(url, { method: "POST",
+                headers: { 'Content-Type': 'application/json' },
                 body })
             .catch(e => { throw new Error(`Error in fetch: ${e}`); });
             if (!rewRes.ok) {

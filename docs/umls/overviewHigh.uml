@@ -23,7 +23,7 @@ W -> C: start(generation parameters)
 C -> K: Transaction
 C -> K: Transaction result (delayed)
 
-group "Scrape data" 
+group "Scrape data"
 SS -> K: scrape at intervals
 K -> SS: transactions \nresults
 SS -> DB: write

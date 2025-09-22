@@ -61,7 +61,7 @@ function textInput<T>(lab: string, val: T, updateVal: (v: T) => void,  type: 'te
   />
 }
 function makeButton<T>(lab: string|(() => string), toggler: () => boolean, onClick: () => void) {
-  return <Button variant="contained" 
+  return <Button variant="contained"
   disabled={toggler()}
   onClick={onClick}>
     {lab instanceof Function ? lab() : lab}
@@ -109,7 +109,7 @@ export default function App() {
       setPostButtonState(false);
     });
   }
-  
+
   //------ Generate Transactions----------------
   const [genParams, setGenParams] = useState(() => {
     const now = new Date();
@@ -176,10 +176,10 @@ export default function App() {
         setStartGenTxt(`Progress: ${JSON.stringify(lastProgressReport)}. Elapsed: ${now - startTime}.`);
       }
     } catch (err) {
-      // TODO: maybe it is worth sending progress requests non-stop 
+      // TODO: maybe it is worth sending progress requests non-stop
       // and show the real time generation state even when no generation is running
       setStartGenButtonState(StartGenButtonStates.NothingHappens);
-      setStartGenTxt(`Error during generation. 
+      setStartGenTxt(`Error during generation.
         Last progress report: ${JSON.stringify(lastProgressReport)}.
         Error: ${err}.`);
     }
@@ -190,7 +190,7 @@ export default function App() {
   const [output, setOutput] = useState<string>("");
   function renderMenuButton(label: string, show: () => boolean, refreshOptions: () => void) {
     if (!show()) {
-      return <div></div> 
+      return <div></div>
     } else {
       return <div
           style={{
@@ -213,8 +213,8 @@ export default function App() {
       }
     }
 
-    const userPatternDebounceState = useRef<{timer?: NodeJS.Timeout, lastValue: string, 
-      isLookingUp: boolean, 
+    const userPatternDebounceState = useRef<{timer?: NodeJS.Timeout, lastValue: string,
+      isLookingUp: boolean,
       scheduled?: UserDataRequestParameters
       menuItems?: {top: number, bot: number}}>({lastValue: "", isLookingUp: false, scheduled: {
         pattern: "", count: 100
@@ -229,7 +229,7 @@ export default function App() {
     const [optionsUserNames, setFoundUserData] = useState<UserOption[]>([]);
     const [isLockedForUserRetrieval, lockUserRetrieval] = useState(false);
     const globalIdx = useRef<number>(0);
-    const defUseStat = useRef<() => string>(() => { 
+    const defUseStat = useRef<() => string>(() => {
       logger.error("Creating new last Input!", globalIdx.current++);
       return "";});
     const [lastInput, setLastInput] = useState(defUseStat.current());
@@ -241,8 +241,8 @@ export default function App() {
 
 
     async function handleInputChange(newValue: string, actionMeta: InputActionMeta) {
-      if ( actionMeta.action === 'input-blur' 
-        || actionMeta.action === 'menu-close' 
+      if ( actionMeta.action === 'input-blur'
+        || actionMeta.action === 'menu-close'
         || actionMeta.action === 'set-value'
         || newValue == actionMeta.prevInputValue) {
         return;
@@ -262,7 +262,7 @@ export default function App() {
       }, DEBOUNCE_INTERVAL_MS);
     }
     async function requestUserList() {
-      if (userPatternDebounceState.current.isLookingUp || 
+      if (userPatternDebounceState.current.isLookingUp ||
         userPatternDebounceState.current.scheduled === undefined) {
         return;
       }
@@ -274,7 +274,7 @@ export default function App() {
           userPatternDebounceState.current.scheduled = undefined;
           params.pattern = "%" + params.pattern + "%";
           const res = await gqlp.users.fetchCall(GQL_URL, params);
-          setFoundUserData(res.slice.map(u => ({value: `${u.name} (id: ${u.id})`, label: `${u.name} (${u.id})`, cursor: u.cursor})));
+          setFoundUserData(res.slice.map(u => ({value: `${u.name} (id: ${u.id})`, id: u.id, label: `${u.name} (${u.id})`, cursor: u.cursor})));
         }
       } catch (err) {
         setOutput(JSON.stringify(err));
@@ -350,7 +350,7 @@ export default function App() {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
-            {dateTimeInput("Date", postTransactionParams.date, (v) => 
+            {dateTimeInput("Date", postTransactionParams.date, (v) =>
               setPostTransactionParams({ ...postTransactionParams, date: v })
             )}
           </Grid>
@@ -397,7 +397,7 @@ export default function App() {
             {textInput("Transaction Result Delay Ms.",  genParams.maxDelayMs, (v) => setGenParams({ ...genParams, maxDelayMs: v }), "number")}
           </Grid>
           <Grid item xs={12} spacing={2}>
-            {makeButton(() => startGenButtonStates.get(startGenButtonState)!.buttonLabel, 
+            {makeButton(() => startGenButtonStates.get(startGenButtonState)!.buttonLabel,
             () => startGenButtonStates.get(startGenButtonState)!.buttonDisabled, startGeneration)}
             {label(() => startGenTxt)}
           </Grid>
@@ -411,7 +411,7 @@ export default function App() {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={4}>
-            <Select 
+            <Select
               value={selected}
               inputValue={lastInput}
               placeholder="Select User"
@@ -421,20 +421,20 @@ export default function App() {
               onInputChange={handleInputChange}
               closeMenuOnSelect={false}
               onChange={(newValue, actionMeta) => {
-                // Using isMulti={true} and taking only last item is a hack to keep 
-                // the input text in the input field after the menu is closed in any way.
-                // Doing it with single selection hides the selected value on the second
-                // manual menu close
-                // Reproduction with isMulti={false}: 
-                // 1) Type some input
-                // 2) Select item with input text still there
-                // 3) close-open-close the menu with mouse click
-                // Now any text is gone amd only "x" mark remains.
-                if (newValue.length === 0) {
-                  setSelected(null);
-                  return;
-                }
-                setSelected([last(newValue as UserOption[])!]);
+                  // Using isMulti={true} and taking only last item is a hack to keep
+                  // the input text in the input field after the menu is closed in any way.
+                  // Doing it with single selection hides the selected value on the second
+                  // manual menu close
+                  // Reproduction with isMulti={false}:
+                  // 1) Type some input
+                  // 2) Select item with input text still there
+                  // 3) close-open-close the menu with mouse click
+                  // Now any text is gone amd only "x" mark remains.
+                  if (newValue.length === 0) {
+                    setSelected(null);
+                    return;
+                  }
+                  setSelected([last(newValue as UserOption[])!]);
               }}
               styles={{control: (base: any) => ({
                 ...base,

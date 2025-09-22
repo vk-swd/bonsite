@@ -156,7 +156,7 @@ export class RangeSet {
         if (prev.end + 1 !== num && next.start - 1 !== num) {
             this.ranges.splice(left, 0, { start: num, end: num });
             return;
-        } 
+        }
         if (prev.end + 1 === num) {
             // Extend previous range
             prev.end = num;
@@ -221,7 +221,7 @@ export class UserIdPattern {
     ypos = 0
     horizontal = true;
     remained: number;
-    get from(): number { 
+    get from(): number {
         return this.xpos;
     }
     get to(): number {

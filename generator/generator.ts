@@ -171,9 +171,9 @@ export class Generator {
             const transactionTime =  Math.floor(this.startTime + i * this.timeIncrement);
             // Can make internal transfers too (same id to and from)
             const amount = 1 + Math.floor(Math.random() * 1000);
-            const [tEvent, rEvent] = this.getTransaction(this.getnUserId(), this.getnUserId(), 
-                amount, transactionTime, 
-                this.delayGenerator.delay(transactionTime), 
+            const [tEvent, rEvent] = this.getTransaction(this.getnUserId(), this.getnUserId(),
+                amount, transactionTime,
+                this.delayGenerator.delay(transactionTime),
                 TResult.CONFIRMED);
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTIONS, event: tEvent });
             this.queue.enqueEvent({ topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: rEvent });

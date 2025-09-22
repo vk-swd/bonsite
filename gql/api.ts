@@ -28,7 +28,7 @@ export class GqlServer {
         });
         return deferred.promise;
     }
-    private constructor(public app: express.Express) { 
+    private constructor(public app: express.Express) {
     }
 }
 

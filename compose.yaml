@@ -26,7 +26,7 @@ x-healthcheck-params: &healthcheck_params
   retries: 3
   start_period: 40s
   start_interval: 1s
-  
+
 
 # Environment variables are read from .env file automatically
 services:
@@ -40,7 +40,7 @@ services:
         RUN apt update; apt install -y procps net-tools iputils-ping curl wget apache2-utils; npm install; rm package*.json
     image: my-backend
   frontend_builder:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_app
       environment:
@@ -77,14 +77,14 @@ services:
     #     condition: service_completed_successfully
     #   gql:
     #     condition: service_healthy
-    networks: 
+    networks:
       - backend_net
-  
+
   gql:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_monitored_app
-      volumes: 
+      volumes:
         - ./${GRAPH_QL_APP_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
@@ -102,17 +102,17 @@ services:
         generator:
           condition: service_healthy
         statement_generator:
-          condition: service_healthy        
+          condition: service_healthy
 
   generator:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_kafka_app
       volumes:
         - ./${GENERATOR_NAME}:${SOURCEDIR}
         - shared_dir:${SHARED_DIR}
         - ./${COMMON_DIR_NAME}/apiRequestHandler.ts:${WORKDIR}/${COMMON_DIR_NAME}/apiRequestHandler.ts
-      
+
       hostname: "${GENERATOR_NAME}"
       environment:
         - GENERATOR_PORT=${GENERATOR_PORT}
@@ -140,7 +140,7 @@ services:
     command: ['${SOURCEDIR}/generateConfig.sh > /etc/prometheus/prometheus.yml;
               prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus;
               exec sh']
-    networks: 
+    networks:
       - backend_net
 
   graphana:
@@ -158,17 +158,17 @@ services:
       - GRAPHANA_DASHBOARD_FOLDER=${GRAPHANA_DASHBOARD_FOLDER}
     ports:
       - "127.0.0.1:${GRAPHANA_PORT_HOST}:3000"
-    networks: 
+    networks:
       - backend_net
-  
+
   kafka1:
-    extends: 
+    extends:
       file: base_services.yaml
       service: kafka-app
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
-    hostname: "${KAFKA_HOST}"      
+    hostname: "${KAFKA_HOST}"
 
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -184,15 +184,15 @@ services:
     hostname: "${MSSQL_HOSTNAME}"
     mem_limit: 5g
     memswap_limit: 0m
-    networks: 
+    networks:
         - backend_net
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd  -S localhost -U ${MSSQL_CONSUMER_USERNAME} -P ${MSSQL_PASSWORD} -C -Q exit"]
       <<: [*healthcheck_params]
-      
+
 
   db_initializer:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_app
       volumes:
@@ -209,7 +209,7 @@ services:
           condition: service_started
 
   message_sink:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_kafka_app
       hostname: "${MESSAGE_SINK_NAME}"
@@ -227,7 +227,7 @@ services:
           condition: service_healthy
 
   statement_generator:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_monitored_app
       volumes:
@@ -261,7 +261,7 @@ services:
         condition: service_started
 
   tester:
-      extends: 
+      extends:
         file: base_services.yaml
         service: node_app
       volumes:

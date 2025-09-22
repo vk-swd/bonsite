@@ -74,7 +74,7 @@ async function sendTransactions(tBatch: Batch, msg: string) {
     const ignored = (await db_connection!.getRawData(expectedIgnored.length, RawTables.transactions))
     const parsed = ignored.map(i => TransactionValidator.parse(parseQueryRes(i, transactionsTable.columns)));
     compareObjecs(parsed, expectedIgnored, msg);
-        
+
     await testOffsets(topic_transactions, last(tBatch)!.o, db_connection!);
 }
 async function sendTResults(resBatch: Batch, msg: string) {
@@ -89,7 +89,7 @@ async function sendTResults(resBatch: Batch, msg: string) {
 async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
     const expectedReturned = getReturnedTransactions(tBatch, resBatches, user);
     const ts: Transaction[] = [];
-    await db_connection!.getTransactions([{ userId: user, type: StatementType.FS }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
+    await db_connection!.streamTransactions([{ userId: user, type: StatementType.FS }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
         ts.push(TransactionValidator.parse(transaction.payload));
     })
     compareObjecs(ts, expectedReturned, msg);
@@ -110,7 +110,7 @@ describe('Kafka Consumer Tests', function () {
     this.beforeEach(async () => {
         await createSchema(db_connection!.pool, "TestDB");
     });
-    
+
     it(`Test normal case`, async () => {
         let tIdx = 1;
         let rIdx = 1;
@@ -133,7 +133,7 @@ describe('Kafka Consumer Tests', function () {
             ]
         ].map(b => b.map(t => {
             // Dud metadata records as completeness is not tested
-            return { dstTable: t.dstTable, 
+            return { dstTable: t.dstTable,
                 t: { metadata: {}, payload: t.t } as InKafkaMessage,
                 o: t.o };
         }));
@@ -182,7 +182,7 @@ describe('Kafka Consumer Tests', function () {
             ]
         ].map(b => b.map(t => {
             // Dud metadata records as completeness is not tested
-            return { dstTable: t.dstTable, 
+            return { dstTable: t.dstTable,
                 t: { metadata: {}, payload: t.t } as InKafkaMessage,
                 o: t.o };
         }));
