@@ -215,10 +215,11 @@ export class UserConnection {
             logger.error(`Caught Error in streamTransactions for`, p, `:`, err);
         });
         request.on('row', async (row: any) => {
-            const parsed = parseQueryRes(row, transactionsTable.columns);
-            const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;            
+            const {pidx, pid, ...rest} = row;
+            const {metadata, idx, ...parsed} = parseQueryRes(rest, transactionsTable.columns);
+            const res = { payload: parsed, metadata: MetadataValidator.parse(JSON.parse(row.metadata)) } as InKafkaMessage;
             inFlight++;
-            processor(Number.parseInt(row.pid),Number.parseInt(row.pidx), res)
+            processor(Number.parseInt(pid),Number.parseInt(pidx), res)
             .catch(e => {
                 request.cancel();
                 deferred.reject(`Error processing transaction for user ${row.pid} : ${e}`);
@@ -264,8 +265,31 @@ export class UserConnection {
         request.on('row', (row : any) => processor(row, count))
         await request.query(`SELECT * FROM ${name}`);
     }
-    close(): Promise<void> {
-        return this.pool.close();
+    async getDBState(): Promise<ServerState> {
+        const request = this.pool.request();
+        let res
+        try {
+            res = await request.execute(getDBStatProc.procName);
+        } catch (e) {
+            throw new Error(`getDBState failed: ${e}`);
+        }
+        if (!(res.recordsets instanceof Array) || res.recordsets.length < 3) {
+            throw new Error(`getDBState returned invalid result: ${JSON.stringify(res.recordsets)}`);
+        }
+        try {
+            const resFinal = ServerStateValidator.parse(res.recordsets[0][0]); // validate other fields
+            if (res.recordsets[1].length > 0) {
+                const lastTransactionPosted = TransactionValidator.parse(parseQueryRes(res.recordsets[1][0], transactionsTable.columns));
+                resFinal.lastTransactionPosted = JSON.stringify(lastTransactionPosted);
+            }
+            if (res.recordsets[2].length > 0) {
+                const lastTransactionResPosted = TransactionResultValidator.parse(parseQueryRes(res.recordsets[2][0], transactionResultsTable.columns));
+                resFinal.lastTransactionRes = JSON.stringify(lastTransactionResPosted);
+            }
+            return resFinal;
+        } catch (e) {
+            throw new Error(`getDBState failed to parse results: ${e}`);
+        }
     }
 }
 

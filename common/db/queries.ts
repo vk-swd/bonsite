@@ -1,5 +1,5 @@
-import { UsersRequestC } from "./procedures.js";
-import { Column, usersTable } from "./tables.js";
+import { DBStateC, UsersRequestC } from "./procedures.js";
+import { Column, transactionResultsTable, transactionsTable, usersTable } from "./tables.js";
 
 
 
@@ -57,4 +57,24 @@ export function getUserProcedureQuery(name: string) {
         order by ${usersTable.columns.idx.name}
         ${matchedUserCountQuery()};
     `);
+}
+
+export function getDBState(name: string) {
+    const getRowCOunt = (tableName: string, colName: string) => `
+        declare @${colName} Int
+        select @${colName} = (select count(*) from  ${tableName} u)`;
+    return procedureQuery(name, [], `
+        ${getRowCOunt(usersTable.name, DBStateC.userCount.name)}
+        ${getRowCOunt(transactionsTable.name, DBStateC.transactionCount.name)}
+        select
+        @${DBStateC.userCount.name} as ${DBStateC.userCount.name},
+        @${DBStateC.transactionCount.name} as ${DBStateC.transactionCount.name},
+        @@CPU_BUSY as ${DBStateC.cpuBisy.name},
+        @@TOTAL_READ as ${DBStateC.totalRead.name},
+        @@TOTAL_WRITE as ${DBStateC.totalWrite.name},
+        @@TOTAL_ERRORS as ${DBStateC.totalErrors.name};
+        select top 1 * from ${transactionsTable.name} t order by idx desc
+        select top 1 * from ${transactionResultsTable.name} t order by idx desc
+    `);
+
 }

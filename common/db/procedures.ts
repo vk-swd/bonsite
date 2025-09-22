@@ -29,6 +29,18 @@ export const UsersRequestC: Columns<UserDataRequestParameters> = {
 export const getUsersProc = makeProc(`${schema}.getUsers`, UsersRequestC, getUserProcedureQuery);
 export const getUsersTopProc = makeProc(`${schema}.getTopUsers`, UsersRequestC, getTopUsersProcedureQuery);
 
+export const DBStateC: Columns<Omit<ServerState, "lastTransactionPosted">> = {
+    transactionCount: makeCol("transactionCount", sqlTypes.bigInt),
+    userCount: makeCol("userCount", sqlTypes.bigInt),
+    cpuBisy: makeCol("cpuBisy", sqlTypes.bigInt),
+    totalRead: makeCol("totalRead", sqlTypes.bigInt),
+    totalWrite: makeCol("totalWrite", sqlTypes.bigInt),
+    totalErrors: makeCol("totalErrors", sqlTypes.bigInt)
+}
+export const getDBStatProc = makeProc(`${schema}.getDBStat`, DBStateC, getDBState);
+
+
+
 export type CommitResults = { duds: number; newCount: number };
 export const CommitResultsC: Columns<CommitResults> = {
     duds: makeCol("duds", sqlTypes.int),

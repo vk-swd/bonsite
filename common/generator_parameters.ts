@@ -12,6 +12,7 @@ export const GenParametersValidator = z.object({
 export type GenParameters = z.infer<typeof GenParametersValidator>;
 
 export const PostTransactionValidator = z.object({
+    id: z.number().optional(),
     userFrom: z.number(),
     userTo: z.number(),
     amount: z.number(),

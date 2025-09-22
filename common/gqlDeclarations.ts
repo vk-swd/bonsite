@@ -1,5 +1,5 @@
 import z, { util, ZodObject, ZodRawShape, ZodType } from "zod";
-import { StatementParametersValidator, UserDataRequestValidator, UserDataResultValidator } from "./event_types.js";
+import { ServerStateValidator, StatementParametersValidator, StatementRequestResultValidator, UserDataRequestValidator, UserDataResultValidator } from "./event_types.js";
 import { GenParametersValidator, PostTransactionValidator, ProgressReportValidator } from "./generator_parameters.js";
 import { logger } from "./logger.js";
 
@@ -145,9 +145,11 @@ class GqlFunction1<T, K> {
 
 export const postTransaction = new GqlFunction1("postTransaction", z.string(), PostTransactionValidator);
 export const startGen = new GqlFunction1("startGen", z.string(), GenParametersValidator);
-export const getStatement = new GqlFunction1("getStatement", z.string(), StatementParametersValidator);
 export const getProgress = new GqlFunction1("getProgress", ProgressReportValidator);
 export const getGeneratorStats = new GqlFunction1("getGeneratorStats", z.string());
 export const stopGen = new GqlFunction1("stopGen", z.string());
 export const hello = new GqlFunction1("hello", z.string())
 export const users = new GqlFunction1("users", UserDataResultValidator, UserDataRequestValidator);
+
+export const getDatabaseStats = new GqlFunction1("getDatabaseStats", ServerStateValidator);
+export const getStatement = new GqlFunction1("getStatement", StatementRequestResultValidator, StatementParametersValidator);

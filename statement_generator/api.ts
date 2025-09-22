@@ -1,8 +1,7 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
 import { getEnv } from './common/utils.js';
-import { StatementParameters, StatementParametersValidator, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, reqStatementUrl, reqUsersUrl } from './common/event_types.js';
-import { rmSync } from 'fs';
+import { ServerState, StatementParameters, StatementParametersValidator, StatementRequestResult, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, reqStatementUrl, reqUsersUrl, serverStateUrl } from './common/event_types.js';
 import { metrics, updateMaxResponseDelayMs } from './monitoring_local.js';
 import { handleRequest, MetricStats } from './common/apiRequestHandler.js';
 // import * as mt from './monitoring_local.js'
@@ -26,28 +25,42 @@ export class StatementGenApiServer extends EventEmitter {
                 res.write(JSON.stringify(r));
                 res.end();
                 metrics?.apiSuccess.inc();
-            })            
+            })
         }, metricCB);
     }
-    handleStatementReq(req: IncomingMessage, res: ServerResponse, statementWriter: (p: StatementParameters) => Promise<string[]>) : boolean {
+    handleStatementReq(req: IncomingMessage, res: ServerResponse) : boolean {
         return handleRequest('/' + reqStatementUrl, req, res, async (data?: string) => {
-            return statementWriter(StatementParametersValidator.parse(JSON.parse(data!)))
+            return this.statementWriter(StatementParametersValidator.parse(JSON.parse(data!)))
             .then(r => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.write(JSON.stringify(r));
                 res.end();
                 metrics?.apiSuccess.inc();
-            })            
+            })
         }, metricCB);
     }
-    constructor(statementWriter: (p: StatementParameters) => Promise<string[]>, 
-    private getUsers: (params: UserDataRequestParameters) => Promise<UserDataResult>) {
+    handleGetServerState(req: IncomingMessage, res: ServerResponse) : boolean {
+        return handleRequest('/' + serverStateUrl, req, res, async () => {
+            return this.getDBState()
+            .then(r => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.write(JSON.stringify(r));
+                res.end();
+                metrics?.apiSuccess.inc();
+            })
+        }, metricCB);
+    }
+    constructor(
+        private statementWriter: (p: StatementParameters) => Promise<StatementRequestResult>,
+        private getUsers: (params: UserDataRequestParameters) => Promise<UserDataResult>,
+        private getDBState: () => Promise<ServerState>) {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.method} ${req.url}`)
             metrics?.apiCallCount.inc();
             if (this.handleUserReq(req, res)) return;
-            if (this.handleStatementReq(req, res, statementWriter)) return;
+            if (this.handleStatementReq(req, res)) return;
+            if (this.handleGetServerState(req, res)) return;
             res.writeHead(404);
             res.end('Not Found');
             metrics?.apiUnknown.inc();

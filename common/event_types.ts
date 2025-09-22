@@ -7,10 +7,7 @@ export const TransactionValidator = z.object({
     amount: z.number(),
     userIdFrom: z.number(),
     userIdTo: z.number(),
-    description: z.string().optional(),
-    merchantInfo: z.string().optional(),
-    location: z.string().optional()
-});
+}).register(z.globalRegistry, { description: "Transaction"});
 
 export type Transaction = z.infer<typeof TransactionValidator>;
 
@@ -74,11 +71,23 @@ export const UserDataResultValidator = z.object({
 }).register(z.globalRegistry, { description: "UserDataResult" });
 export type UserDataResult = z.infer<typeof UserDataResultValidator>;
 
-
+export const ServerStateValidator = z.object({
+    lastTransactionPosted: z.string().optional().nullable(),
+    lastTransactionRes: z.string().optional().nullable(),
+    transactionCount: z.number(),
+    userCount: z.number(),
+    cpuBisy: z.number(), //select @@CPU_BUSY
+    totalRead: z.number(), //select @@TOTAL_READ
+    totalWrite: z.number(), //select @@TOTAL_WRITE
+    totalErrors: z.number(), //select @@TOTAL_ERRORS
+}).register(z.globalRegistry, { description: "ServerState" });
+export type ServerState = z.infer<typeof ServerStateValidator>;
 
 export const reqStatementUrl = "statements"
 export const reqUsersUrl = "users"
-export const postTransactionsUrl = "postT"
+export const postTransactionsUrl = "post_transactions"
+export const serverStateUrl = "server_state"
+
 export const MIN_DATE = "1970-01-01T00:00:00.000Z";
 export const MAX_DATE = "9999-12-31T23:59:59.997Z";
 export enum StatementType {
@@ -94,3 +103,11 @@ export const StatementParametersValidator = z.object({
     count: z.number().optional()
 }).register(z.globalRegistry, { description: "StatementParameters" });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;
+
+export const StatementRequestResultValidator = z.object({
+    filePath: z.string().optional().nullable(),
+    transactions: TransactionValidator.array(),
+    offset: z.number(),
+    totalCount: z.number()
+}).register(z.globalRegistry, { description: "StatementRecords" });
+export type StatementRequestResult = z.infer<typeof StatementRequestResultValidator>;

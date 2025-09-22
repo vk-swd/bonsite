@@ -1,5 +1,5 @@
 import * as fsp from 'fs/promises';
-import { InKafkaMessage, StatementParameters, StatementType } from "./common/event_types.js";
+import { InKafkaMessage, StatementParameters, StatementRequestResult, StatementType, Transaction } from "./common/event_types.js";
 import { Deferred, getEnv } from './common/utils.js';
 import { UserConnection } from "./common/db/db_defines.js";
 import { Writer } from './writer.js';
@@ -47,8 +47,8 @@ export class BaseWorker<O> implements Worker<O> {
         return false;
     }
 }
-export class Serialiser extends BaseWorker<string[]> implements Worker<string[]> {
-    rresult: string[] = [];
+export class Serialiser extends BaseWorker<StatementRequestResult> implements Worker<StatementRequestResult> {
+    rresult: Transaction[] = [];
     finished = false;
     offsetCounter = 0;
     constructor(private params: StatementParameters) {
@@ -65,29 +65,31 @@ export class Serialiser extends BaseWorker<string[]> implements Worker<string[]>
         metrics?.servedStatementsCount.inc();
         metrics?.servedTransactionRecords.inc(this.rresult.length);
         updateMaxResponseDelayMs(Date.now() - this.creationTime);
-        this.deferred.resolve(this.rresult);
+        // TODO: total count inference is not yet implemented. Should be returned as extra recordset
+        this.deferred.resolve({filePath: "", totalCount: this.rresult.length,
+            offset: this.params.offset ?? 0, transactions: this.rresult});
         return Promise.resolve();
     }
     handle(t: InKafkaMessage): void {
         if (!this.params.count) {
-            this.rresult.push(JSON.stringify(t));
+            this.rresult.push(t.payload as Transaction);
             return;
         }
         if (this.rresult.length >= this.params.count) {
             return;
         }
         if (!this.params.offset) {
-            this.rresult.push(JSON.stringify(t));
+            this.rresult.push(t.payload as Transaction);
             return;
         }
         if (this.params.offset > this.offsetCounter) {
             this.offsetCounter++;
             return;
         }
-        this.rresult.push(JSON.stringify(t));
+        this.rresult.push(t.payload as Transaction);
     }
 }
-export class FileWriter extends BaseWorker<string[]> implements Worker<string[]> {
+export class FileWriter extends BaseWorker<StatementRequestResult> implements Worker<StatementRequestResult> {
     writer: Writer;
     finished = false;
     constructor(private fileName: string, private p : StatementParameters, baseDir: string = SHARED_DIR) {
@@ -110,7 +112,7 @@ export class FileWriter extends BaseWorker<string[]> implements Worker<string[]>
             metrics?.servedStatementsCount.inc();
             metrics?.servedTransactionRecords.inc(lineCount);
             updateMaxResponseDelayMs(Date.now() - this.creationTime);
-            this.deferred.resolve([this.fileName]);
+            this.deferred.resolve({filePath: this.fileName, totalCount: lineCount, offset: 0, transactions: []});
         }).catch(e => {
             metrics?.fileWriteErrors.inc();
             this.deferred.reject(e);
@@ -268,7 +270,7 @@ export class BundleHandler<O> {
     }
 }
 
-export class Preparer extends BundleHandler<string[]> {
+export class Preparer extends BundleHandler<StatementRequestResult> {
     salt = 0;
     constructor(db_connection: UserConnection, maxInFlight: number = 100000) {
         super(maxInFlight, db_connection, (p: StatementParameters) => {

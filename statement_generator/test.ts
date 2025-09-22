@@ -1,5 +1,5 @@
 
-import { BundleHandler, FileWriter, BaseWorker } from './preparer.js';
+import { BundleHandler, FileWriter, BaseWorker, Preparer } from './preparer.js';
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult, UserDataValidator } from './common/event_types.js';
@@ -222,15 +222,15 @@ describe('Sanity check', function () {
     const testParametersWrites = async (p: StatementParameters[]) => {
         // Produce "n.length" satement files, then read them all, analyze and delete
         let analyzedTransactions = 0;
-        const preparer1 = new BundleHandler<string[]>(1000, db_connection!, (p: StatementParameters) => {
+        const preparer1 = new BundleHandler(1000, db_connection!, (p: StatementParameters) => {
             const fileName = `statement-${p.userId}-${new Date().toISOString()}.json`;
             return new FileWriter(fileName, p);
         });
-        const progressWrite = new ProgressPrinter(p.length, (pc) => `files written ${pc}%, files read 0%`); 
+        const progressWrite = new ProgressPrinter(p.length, (pc) => `files written ${pc}%, files read 0%`);
         const files = (await Promise.all(p.map(par => preparer1.addTask(par).then(r=> {
             progressWrite.writeProgress();
             return r;
-        })))).map(r => r[0]);
+        })))).map(r => r.filePath);
 
         async function getMessages(fileName: string) {
             const messages: InKafkaMessage[] = [];
@@ -376,5 +376,31 @@ describe('Sanity check', function () {
         // console.log(`Users in DB: ${JSON.stringify(res1)}`);
         const res = await db_connection!.getUsers({ pattern: '%', count: 4 })
         console.log(`Got users ${JSON.stringify(res)}`);
+    })
+    it.only(`DB state + paginated statement request`, async () => {
+        await createSchema(db_connection!.pool, "TestDBStatementGenDBstatePagedStatements");
+        const transactions: MsgOffset[] = Array.from({length: 100}).map((_, idx) => {
+            return { msg: {
+                    payload: { id: idx, userIdFrom: 1, userIdTo: 2, amount: idx, dateTime: idx * 1000 },
+                    metadata: {} }, offset: idx.toString()}; });
+        const transactionRes: MsgOffset[] = transactions.map(t => {
+            return { msg: { payload:
+                {id: t.msg.payload.id, dateTime: t.msg.payload.dateTime, state: TResult.CONFIRMED },
+                metadata: {}}, offset: t.offset };
+        });
+        await sendBatch(setUpTempTransactionsTable, transactions, topic_transactions);
+        await sendBatch(setUpTempTransactionResultsTable, transactionRes, topic_transaction_res);
+        const state = await db_connection!.getDBState();
+        const praparer = new Preparer(db_connection!);
+        const g1 = await praparer.addTask({ userId: 1, fromm: 10 * 1000, too: 20 * 1000, count: 1, type: StatementType.DS });
+        const g2 = await praparer.addTask({ userId: 1, fromm: 10 * 1000, too: 20 * 1000, offset: 1, count: 1, type: StatementType.DS });
+        expect(g1.transactions.length).to.equal(1);
+        expect(g1.transactions[0]).to.deep.equal(transactions[10].msg.payload);
+        expect(g2.transactions.length).to.equal(1);
+        expect(g2.transactions[0]).to.deep.equal(transactions[11].msg.payload);
+        expect(state.userCount).to.equal(2);
+        expect(state.transactionCount).to.equal(100);
+        expect(JSON.parse(state.lastTransactionPosted!)).to.be.deep.eq((last(transactions)?.msg.payload));
+        expect(JSON.parse(state.lastTransactionRes!)).to.be.deep.eq((last(transactionRes)?.msg.payload));
     })
 });

@@ -4,7 +4,7 @@ import { MetricStats } from "./common/apiRequestHandler.js";
 
 import * as mtx from "./monitoring_local.js";
 import * as gp from "./common/generator_parameters.js";
-import { StatementParameters, reqUsersUrl, postTransactionsUrl, reqStatementUrl, UserDataResult, UserDataRequestParameters, UserDataRequestValidator, UserDataValidator, UserDataResultValidator, StatementParametersValidator, StatementType } from "./common/event_types.js";
+import { StatementParameters, reqUsersUrl, postTransactionsUrl, reqStatementUrl, UserDataResult, UserDataRequestParameters, UserDataRequestValidator, UserDataValidator, UserDataResultValidator, StatementParametersValidator, StatementType, serverStateUrl, ServerState, ServerStateValidator, TransactionValidator, StatementRequestResultValidator, StatementRequestResult } from "./common/event_types.js";
 import { logger } from "./common/logger.js";
 
 /*  ===============================================
@@ -16,7 +16,7 @@ import { logger } from "./common/logger.js";
     AND GqlIfy FOR PARAMETERS AND RETURN VALUES
     ===============================================
 */
- 
+
 export const schema: GraphQLSchema = buildSchema(`
 type Query {
   ${gqld.startGen.declaration()}
@@ -27,6 +27,7 @@ type Query {
   ${gqld.hello.declaration()}
   ${gqld.users.declaration()}
   ${gqld.postTransaction.declaration()}
+  ${gqld.getDatabaseStats.declaration()}
 }
 input ${gqld.getTypeDeclaration(gp.GenParametersValidator)}
 input ${gqld.getTypeDeclaration(StatementParametersValidator)}
@@ -35,6 +36,9 @@ input ${gqld.getTypeDeclaration(UserDataRequestValidator)}
 type  ${gqld.getTypeDeclaration(gp.ProgressReportValidator)}
 type  ${gqld.getTypeDeclaration(UserDataValidator)}
 type  ${gqld.getTypeDeclaration(UserDataResultValidator)}
+type  ${gqld.getTypeDeclaration(ServerStateValidator)}
+type  ${gqld.getTypeDeclaration(TransactionValidator)}
+type  ${gqld.getTypeDeclaration(StatementRequestResultValidator)}
 `);
 
 
@@ -55,7 +59,7 @@ function params<T>(params: T): RequestInit {
   async function defaultDataHandler(res: Response): Promise<string> {
       return defaulResponse;
   }
-  function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T>, monitoring: MetricStats, 
+  function getRequest<T>(url: string, dataHandler: (data: Response) => Promise<T>, monitoring: MetricStats,
   init?: RequestInit): Promise<T> {
     const now = Date.now();
     monitoring.incrementApiCallCount();
@@ -98,17 +102,20 @@ export const Query = (generatorAddress: string, statementGeneratorAddr: string) 
   getGeneratorStats: async (): Promise<string> => {
       return await getRequest<string>(generatorAddress + gp.getStatUrl, res => res.text(), monitoring);
   },
-  getStatement: async (arg: {params: gqld.GqlIfy<StatementParameters>} ): Promise<string> => {
-    const p = gqld.getStatement.coercedParamType?.parse(arg.params);
-    return await getRequest(statementGeneratorAddr + reqStatementUrl, res => res.text(), monitoring, params(p));
-  },
   users: async (arg: {params: gqld.GqlIfy<UserDataRequestParameters>} ): Promise<UserDataResult> => {
     const p = gqld.users.coercedParamType?.parse(arg.params);
-    return await getRequest(statementGeneratorAddr + reqUsersUrl, 
+    return await getRequest(statementGeneratorAddr + reqUsersUrl,
       res => res.json(), monitoring, params(p)) as Promise<any>;
   },
   postTransaction: async (arg: {params: gqld.GqlIfy<gp.PostTransactionParams>} ): Promise<string> => {
     const p = gqld.postTransaction.coercedParamType?.parse(arg.params);
     return await getRequest<string>(generatorAddress + postTransactionsUrl, res => res.text(), monitoring, params(p));
+  },
+  getDatabaseStats: async (): Promise<ServerState> => {
+    return await getRequest<ServerState>(statementGeneratorAddr + serverStateUrl, res => res.json(), monitoring);
+  },
+  getStatement: async (arg: {params: gqld.GqlIfy<StatementParameters>} ): Promise<StatementRequestResult> => {
+    const p = gqld.getStatement.coercedParamType?.parse(arg.params);
+    return await getRequest(statementGeneratorAddr + reqStatementUrl, res => res.json(), monitoring, params(p));
   }
 })

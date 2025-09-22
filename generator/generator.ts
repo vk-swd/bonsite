@@ -109,7 +109,8 @@ export class Generator {
         this.stopped = true;
     }
     getTransactionsToPost(params: PostTransactionParams): TransactionEvent[] {
-        const [t,r] = this.getTransaction(params.userFrom, params.userTo, params.amount, params.date, params.date, TResult.CONFIRMED);
+        const [t,r] = this.getTransaction(params.userFrom, params.userTo, params.amount,
+            params.date, params.date, TResult.CONFIRMED, params.id);
         return [{ topic: KAFKA_TOPICS_TRANSACTIONS, event: t },
             { topic: KAFKA_TOPICS_TRANSACTION_RESULTS, event: r }];
     }
@@ -137,10 +138,10 @@ export class Generator {
     getTransactionsToGenerate(): number {
         return this.transactionsToGenerate;
     }
-    private getTransaction(userIdFrom: number, userIdTo: number, amount: number, 
-        transactionTime: number, datetimeR: number, state: TResult): [InKafkaMessage, InKafkaMessage] {
+    private getTransaction(userIdFrom: number, userIdTo: number, amount: number,
+        transactionTime: number, datetimeR: number, state: TResult, id?: number): [InKafkaMessage, InKafkaMessage] {
         const transaction: Transaction = {
-            id: this.transactionId++,
+            id: id ? id : (this.transactionId++),
             userIdFrom,
             userIdTo,
             dateTime: transactionTime,
