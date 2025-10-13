@@ -11,7 +11,6 @@ const groupId = getEnv("KAFKA_GROUP_ID");
 const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS_TRANSACTIONS")];
 export const [topic_transaction_res, topic_transactions] = topics;
 
-}
 export async function connectToKafka(getOffset: (topic: string, partition: number) => string,
                                      processBatch: (offset: Offset, msgs: string[]) => Promise<void>): Promise<KafkaConnection> {
     const kafka_connect_conf = {

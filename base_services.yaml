@@ -8,7 +8,6 @@ services:
         - ./healthcheck.js:${WORKDIR}/healthcheck.js
         - ${WORKDIR}/${COMMON_DIR_NAME}
         - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
-        - ./${COMMON_DIR_NAME}/zodGqlTypes.ts:${WORKDIR}/${COMMON_DIR_NAME}/zodGqlTypes.ts
         - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
         - ./${COMMON_DIR_NAME}/healthcheck.ts:${WORKDIR}/${COMMON_DIR_NAME}/healthcheck.ts
       working_dir: ${WORKDIR}
