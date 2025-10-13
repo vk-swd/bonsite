@@ -256,6 +256,9 @@ export default function App() {
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
       <Paper sx={{ p: 3, mb: 4 }}>
+      <Typography variant="h6" gutterBottom>
+          Docs: <a href="doc.html">doc.html</a>
+        </Typography>
         <Typography variant="h6" gutterBottom>
           Create Transaction
         </Typography>

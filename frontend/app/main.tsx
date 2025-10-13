@@ -8,4 +8,4 @@ import { logger } from "../common/logger";
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 root.render(<App />)
-fetchHandleAuth(hello.fetchCall.bind(hello, GQL_URL), undefined)
+

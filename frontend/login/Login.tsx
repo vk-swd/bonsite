@@ -1,12 +1,11 @@
-import React, { useRef, useState, Dispatch, SetStateAction } from "react";
+import React, { useState } from "react";
 import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
-import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Grid from '@mui/material/Grid';
 import Paper from '@mui/material/Paper';
-import { fetchHandleAuth, fetchHandleAuthLogin } from "../fetchHandleAuth";
-import { ApiError, ApiErrorType, customHeaderParamClientId } from "../common/gqlDeclarations";
+import { fetchHandleAuthLogin } from "../fetchHandleAuth";
+import { ApiError, GQL_URL, hello, customHeaderParamClientId } from "../common/gqlDeclarations";
 import { logger } from "../common/logger";
 import { LoginDataValidator } from "../common/event_types";
 import { textInput } from "../elements";
@@ -25,6 +24,24 @@ function label(toggler: () => string) {
     {toggler()}
   </Typography>
 }
+//check authentication by calling hello
+fetchHandleAuthLogin(hello.fetchCall.bind(hello, GQL_URL), undefined)
+.then(() => {
+    window.location.href = "/doc.html";
+}).catch((err) => {
+    if (!(err instanceof ApiError)) {
+        logger.log("Login fetch hello error not ApiError", err);
+        return;
+    }
+    let temp = err;
+    while (temp instanceof ApiError) {
+        if (temp.prevError == undefined) {
+            logger.log("login fetch hello error no prevError", temp.message, temp.type);
+            break;
+        }
+        temp = temp.prevError;
+    }
+})
 
 export default function Login() {
   const loginInput = textInput<string>("Login", useState(""));
@@ -52,7 +69,7 @@ export default function Login() {
         return res;
       })
     }).then((resp) => {
-      window.location.href = "/index.html";
+      window.location.href = "/doc.html";
     }).catch((err) => {
       alert("Login failed");
     }).finally(() => {

@@ -1,4 +1,4 @@
-
+import CopyPlugin from "copy-webpack-plugin"
 import HtmlWebpackPlugin from "html-webpack-plugin"
 
 if (process.env.FRONTEND_DEPLOY_FOLDER === undefined) {
@@ -37,23 +37,23 @@ export default {
         ".mjs": [".mts", ".mjs"]
       }
     },
-    plugins: [new HtmlWebpackPlugin({
-      chunks: ['main'],
-      filename: 'index.html',
-      template: 'app/index.html'
-    }),
-    new HtmlWebpackPlugin({
-      chunks: ['login'],
-      filename: 'login.html',
-      template: 'login/index.html'
-    })],
-    // plugins: [
-    //   new CopyPlugin({
-    //     patterns: [
-    //       { from: 'index.html', to: process.env.FRONTEND_DEPLOY_FOLDER }, // copies all files from public/ into dist/
-    //     ],
-    //   })
-    // ]
+    plugins: [
+      new CopyPlugin({
+        patterns: [
+          { from: './docs', to: process.env.FRONTEND_DEPLOY_FOLDER }, // copies all files from public/ into dist/
+        ],
+      }),
+      new HtmlWebpackPlugin({
+        chunks: ['main'],
+        filename: 'index.html',
+        template: 'app/index.html'
+      }),
+      new HtmlWebpackPlugin({
+        chunks: ['login'],
+        filename: 'login.html',
+        template: 'login/index.html'
+      })
+    ]
   };
 
 

@@ -10,6 +10,7 @@ volumes:
 
 x-gql-env: &gql_env
   GRAPH_QL_PORT: ${GRAPH_QL_PORT}
+  GRAPH_QL_AUTH_PORT: ${GRAPH_QL_AUTH_PORT}
   GRAPH_QL_HOSTNAME: ${GRAPH_QL_APP_NAME}
 
 x-environment: &mssql_env
@@ -93,11 +94,11 @@ services:
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
       environment:
-        - GENERATOR_PORT=${GENERATOR_PORT}
-        - GENERATOR_HOST=${GENERATOR_NAME}
-        - STATEMENT_GENERATOR_PORT=${STATEMENT_GENERATOR_PORT}
-        - STATEMENT_GENERATOR_HOST=${STATEMENT_GENERATOR_NAME}
-        - GRAPH_QL_PORT=${GRAPH_QL_PORT}
+        GENERATOR_PORT: ${GENERATOR_PORT}
+        GENERATOR_HOST: ${GENERATOR_NAME}
+        STATEMENT_GENERATOR_PORT: ${STATEMENT_GENERATOR_PORT}
+        STATEMENT_GENERATOR_HOST: ${STATEMENT_GENERATOR_NAME}
+        <<: [*gql_env]
       depends_on:
         generator:
           condition: service_healthy
