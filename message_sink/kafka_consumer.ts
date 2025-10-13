@@ -27,12 +27,10 @@ export async function connectToKafka(getOffsets: (event: kf.ConsumerGroupJoinEve
         sessionTimeout: 7000,
         heartbeatInterval: 2000
     };
-    {
-        const ad: kf.Admin = kafka_client.admin();
-        await ad.connect();
-        await ad.createTopics({ topics: topics.map(t => ({ topic: t })) });
-        await ad.disconnect();
-    }
+    const admin: kf.Admin = kafka_client.admin({retry: {retries: 5}});
+    await admin.connect();
+    // ensure topics exist
+    await admin.createTopics({ topics: topics.map(t => ({ topic: t, configEntries: [{ name: "retention.bytes", value: `${2 * 1024 * 1024 * 1024}`}] })) });
     const consumer = kafka_client.consumer(consumer_config);
     consumer.on(`consumer.disconnect`, () => {
         // when the application is stopped normally,
