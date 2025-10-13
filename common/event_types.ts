@@ -57,18 +57,18 @@ export const UserDataRequestValidator = z.object({
     cursor: z.number().optional(),
     count: z.number(),
     pattern: z.string()
-}).register(z.globalRegistry, { description: "UserDataRequest" });
+});
 export type UserDataRequestParameters = z.infer<typeof UserDataRequestValidator>
 export const UserDataValidator = z.object({
     cursor: z.number(),
     name: z.string(),
     id: z.number()
-}).register(z.globalRegistry, { description: "UserData" });
+})
 export type UserData = z.infer<typeof UserDataValidator>;
 export const UserDataResultValidator = z.object({
     slice: UserDataValidator.array(),
     totalCount: z.number()
-}).register(z.globalRegistry, { description: "UserDataResult" });
+});
 export type UserDataResult = z.infer<typeof UserDataResultValidator>;
 
 export const ServerStateValidator = z.object({
@@ -80,7 +80,7 @@ export const ServerStateValidator = z.object({
     totalRead: z.number(), //select @@TOTAL_READ
     totalWrite: z.number(), //select @@TOTAL_WRITE
     totalErrors: z.number(), //select @@TOTAL_ERRORS
-}).register(z.globalRegistry, { description: "ServerState" });
+});
 export type ServerState = z.infer<typeof ServerStateValidator>;
 
 export const reqStatementUrl = "statements"
@@ -101,7 +101,7 @@ export const StatementParametersValidator = z.object({
     type: z.enum(StatementType),
     offset: z.number().optional(),
     count: z.number().optional()
-}).register(z.globalRegistry, { description: "StatementParameters" });
+});
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;
 
 export const StatementRequestResultValidator = z.object({
@@ -109,5 +109,6 @@ export const StatementRequestResultValidator = z.object({
     transactions: TransactionValidator.array(),
     offset: z.number(),
     totalCount: z.number()
-}).register(z.globalRegistry, { description: "StatementRecords" });
+});
+
 export type StatementRequestResult = z.infer<typeof StatementRequestResultValidator>;

@@ -1,44 +1,48 @@
 import z, { util, ZodObject, ZodRawShape, ZodType } from "zod";
-import { ServerStateValidator, StatementParametersValidator, StatementRequestResultValidator, UserDataRequestValidator, UserDataResultValidator } from "./event_types.js";
+import { LoginDataValidator, ServerStateValidator, StatementParameters, StatementParametersValidator, StatementRequestResult, StatementRequestResultValidator, TokenDataValidator, UserDataRequestValidator, UserDataResultValidator, UserDateRangeValidator } from "./event_types.js";
 import { GenParametersValidator, PostTransactionValidator, ProgressReportValidator } from "./generator_parameters.js";
 import { logger } from "./logger.js";
 
 
-function createEnumSchema(enumObject: util.EnumLike) {
+export const GQL_URL = "/graphql";
+function createEnumSchema(enumObject: util.EnumLike, coerceStringToInt: boolean = true) {
     const values = Object.values(enumObject);
     const hasNumbers = values.some(v => typeof v === 'number');
     if (hasNumbers) {
-        return z.coerce.number().pipe(z.enum(enumObject) as any);
+        return (coerceStringToInt ? z.coerce.number() : z.number()).pipe(z.enum(enumObject) as any);
     } else {
         return z.enum(enumObject);
     }
 }
-function createStrToIntCoercedGqlSchema<T extends z.ZodTypeAny>(schema: T): z.ZodTypeAny {
+function duplicateZodType<T extends z.ZodTypeAny>(schema: T, coerceStringToInt: boolean = true): z.ZodTypeAny {
     // Creates coerced types which force convert strings into numbers where numbers are expected
     if (schema instanceof z.ZodNumber) {
-        return z.coerce.number();
+        return coerceStringToInt ? z.coerce.number() : z.number();
     }
     if (schema instanceof z.ZodEnum) {
-        logger.log("Enum schema:", schema.enum, typeof(schema.enum));
         return createEnumSchema(schema.enum) //z.enum(schema.enum);
     }
     if (schema instanceof z.ZodOptional) {
-        return createStrToIntCoercedGqlSchema((schema as z.ZodOptional).def.innerType as any).optional();
+        return duplicateZodType((schema as z.ZodOptional).def.innerType as any).optional();
     }
     if (schema instanceof z.ZodNullable) {
-        return createStrToIntCoercedGqlSchema((schema as z.ZodNullable).def.innerType as any).nullable();
+        return duplicateZodType((schema as z.ZodNullable).def.innerType as any).nullable();
     }
     if (schema instanceof z.ZodObject) {
         const newShape = {} as any;
         for (const [key, field] of Object.entries(schema.shape)) {
-            newShape[key] = createStrToIntCoercedGqlSchema(field);
+            newShape[key] = duplicateZodType(field);
         }
         return z.object(newShape);
     }
     if (schema instanceof z.ZodArray) {
-        return z.array(createStrToIntCoercedGqlSchema((schema as z.ZodArray).def.element as any));
+        return z.array(duplicateZodType((schema as z.ZodArray).def.element as any));
     }
     return schema; // Return as-is for other types
+}
+export function makeNamedZodType<T extends z.ZodRawShape>(schema: z.ZodObject<T>, name: string): z.ZodObject<T> {
+    // TODO: tighen up the procedure here to make sure that no modification of the shape is possible
+    return duplicateZodType(schema, false).register(z.globalRegistry, { description: name }) as z.ZodObject<T>;
 }
 
 export function parseReturnNames<T>(name: string, o: ZodType<T>): string {
@@ -54,7 +58,7 @@ export function parseReturnNames<T>(name: string, o: ZodType<T>): string {
     return lineFirst + " " + lineSecond;
 }
 
-export function getTypeDeclaration<T extends z.ZodRawShape>(val: z.ZodObject<T>): string {
+export function getTypeDeclaration<T extends z.ZodRawShape>(val: z.ZodObject<T>, prefix?: string): string {
     const shape = val.shape;
     return `${val.meta()?.description} {\n${Object.entries(shape).map(([key, value]) =>
         `${key}: ${getTypeName(value as z.ZodTypeAny)}`).join("\n")}\n}`;
@@ -84,13 +88,13 @@ class GqlFunction1<T, K> {
     constructor(public name: string,
         public returnType: ZodType<T>,
         public paramType?: ZodType<K>) {
-        this.coercedReturnType = createStrToIntCoercedGqlSchema(returnType) as ZodType<T>;
+        this.coercedReturnType = duplicateZodType(returnType) as ZodType<T>;
         let paramString = "";
         if (paramType) {
             if (paramType.type === "object") {
                 paramString = `(params: ${getTypeName(paramType)}!)`;
             }
-            this.coercedParamType = createStrToIntCoercedGqlSchema(paramType) as ZodType<K>;
+            this.coercedParamType = duplicateZodType(paramType) as ZodType<K>;
         }
         let returnString = getTypeName(returnType);
         this.declarationStr = `${this.name}${paramString} :${returnString}`;
@@ -143,13 +147,22 @@ class GqlFunction1<T, K> {
     }
 }
 
-export const postTransaction = new GqlFunction1("postTransaction", z.string(), PostTransactionValidator);
-export const startGen = new GqlFunction1("startGen", z.string(), GenParametersValidator);
-export const getProgress = new GqlFunction1("getProgress", ProgressReportValidator);
+export const postTransaction = new GqlFunction1("postTransaction", z.string(), 
+    makeNamedZodType(PostTransactionValidator, "PostTransactionParameters"));
+export const startGen = new GqlFunction1("startGen", z.string(), 
+    makeNamedZodType(GenParametersValidator, "GeneratorParameters"))
+export const getProgress = new GqlFunction1("getProgress", 
+    makeNamedZodType(ProgressReportValidator, "ProgressReport"));
+
 export const getGeneratorStats = new GqlFunction1("getGeneratorStats", z.string());
 export const stopGen = new GqlFunction1("stopGen", z.string());
 export const hello = new GqlFunction1("hello", z.string())
-export const users = new GqlFunction1("users", UserDataResultValidator, UserDataRequestValidator);
 
-export const getDatabaseStats = new GqlFunction1("getDatabaseStats", ServerStateValidator);
-export const getStatement = new GqlFunction1("getStatement", StatementRequestResultValidator, StatementParametersValidator);
+export const getDatabaseStats = new GqlFunction1("getDatabaseStats", 
+    makeNamedZodType(ServerStateValidator, "ServerState"));
+
+const StatementReqResNamedZod = makeNamedZodType(StatementRequestResultValidator, "StatementRecords") as z.ZodObject;
+export const TransactionNamedZod = StatementReqResNamedZod.shape.transactions.element.register(z.globalRegistry, { description: "Transaction" }) as z.ZodObject<any>;
+export const getStatement = new GqlFunction1<z.infer<typeof StatementReqResNamedZod>, StatementParameters>("getStatement",
+    StatementReqResNamedZod, 
+    makeNamedZodType(StatementParametersValidator, "StatementParameters"));
