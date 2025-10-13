@@ -3,6 +3,7 @@ import { logger } from "./common/logger.js";
 import * as mtx from "./monitoring_local.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
 import { GqlServer } from "./api.js";
+import { coreReg } from "./common/monitoring.js";
 
 
 
@@ -29,7 +30,8 @@ try {
   const msg = `Error starting GraphQL server: ${JSON.stringify(e)}`;
   logger.error(msg);
   mtx.metrics?.serverSetUpFailed.inc();
-  await mtx.dumpRegistry();
+  await mtx.dumpRegistry(coreReg);
+  await mtx.dumpRegistry(mtx.localReg);
   throw new Error(msg);
 }
 

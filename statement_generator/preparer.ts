@@ -3,7 +3,7 @@ import { InKafkaMessage, StatementParameters, StatementRequestResult, StatementT
 import { Deferred, getEnv } from './common/utils.js';
 import { UserConnection } from "./common/db/db_defines.js";
 import { Writer } from './writer.js';
-import { metrics, updateMaxResponseDelayMs } from './monitoring_local.js';
+import { metrics } from './monitoring_local.js';
 import { logger } from './common/logger.js';
 import { last } from './common/utils.js';
 
@@ -64,7 +64,6 @@ export class Serialiser extends BaseWorker<StatementRequestResult> implements Wo
         this.finished = true;
         metrics?.servedStatementsCount.inc();
         metrics?.servedTransactionRecords.inc(this.rresult.length);
-        updateMaxResponseDelayMs(Date.now() - this.creationTime);
         // TODO: total count inference is not yet implemented. Should be returned as extra recordset
         this.deferred.resolve({filePath: "", totalCount: this.rresult.length,
             offset: this.params.offset ?? 0, transactions: this.rresult});

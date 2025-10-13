@@ -1,8 +1,8 @@
 import * as prom from 'prom-client'
 import { logger } from './common/logger.js';
-import { MonitoringServer, makeCounter } from "./common/monitoring.js";
+import { MaxCounter, MonitoringServer, PromRegistryNamed, makeCounter } from "./common/monitoring.js";
 
-export const localReg: prom.Registry = new prom.Registry();
+export const localReg = new PromRegistryNamed("local", new prom.Registry());
 
 class Metrics {
     constructor(
@@ -12,7 +12,7 @@ class Metrics {
         public apiUnknown: prom.Counter,
         public statementRequestCount: prom.Counter,
         public servedStatementsCount: prom.Counter,
-        public maxResponseDelayMs: prom.Counter,
+        public maxResponseDelayMs: MaxCounter,
         public servedTransactionRecords: prom.Counter,
         public filesGenerated: prom.Counter,
         public databaseRequests: prom.Counter,
@@ -20,13 +20,6 @@ class Metrics {
         public fileWriteErrors: prom.Counter,
         public transactionsRetrieved: prom.Counter
     ) {}
-}
-
-let maxResponseDelayMs = 0;
-export function updateMaxResponseDelayMs(value: number) {
-    if (value > maxResponseDelayMs) {
-        maxResponseDelayMs = value;
-    }
 }
 
 export let metrics: Metrics | undefined = undefined;
@@ -44,7 +37,7 @@ export async function startMonitoring() {
         await makeCounter('api_unknown_total', 'Number of API calls that resulted in an unknown status', localReg),
         await makeCounter('statement_requests_total', 'Number of statement requests received', localReg),
         await makeCounter('served_statements_total', 'Number of statements served', localReg),
-        await makeCounter('max_api_response_delay_ms', 'Maximum response delay in milliseconds', localReg),
+        await MaxCounter.make('max_api_response_delay_ms', 'Maximum response delay in milliseconds', localReg),
         await makeCounter('served_transaction_records_total', 'Number of transaction records served', localReg),
         await makeCounter('files_generated_total', 'Number of files generated', localReg),
         await makeCounter('database_requests_total', 'Number of database requests made', localReg),
@@ -54,10 +47,8 @@ export async function startMonitoring() {
     );
     server = new MonitoringServer(async () => {
         logger.info("Scraping metrics");
-        metrics?.maxResponseDelayMs.reset();
-        metrics?.maxResponseDelayMs.inc(maxResponseDelayMs);
-        maxResponseDelayMs = 0;
-        const metrics1 = await localReg.metrics();
+        metrics?.maxResponseDelayMs.report();
+        const metrics1 = await localReg.registry.metrics();
         return metrics1;
     });
 }

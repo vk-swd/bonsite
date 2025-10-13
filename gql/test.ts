@@ -67,6 +67,7 @@ const handleUserReq = makeHandler(reqUsersUrl, makeSuperUniqueUserList(userReque
 const handleStop = makeHandler(stopUrl, defaulResponse);
 
 const progressReport: ProgressReport = {
+    postedPending:1,
     totalSent: 234567234567234567,
     generated: 10000001000000100000,
     percentComplete: 13,
@@ -150,7 +151,7 @@ describe('Kafka Consumer Tests', function () {
         expect(await startGen.fetchCall(GQL_URL, genParams)).to.equal(defaulResponse);
         expect(await stopGen.fetchCall(GQL_URL)).to.deep.equal(defaulResponse);
         expect(await getProgress.fetchCall(GQL_URL)).to.deep.equal(progressReport);
-        expect(await getGeneratorStats.fetchCall(GQL_URL)).to.deep.equal(statReport);
+        expect(await getGeneratorStats.fetchCall(GQL_URL)).to.deep.equal(statReport); // testing api, not the actual stats.
         expect(await postTransaction.fetchCall(GQL_URL, postTransactionParams)).to.deep.equal(defaulResponse);
         expect(await getStatement.fetchCall(GQL_URL, statementParams)).to.deep.equal(expectedStatementResult);
         expect(apiCount).to.equal(7);

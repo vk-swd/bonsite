@@ -49,7 +49,7 @@ const monitoring: MetricStats = {
     incrementApiCallCount: () => mtx.metrics?.requestCount.inc(),
     incrementUnknownApiCallCount: () => {},
     incrementFailedApiCallCount: () => mtx.metrics?.requestError.inc(),
-    updateMaxResponseDelayMs: (delay: number) => mtx.updateMaxApiResponseDelayMs(delay)
+    updateMaxResponseDelayMs: (delay: number) => mtx.metrics?.maxResponseDelayMs.set(delay)
 };
 export const defaulResponse = "ok";
 

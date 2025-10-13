@@ -13,6 +13,6 @@ datasources:
       cacheLevel: 'High'
       disableRecordingRules: false
       incrementalQueryOverlapWindow: 10m
-      timeInterval: 5s
-      scrapeInterval: 1s
+      timeInterval: 10s
+      scrapeInterval: 10s
       authenticationType: "none"

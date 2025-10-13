@@ -1,8 +1,8 @@
 import * as prom from 'prom-client'
 import { logger } from './common/logger.js';
-import { MonitoringServer, makeCounter } from "./common/monitoring.js";
+import { MaxCounter, MonitoringServer, PromRegistryNamed, makeCounter } from "./common/monitoring.js";
 
-export const localReg: prom.Registry = new prom.Registry();
+export const localReg = new PromRegistryNamed("local", new prom.Registry());
 
 class Metrics {
     constructor(
@@ -14,11 +14,18 @@ class Metrics {
         public kafkaDisconnectCount: prom.Counter,
         public kafkaIncomingMessageCount: prom.Counter,
         public kafkaRequestTimeout: prom.Counter,
+        public kafkaRowsRotated: prom.Counter,
+        public kafkaOldRecordsArrived: prom.Counter,
+        public kafkaMaxFetchDelay: MaxCounter,
         public dbKnownMessageWritten: prom.Counter,
         public dbUnknownMessageWritten: prom.Counter,
         public dbRollbackCount: prom.Counter,
         public dbConnectionFailure: prom.Counter,
-        public dbQueryFailure: prom.Counter
+        public dbQueryFailure: prom.Counter,
+        public dbRowsRotated: prom.Counter,
+        public kafkaProcessingFailed: prom.Counter,
+        public maxFetchProcessingDelayMs: MaxCounter,
+        public maxFetchFullProcessingDelayMs: MaxCounter
     ) {}
 }
 
@@ -39,18 +46,28 @@ export async function startMonitoring() {
         await makeCounter('kafka_disconnect_count', 'Number of times Kafka consumer disconnected', localReg),
         await makeCounter('kafka_incoming_message_count', 'Number of incoming messages from Kafka', localReg),
         await makeCounter('kafka_connect_timeout', 'Number of times Kafka connection timed out', localReg),
+        await makeCounter('kafka_rows_rotated', 'Number of rows removed from Kafka topic to save space', localReg),
+        await makeCounter('kafka_old_records_arrived', 'Number of times old records arrived from Kafka (possible reprocessing)', localReg),
+        await MaxCounter.make('kafka_max_fetch_delay', 'Maximum delay in milliseconds between fetch and processing', localReg),
         await makeCounter('db_known_message_count', 'Number of known messages in the database', localReg),
         await makeCounter('db_unknown_message_count', 'Number of unknown messages in the database', localReg),
         await makeCounter('db_rollback_count', 'Number of times database transaction was rolled back', localReg),
         await makeCounter('db_connection_failure', 'Number of times database connection failed', localReg),
-        await makeCounter('db_query_failure', 'Number of times database query failed', localReg)
+        await makeCounter('db_query_failure', 'Number of times database query failed', localReg),
+        await makeCounter('db_rows_rotated', 'Number of rows removed to save space', localReg),
+        await makeCounter('fetch_processing_failed', 'Number of times fetched messages could not be processed down the line', localReg),
+        await MaxCounter.make('max_fetch_processing_delay_ms', 'Maximum fetch process delay in milliseconds', localReg),
+        await MaxCounter.make('max_fetch_full_processing_delay_ms', 'Maximum fetch processing delay in milliseconds including errors', localReg)
     );
     server = new MonitoringServer(async () => {
-        logger.info("Scraping metrics");
-        const metrics = await localReg.metrics();
-        return metrics;
+        metrics?.maxFetchProcessingDelayMs.report();
+        metrics?.maxFetchFullProcessingDelayMs.report();
+        metrics?.kafkaMaxFetchDelay.report();
+        const metrics1 = await localReg.registry.metrics();
+        return metrics1;
     });
 }
 
-
 export { dumpRegistry } from './common/monitoring.js';
+
+

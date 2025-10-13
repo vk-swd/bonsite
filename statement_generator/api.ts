@@ -1,16 +1,17 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
 import { getEnv } from './common/utils.js';
-import { ServerState, StatementParameters, StatementParametersValidator, StatementRequestResult, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, reqStatementUrl, reqUsersUrl, serverStateUrl } from './common/event_types.js';
-import { metrics, updateMaxResponseDelayMs } from './monitoring_local.js';
+import { ServerState, StatementParameters, StatementParametersValidator, StatementRequestResult, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, UserDateRange, UserDateRangeValidator, reqStatementUrl, reqUsersUrl, serverStateUrl, userDateRange} from './common/event_types.js';
+import { metrics } from './monitoring_local.js';
 import { handleRequest, MetricStats } from './common/apiRequestHandler.js';
+import { logger } from './common/logger.js';
 // import * as mt from './monitoring_local.js'
 
 const STATEMENT_GENERATOR_PORT = getEnv("STATEMENT_GENERATOR_PORT");
 
 const metricCB: MetricStats = {
     incrementApiCallCount: () => metrics?.apiCallCount.inc(),
-    updateMaxResponseDelayMs: (value: number) => updateMaxResponseDelayMs(value),
+    updateMaxResponseDelayMs: (value: number) => metrics?.maxResponseDelayMs.set(value),
     incrementFailedApiCallCount: () => metrics?.apiError.inc(),
     incrementUnknownApiCallCount: () => metrics?.apiUnknown.inc()
 }
