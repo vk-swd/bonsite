@@ -315,8 +315,14 @@ export class UserConnection {
             throw new Error(`getDBState failed: ${e}`);
         }
     }
+    async getUserDateRange(p: UserDateRange): Promise<UserDateRange> {
+        const request = this.pool.request();
+        setQueryInput(request, UserDateRangeC.userId, p);
         try {
+            const res = await request.execute(getUserDateRangeProc.procName);
+            return UserDateRangeValidator.parse({...parseQueryRes(res.recordset[0], UserDateRangeC), userId: p.userId});
         } catch (e) {
+            throw new Error(`getUserDateRange DB request failed: ${e}`);
         }
     }
 }

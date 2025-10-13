@@ -76,6 +76,9 @@ export const ServerStateValidator = z.object({
     lastTransactionRes: z.string().optional().nullable(),
     transactionCount: z.number(),
     userCount: z.number(),
+    maxUserId: z.number(),
+    maxTransactionId: z.number(),
+    maxTransactionResId: z.number(),
     cpuBisy: z.number(), //select @@CPU_BUSY
     totalRead: z.number(), //select @@TOTAL_READ
     totalWrite: z.number(), //select @@TOTAL_WRITE
@@ -87,6 +90,7 @@ export const reqStatementUrl = "statements"
 export const reqUsersUrl = "users"
 export const postTransactionsUrl = "post_transactions"
 export const serverStateUrl = "server_state"
+export const userDateRange = "user_date_range"
 
 export const MIN_DATE = "1970-01-01T00:00:00.000Z";
 export const MAX_DATE = "9999-12-31T23:59:59.997Z";
@@ -104,6 +108,13 @@ export const StatementParametersValidator = z.object({
 });
 export type StatementParameters = z.infer<typeof StatementParametersValidator>;
 
+export const UserDateRangeValidator = z.object({
+    userId: z.number(),
+    minDate: z.number().optional(),
+    maxDate: z.number().optional()
+});
+export type UserDateRange = z.infer<typeof UserDateRangeValidator>;
+
 export const StatementRequestResultValidator = z.object({
     filePath: z.string().optional().nullable(),
     transactions: TransactionValidator.array(),
@@ -112,3 +123,4 @@ export const StatementRequestResultValidator = z.object({
 });
 
 export type StatementRequestResult = z.infer<typeof StatementRequestResultValidator>;
+

@@ -1,5 +1,5 @@
 import z, { util, ZodObject, ZodRawShape, ZodType } from "zod";
-import { LoginDataValidator, ServerStateValidator, StatementParameters, StatementParametersValidator, StatementRequestResult, StatementRequestResultValidator, TokenDataValidator, UserDataRequestValidator, UserDataResultValidator, UserDateRangeValidator } from "./event_types.js";
+import { ServerStateValidator, StatementParameters, StatementParametersValidator, StatementRequestResult, StatementRequestResultValidator, UserDataRequestValidator, UserDataResultValidator, UserDateRangeValidator } from "./event_types.js";
 import { GenParametersValidator, PostTransactionValidator, ProgressReportValidator } from "./generator_parameters.js";
 import { logger } from "./logger.js";
 
@@ -158,6 +158,12 @@ export const getGeneratorStats = new GqlFunction1("getGeneratorStats", z.string(
 export const stopGen = new GqlFunction1("stopGen", z.string());
 export const hello = new GqlFunction1("hello", z.string())
 
+const UserDataResultNamedZod: z.ZodObject = makeNamedZodType(UserDataResultValidator, "UserDataResult") as z.ZodObject<any>; 
+export const UserDataNamedZod = (UserDataResultNamedZod.shape.slice as z.ZodArray<any>).element.register(z.globalRegistry, { description: "UserData" }) as z.ZodObject<any>;
+export const users = new GqlFunction1("users", 
+    UserDataResultNamedZod, 
+    makeNamedZodType(UserDataRequestValidator, "UserDataRequest"));
+
 export const getDatabaseStats = new GqlFunction1("getDatabaseStats", 
     makeNamedZodType(ServerStateValidator, "ServerState"));
 
@@ -166,3 +172,8 @@ export const TransactionNamedZod = StatementReqResNamedZod.shape.transactions.el
 export const getStatement = new GqlFunction1<z.infer<typeof StatementReqResNamedZod>, StatementParameters>("getStatement",
     StatementReqResNamedZod, 
     makeNamedZodType(StatementParametersValidator, "StatementParameters"));
+
+export const getTransactionDatesForUser = new GqlFunction1("getTransactionDatesForUser",
+    makeNamedZodType(UserDateRangeValidator, "UserDateRangeRequest"),
+    makeNamedZodType(UserDateRangeValidator, "UserDateRangeResponse"));
+

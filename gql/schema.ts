@@ -4,7 +4,7 @@ import { MetricStats } from "./common/apiRequestHandler.js";
 
 import * as mtx from "./monitoring_local.js";
 import * as gp from "./common/generator_parameters.js";
-import { StatementParameters, reqUsersUrl, postTransactionsUrl, reqStatementUrl, UserDataResult, UserDataRequestParameters, UserDataRequestValidator, UserDataValidator, UserDataResultValidator, StatementParametersValidator, StatementType, serverStateUrl, ServerState, ServerStateValidator, TransactionValidator, StatementRequestResultValidator, StatementRequestResult } from "./common/event_types.js";
+import { StatementParameters, reqUsersUrl, postTransactionsUrl, reqStatementUrl, UserDataResult, UserDataRequestParameters, UserDataRequestValidator, UserDataValidator, UserDataResultValidator, StatementParametersValidator, StatementType, serverStateUrl, ServerState, ServerStateValidator, TransactionValidator, StatementRequestResultValidator, StatementRequestResult, UserDateRange, userDateRange, LoginData, TokenData } from "./common/event_types.js";
 import { logger } from "./common/logger.js";
 
 /*  ===============================================
@@ -28,17 +28,20 @@ type Query {
   ${gqld.users.declaration()}
   ${gqld.postTransaction.declaration()}
   ${gqld.getDatabaseStats.declaration()}
+  ${gqld.getTransactionDatesForUser.declaration()}
 }
-input ${gqld.getTypeDeclaration(gp.GenParametersValidator)}
-input ${gqld.getTypeDeclaration(StatementParametersValidator)}
-input ${gqld.getTypeDeclaration(gp.PostTransactionValidator)}
-input ${gqld.getTypeDeclaration(UserDataRequestValidator)}
-type  ${gqld.getTypeDeclaration(gp.ProgressReportValidator)}
-type  ${gqld.getTypeDeclaration(UserDataValidator)}
-type  ${gqld.getTypeDeclaration(UserDataResultValidator)}
-type  ${gqld.getTypeDeclaration(ServerStateValidator)}
-type  ${gqld.getTypeDeclaration(TransactionValidator)}
-type  ${gqld.getTypeDeclaration(StatementRequestResultValidator)}
+input ${gqld.getTypeDeclaration(gqld.startGen.paramType! as any)}
+input ${gqld.getTypeDeclaration(gqld.postTransaction.paramType! as any)}
+type  ${gqld.getTypeDeclaration(gqld.getProgress.returnType as any)}
+type  ${gqld.getTypeDeclaration(gqld.UserDataNamedZod)}
+type  ${gqld.getTypeDeclaration(gqld.users.returnType as any)}
+input ${gqld.getTypeDeclaration(gqld.users.paramType! as any)}
+type  ${gqld.getTypeDeclaration(gqld.getDatabaseStats.returnType as any)}
+type  ${gqld.getTypeDeclaration(gqld.TransactionNamedZod)}
+input ${gqld.getTypeDeclaration(gqld.getStatement.paramType! as any)}
+type  ${gqld.getTypeDeclaration(gqld.getStatement.returnType as any)}
+input ${gqld.getTypeDeclaration(gqld.getTransactionDatesForUser.paramType! as any)}
+type  ${gqld.getTypeDeclaration(gqld.getTransactionDatesForUser.returnType as any)}
 `);
 
 
@@ -83,10 +86,10 @@ function params<T>(params: T): RequestInit {
           monitoring.updateMaxResponseDelayMs(delay);
       })
   }
-
+let lastQuery = "";
 export const Query = (generatorAddress: string, statementGeneratorAddr: string) => ({
   hello: () => {
-    return "Hello called"
+    return lastQuery
   },
   stopGen: () => {
     return getRequest<string>(generatorAddress + gp.stopUrl, res => res.text(), monitoring);
@@ -117,5 +120,11 @@ export const Query = (generatorAddress: string, statementGeneratorAddr: string) 
   getStatement: async (arg: {params: gqld.GqlIfy<StatementParameters>} ): Promise<StatementRequestResult> => {
     const p = gqld.getStatement.coercedParamType?.parse(arg.params);
     return await getRequest(statementGeneratorAddr + reqStatementUrl, res => res.json(), monitoring, params(p));
+  },
+  getTransactionDatesForUser: async (arg: {params: gqld.GqlIfy<UserDateRange>} ): Promise<UserDateRange> => {
+    const p = gqld.getTransactionDatesForUser.coercedParamType?.parse(arg.params);
+    return await getRequest(statementGeneratorAddr + userDateRange, async res => {
+      return await res.json();
+    }, monitoring, params(p));
   }
 })
