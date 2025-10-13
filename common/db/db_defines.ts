@@ -1,10 +1,10 @@
-import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Offset, OffsetValidator, ServerState, ServerStateValidator, StatementParameters, Transaction, TransactionResultValidator, TransactionValidator, UserData, UserDataRequestParameters, UserDataResult, UserDataResultValidator, UserDataValidator } from '../event_types.js'
+import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, Offset, OffsetValidator, ServerState, ServerStateValidator, StatementParameters, Transaction, TransactionResultValidator, TransactionValidator, UserData, UserDataRequestParameters, UserDataResult, UserDataResultValidator, UserDataValidator, UserDateRange, UserDateRangeValidator } from '../event_types.js'
 
 import sql from 'mssql'
 import { logger } from '../logger.js'
 import { Column, IdentityColumn, kafkaOffsetTable, parseQueryRes, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from './tables.js'
 import { connectToDatabase, database, runQuery } from './common.js'
-import { addKafkaOffsetProcedure, CommitResults, CommitResultsC, getDBStatProc, getUsersProc, getUsersTopProc, procGetTransactions, QueryRes, SetUpTempTableProc, StatmentParamTable, UsersRequestC } from './procedures.js'
+import { addKafkaOffsetProcedure, CommitResultsC, DBStateC, getDBStatProc, getUserDateRangeProc, getUsersProc, getUsersTopProc, procGetTransactions, QueryRes, RotateTableArgs, RotateTableProc, RotateTableResultC, SetUpTempTableProc, StatmentParamTable, UserDateRangeC, UsersRequestC } from './procedures.js'
 import { Deferred } from '../utils.js'
 
 function setQueryInput<T, K extends keyof T>(request: sql.Request,
@@ -49,7 +49,6 @@ export class ConnectionError extends Error {
         super(message);
     }
 }
-
 export class UserConnection {
     static async create(login: string): Promise<UserConnection> {
         const pool = await connectToDatabase(login, database);
@@ -61,14 +60,19 @@ export class UserConnection {
         return this.pool.connected;
     }
     pidx = 0;
-    async writeDataTransactionally<T extends TransactionResultStored | TransactionStored>(
-        tempTable: SetUpTempTableProc<T>,
+    async writeDataTransactionally(
+        tempTable: SetUpTempTableProc<TransactionResultStored | TransactionStored>,
         records: InKafkaMessage[],
-        oInfo: Offset
-    ): Promise<CommitResults & {rolledBack: boolean}> {
+        oInfo: Offset,
+        triggerRollback: boolean = false
+    ): Promise<QueryRes> {
         this.pidx = 0;
         const batchInfo = () => `${oInfo.groupId}-${oInfo.topic}-${oInfo.partition}-${oInfo.offset}`;
         const transaction = new sql.Transaction(this.pool);
+        let rolledBack = false
+        transaction.on('rollback', aborted => {
+            rolledBack = aborted;
+        });
         try {
             await transaction.begin();
         } catch (e) {
@@ -83,22 +87,57 @@ export class UserConnection {
             And this assumption is enforced by Kafka, because only one consumer may
             read from a single partition at a time.
         */
+        let result: QueryRes = { duds: 0, newCount: 0 };
         try {
-            const result = await this.sendDataTransactionally(tempTable, records, request);
-            // await this.getExecPlan(tempTable, request);
+            result = await this.sendDataTransactionally(tempTable, records, request);
             await this.commitOffset(oInfo, request);
+            if (triggerRollback) {
+                logger.warn(`Triggering rollback for ${batchInfo()}`);
+                await request.batch("THROW 50001, 'Simulated error', 1;");
+            }
             await transaction.commit();
-            return {...result, rolledBack: false};
+            return result;
         } catch (e) {
             logger.error(`Failed to commit ${tempTable.procName}-${batchInfo()}: ${e}`);
         }
-
+        
         try {
-            await transaction.rollback();
-            return Object.values(CommitResultsC).reduce<CommitResults & {rolledBack: boolean}>((res, c) => ({...res, [c.name]: 0}), {rolledBack: false} as CommitResults & {rolledBack: boolean});
+            if (!rolledBack) {
+                await transaction.rollback();
+            } else {
+                logger.warn(`Transaction already rolled back for ${batchInfo()}`);
+            }
+            result.rolledBack = true;
         } catch (e) {
             throw `Failed to rollback ${batchInfo()}: ${e}`
         }
+        return result;
+    }
+    async rotateTableRows(rowCount:number): Promise<number> {
+        // TODO: make a transaction for multiple table deletions
+        const request = this.pool.request();
+        let removed = 0;
+        let totalRemoved = 0;
+        let idx = 0;
+        let now = 0;
+        do {
+            if (now == 0) {
+                now = Date.now();
+            }
+            const idxLocal = idx++;
+            setQueryInput(request, RotateTableArgs.columns, {columns: rowCount}, `rotarg${idxLocal}`)
+            const resRaw  = await request.query(`exec ` + RotateTableProc.procName + 
+                ` ${RotateTableArgs.columns.parameterName} = @rotarg${idxLocal};`
+            );
+            const res = parseQueryRes(resRaw.recordset[0], RotateTableResultC)
+            removed = res.removed;
+            totalRemoved += removed;
+            rowCount = 10000;
+        } while (removed > 0);
+        if (totalRemoved > 0) {
+            logger.log(`Rotated out total ${totalRemoved} rows in ${idx} batches in `, Date.now() - now, `ms`);
+        }
+        return totalRemoved;
     }
     async writeRawMessages(records: string[], oInfo: Offset): Promise<QueryRes> {
         const transaction = new sql.Transaction(this.pool);
@@ -131,7 +170,8 @@ export class UserConnection {
             }
         }
         await request.bulk(table);
-        const res = await tempTable.getCommitProcedure().batch(request);
+        const rawRes = await request.batch(`exec ` + tempTable.getCommitProcedure().procName)
+        const res = parseQueryRes<QueryRes>(rawRes.recordset[0], CommitResultsC);
         await tempTable.dropTable(request);
         return res;
     }
@@ -183,16 +223,16 @@ export class UserConnection {
     }
     async streamTransactions(p: StatementParameters[], processor: (user: number, reqId: number, line: InKafkaMessage) => Promise<void>): Promise<void> {
         const request = this.pool.request();
+        const dataColumns = procGetTransactions.columns!;
         try {
             await request.query(`DROP TABLE IF EXISTS ${StatmentParamTable.name}`);
             await request.batch(`create table ${StatmentParamTable.name} (
-                ${procGetTransactions.columns
+                ${dataColumns
                     .map((c, idx) => `${c.name} ${c.type.name}`).join(', ')})`)
         } catch(e) {
             throw `Error creating statement parameter table ${JSON.stringify(p)}: ${e}`;
         }
         const table = new sql.Table(StatmentParamTable.name);
-        const dataColumns = procGetTransactions.columns;
         try {
             dataColumns.forEach(c => table.columns.add(c.name, c.type.type()))
         } catch (e) {
@@ -200,7 +240,7 @@ export class UserConnection {
         }
         try {
             for (let idx = 0; idx < p.length; idx++) {
-                const record = {...p[idx], idx: idx};
+                const record = {...p[idx], idx};
                 table.rows.add(...dataColumns.map(c => c.value(record)));
             }
             await request.bulk(table);
@@ -267,28 +307,16 @@ export class UserConnection {
     }
     async getDBState(): Promise<ServerState> {
         const request = this.pool.request();
-        let res
         try {
-            res = await request.execute(getDBStatProc.procName);
+            const res = await request.execute(getDBStatProc.procName);
+            logger.log(`gettng db state `,res);
+            return ServerStateValidator.parse(parseQueryRes(res.recordset[0], DBStateC));
         } catch (e) {
             throw new Error(`getDBState failed: ${e}`);
         }
-        if (!(res.recordsets instanceof Array) || res.recordsets.length < 3) {
-            throw new Error(`getDBState returned invalid result: ${JSON.stringify(res.recordsets)}`);
-        }
+    }
         try {
-            const resFinal = ServerStateValidator.parse(res.recordsets[0][0]); // validate other fields
-            if (res.recordsets[1].length > 0) {
-                const lastTransactionPosted = TransactionValidator.parse(parseQueryRes(res.recordsets[1][0], transactionsTable.columns));
-                resFinal.lastTransactionPosted = JSON.stringify(lastTransactionPosted);
-            }
-            if (res.recordsets[2].length > 0) {
-                const lastTransactionResPosted = TransactionResultValidator.parse(parseQueryRes(res.recordsets[2][0], transactionResultsTable.columns));
-                resFinal.lastTransactionRes = JSON.stringify(lastTransactionResPosted);
-            }
-            return resFinal;
         } catch (e) {
-            throw new Error(`getDBState failed to parse results: ${e}`);
         }
     }
 }

@@ -12,6 +12,7 @@ export async function connectToDatabase(login: string, database?: string): Promi
     const res = new sql.ConnectionPool({
         user: login,
         password: demo_password,
+        requestTimeout: 90000,
         server,
         database,
         options: { trustServerCertificate: true }

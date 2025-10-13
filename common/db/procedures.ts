@@ -1,6 +1,6 @@
-import { MAX_DATE, MIN_DATE, ServerState, StatementParameters, TResult, UserDataRequestParameters } from "../event_types.js";
-import { getDBState, getTopUsersProcedureQuery, getUserProcedureQuery, procedureQuery } from "./queries.js";
-import { Column, Columns, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
+import { MAX_DATE, MIN_DATE, ServerState, StatementParameters, TResult, UserDataRequestParameters, UserDateRange } from "../event_types.js";
+import { commitTransactionQuery, getDBState, getTopUsersProcedureQuery, getUserDateRange, getUserProcedureQuery, getUserStatementsProcQuery, maybeRrotateRowsQuery, procedureQuery, recordUsersInTransactionsQuery } from "./queries.js";
+import { Column, Columns, kafkaOffsetTable, makeCol, parseQueryRes, rawDataTable, schema, sqlTypes, statTable, statTableReads, Stringed, TableDescription, transactionResultsDumpTable, transactionResultsTable, TransactionResultStored, transactionsDumpTable, transactionsTable, TransactionStored, usersTable } from "./tables.js";
 import sql from 'mssql'
 
 
@@ -12,8 +12,8 @@ interface SProc<T> {
 }
 
 
-function makeProc<T>(procName: string, columns: Columns<T>, query: (name: string) => string): SProc<T> {
-    const procQuery = query(procName);
+function makeProc<T>(procName: string, columns: Columns<T>, query: (name: string, ...args: any) => string, ...args: any): SProc<T> {
+    const procQuery = query(procName, ...args);
     return {
         procName,
         columns: Object.values(columns),
@@ -29,23 +29,27 @@ export const UsersRequestC: Columns<UserDataRequestParameters> = {
 export const getUsersProc = makeProc(`${schema}.getUsers`, UsersRequestC, getUserProcedureQuery);
 export const getUsersTopProc = makeProc(`${schema}.getTopUsers`, UsersRequestC, getTopUsersProcedureQuery);
 
-export const DBStateC: Columns<Omit<ServerState, "lastTransactionPosted">> = {
+export const DBStateC: Columns<ServerState> = {
     transactionCount: makeCol("transactionCount", sqlTypes.bigInt),
     userCount: makeCol("userCount", sqlTypes.bigInt),
     cpuBisy: makeCol("cpuBisy", sqlTypes.bigInt),
     totalRead: makeCol("totalRead", sqlTypes.bigInt),
     totalWrite: makeCol("totalWrite", sqlTypes.bigInt),
-    totalErrors: makeCol("totalErrors", sqlTypes.bigInt)
+    totalErrors: makeCol("totalErrors", sqlTypes.bigInt),
+    maxUserId: makeCol("maxUserId", sqlTypes.bigInt),
+    maxTransactionId: makeCol("maxTransactionId", sqlTypes.bigInt),
+    maxTransactionResId: makeCol("maxTransactionResId", sqlTypes.bigInt),
+    lastTransactionPosted: makeCol("lastTransactionPosted", sqlTypes.nvarcharBig, "null"),
+    lastTransactionRes: makeCol("lastTransactionRes", sqlTypes.nvarcharBig, "null"),
 }
 export const getDBStatProc = makeProc(`${schema}.getDBStat`, DBStateC, getDBState);
 
-
-
-export type CommitResults = { duds: number; newCount: number };
-export const CommitResultsC: Columns<CommitResults> = {
-    duds: makeCol("duds", sqlTypes.int),
-    newCount: makeCol("newCount", sqlTypes.int)
+export const UserDateRangeC: Columns<UserDateRange> = {
+    userId: makeCol("userId", usersTable.columns.id.type),
+    minDate: makeCol("minDate", sqlTypes.dateTime),
+    maxDate: makeCol("maxDate", transactionsTable.columns.dateTime.type)
 };
+export const getUserDateRangeProc = makeProc(`${schema}.getUserDateRange`, UserDateRangeC, getUserDateRange);
 
 type StatementReqParam = Omit<{ idx: number } & StatementParameters, "type"|"offset"|"count">;
 export const StatmentParamTable: TableDescription<StatementReqParam> = {
@@ -58,48 +62,8 @@ export const StatmentParamTable: TableDescription<StatementReqParam> = {
     },
     permissions: []
 };
-class GetTransactionsProc implements SProc<StatementReqParam> {
-    public procName = `${schema}.getTransactions`;
-    columns = Object.values(StatmentParamTable.columns);
-    query: string  = ""
-    constructor() {
-        const selectUsers = (srcColumn: string) => {
-            const from = StatmentParamTable.columns.fromm!.name;
-            const to = StatmentParamTable.columns.too!.name;
-            const id = StatmentParamTable.columns.userId.name;
-            const idx = StatmentParamTable.columns.idx.name;
-            return `select p.${id} as pid, p.${idx} as pidx, t.*
-            from ${StatmentParamTable.name} as p
-            left join
-            ${transactionsTable.name} as t
-            on t.${srcColumn} = p.${id}
-            left join
-            ${transactionResultsTable.name} as r
-            on r.${transactionResultsTable.columns.id.name} = t.${transactionsTable.columns.id.name}
-            where t.${transactionsTable.columns.dateTime.name} between p.${from} and p.${to}
-            and r.${transactionResultsTable.columns.state.name} = ${TResult.CONFIRMED}`;
-        }
-        this.query =
-        `
-        CREATE PROCEDURE ${this.procName}
-            AS
-            SET NOCOUNT ON;
-        with unioned as (
-        ${selectUsers(transactionsTable.columns.userIdFrom.name)}
-        union all
-        ${selectUsers(transactionsTable.columns.userIdTo.name)}
-        and t.${transactionsTable.columns.userIdTo.name} != t.${transactionsTable.columns.userIdFrom.name}
-        )
-        select * from unioned order by pidx, ${transactionsTable.columns.dateTime.name}
-        `
-        ;
-    }
+export const procGetTransactions = makeProc(`${schema}.getTransactions`, StatmentParamTable.columns, getUserStatementsProcQuery);
 
-    getProcedureQuery(): string {
-        return this.query;
-    }
-}
-export const procGetTransactions = new GetTransactionsProc();
 
 function fullColumnNamesEqItsProcArgs<T, K extends keyof T>(c: Column<T,K>[], sep: string = ', '): string {
     return c.map(col =>  `${col.inputName} = ${col.parameterName}`).join(sep);
@@ -134,148 +98,21 @@ class AddKafkaOffsetProcedure implements SProc<{}> {
 }
 export const addKafkaOffsetProcedure = new AddKafkaOffsetProcedure();
 
-class CommitTempRecordsProc<T extends TransactionStored | TransactionResultStored> implements SProc<T> {
-    procQuery: string;
-    async batch(request: sql.Request): Promise<CommitResults> {
-        const r = await request.batch(`EXEC ${this.procName};`);
-        return parseQueryRes<CommitResults>(r.recordset[0], CommitResultsC);
-    }
-    getProcedureQuery(): string {
-        return this.procQuery;
-    }
-    constructor(public procName: string, tmpTable: TableDescription<T>, dstTable: TableDescription<T>, public dumpTable: TableDescription<T>) {
-        let extra1: string = "";
-
-        const distinctNew = "distinctNew";
-        const tmpDistinctNew = `#${distinctNew}`
-
-        if (dstTable.name == transactionsTable.name) {
-            const tc_uFrom = transactionsTable.columns.userIdFrom.name;
-            const tc_uTo = transactionsTable.columns.userIdTo.name;
-            const idLocal = `id`
-            extra1 = `
-            with allUsers as (select distinct ${tc_uFrom} as ${idLocal}
-                                from ${tmpTable.name}
-                                union
-                                select distinct ${tc_uTo} as ${idLocal}
-                                from ${tmpTable.name}),
-                usersFrom as (select distinct ${idLocal} from allUsers),
-                namedUFrom as (select ${idLocal},
-                                    'User' + CAST(${idLocal} AS NVARCHAR) as Name
-                                from usersFrom)
-
-                insert into ${usersTable.name}
-                select ${idLocal} as ${usersTable.columns.id.name}, Name as ${usersTable.columns.name.name}
-                from namedUFrom
-                where not exists (select 1 from ${usersTable.name}
-                                    where ${usersTable.columns.id.name} = namedUFrom.id);
-            `
-            ;
-        }
-        const tIdColumn = tmpTable.columns.id;
-        const tIdxColumn = tmpTable.columns.idx;
-        const tmpTabNumbered = `tmpTabNumbered`;
-        const rowNumColumn = `rowNum`;
-        const existingId = "EXISTS_ID";
-        const markedTab = `marked`;
-        const dataColumns = Object.values(dstTable.columns).slice(1).map(c => c.name).join(', ');
-
-
-        const labels: string[] = ["@l1"];
-        const measureTime = (label: string): string => {
-            if (labels.length == 1) {
-                labels.push("@l2");
-                return `declare ${labels[0]} datetime2(3);
-                    declare ${labels[1]} datetime2(3);
-                    SET ${labels[0]} = SYSDATETIME();`
-            } else {
-                const res = `SET ${labels[1]} = SYSDATETIME();
-                insert into ${statTable.name} (${statTable.columns.name.name},
-                                            ${statTable.columns.value.name})
-                            values ('${label}',
-                            DATEDIFF(millisecond, ${labels[0]}, ${labels[1]}));`
-                const tmp = labels[0];
-                labels.shift();
-                labels.push(tmp);
-                return res;
-            }
-        }
-        this.procQuery = procedureQuery(this.procName, [], `
-
-        ${Object.values(CommitResultsC).map(c => `declare ${c.parameterName} ${c.type.name};`).join('\n')}
-        ${Object.values(CommitResultsC).map(c => `set ${c.parameterName} = 0;`).join('\n')}
-
-        ${measureTime("")}
-        ${extra1}
-
-        declare @handled int;
-        set @handled = 0;
-
-        ${measureTime("checked users")}
-        BEGIN TRY
-            INSERT INTO ${dstTable.name}
-            SELECT ${dataColumns} FROM ${tmpTable.name};
-            set ${CommitResultsC.newCount.parameterName} = @@ROWCOUNT;
-            set @handled = 1;
-        END TRY
-        BEGIN CATCH
-            ${measureTime("shat pants")}
-            CREATE NONCLUSTERED INDEX someindex ON ${tmpTable.name} (${tIdColumn.name})
-            ${measureTime("made culstered index")}
-
-            with  ${tmpTabNumbered} as (select *,
-                                ROW_NUMBER() over (partition by ${tIdColumn.name} order by ${tIdxColumn.name}) as ${rowNumColumn}
-                                from ${tmpTable.name}),
-            ${markedTab} as (select tDst.${tIdColumn.name} as ${existingId}, tNumbered.*
-                        from  ${tmpTabNumbered} as tNumbered
-                        left join ${dstTable.name} as tDst
-                        on tDst.${tIdColumn.name} = tNumbered.${tIdColumn.name}),
-            ${distinctNew} as (select * from ${markedTab}
-                               where ${existingId} is not null or ${rowNumColumn} > 1)
-            insert into ${dumpTable.name}
-                             select ${dataColumns}
-                              from ${distinctNew}
-
-            set ${CommitResultsC.duds.parameterName} = @@ROWCOUNT;
-
-
-            ${measureTime("saved raw data of duds")}
-
-
-            with  ${tmpTabNumbered} as (select *,
-                                ROW_NUMBER() over (partition by ${tIdColumn.name} order by ${tIdxColumn.name}) as ${rowNumColumn}
-                                from ${tmpTable.name}),
-            ${markedTab} as (select tDst.${tIdColumn.name} as ${existingId}, tNumbered.*
-                        from  ${tmpTabNumbered} as tNumbered
-                        left join ${dstTable.name} as tDst
-                        on tDst.${tIdColumn.name} = tNumbered.${tIdColumn.name}),
-            ${distinctNew} as (select * from ${markedTab}
-                               where ${existingId} is null and ${rowNumColumn} = 1)
-             insert into ${dstTable.name}
-                             select ${dataColumns}
-                              from ${distinctNew}
-            set ${CommitResultsC.newCount.parameterName} = @@ROWCOUNT;
-
-            ${measureTime("selected unique ores and inserted in dst")}
-
-            --save conflicted and duplicate records to raw data table for further analysis
-
-            set @handled = 1;
-            END CATCH;
-
-            ${measureTime("end")}
-            select ${Object.values(CommitResultsC).map(c => `${c.parameterName} as ${c.name}`).join(', ')};
-            `
-        );
-    }
+//TODO: do something with this duplication and this inconvinient rolledBack boolean
+export class QueryRes {
+    duds: number = 0;
+    newCount: number = 0;
+    rolledBack?: boolean;
 }
-
+export const CommitResultsC: Columns<QueryRes> = {
+    duds: makeCol("duds", sqlTypes.int),
+    newCount: makeCol("newCount", sqlTypes.int)
+};
 export class SetUpTempTableProc<T extends TransactionResultStored | TransactionStored> implements SProc<T> {
     public procName: string
     public tableName: string
     public dstTable: TableDescription<T>
-    private insertionProc: SProc<T>
-    private pr: CommitTempRecordsProc<T>
+    private pr: SProc<{}>
 
     constructor(public srcTable: TableDescription<T>, private dumpTable: TableDescription<T>) {
         const tName = srcTable.name.replace(/\./g, '');
@@ -283,25 +120,15 @@ export class SetUpTempTableProc<T extends TransactionResultStored | TransactionS
         // this.tableName = `${srcTable.name}temp`;
         this.procName = `${schema}.create${tName}`;
         this.dstTable = {...srcTable, name: this.tableName};
-
-        const insertionProcName = `${schema}.insertTo${tName}`;
-        const unsertProcQuery = procedureQuery(insertionProcName,
-            Object.values(this.dstTable.columns).slice(1),
-        insertQuery(this.dstTable.name, Object.values(this.dstTable.columns).slice(1)))
-        this.insertionProc = {
-            procName: insertionProcName,
-            columns: Object.values(this.dstTable.columns).slice(1),
-            getProcedureQuery: () => unsertProcQuery
-        }
-        this.pr = new CommitTempRecordsProc<T>(`${schema}.CommitRecorded${tName}`, this.dstTable, this.srcTable, dumpTable);
+        this.pr = makeProc<{}>(`${schema}.CommitRecorded${tName}`, {}, 
+            commitTransactionQuery, this.tableName, this.dumpTable.name, this.srcTable,
+            this.srcTable.name == transactionsTable.name ? recordUsersInTransactionsQuery(this.tableName) : "");
     }
     getProcedureQuery(): string {
         return ""
     }
     async batch(request: sql.Request): Promise<void> {
         // Rely on the fact that original table has first column as identity primary key
-
-
         await request.batch(`create table ${this.dstTable.name} (
                     ${(Object.values(this.dstTable.columns))
                         .map((c, idx) => `${c.name} ${c.type.name} ${idx == 0 ? c.extra : ""}`).join(', ')})`)
@@ -309,10 +136,7 @@ export class SetUpTempTableProc<T extends TransactionResultStored | TransactionS
     async dropTable(request: sql.Request): Promise<void> {
         await request.batch(`DROP TABLE IF EXISTS ${this.dstTable.name}`);
     }
-    getInsertionProcedure(): SProc<T> {
-        return this.insertionProc;
-    }
-    getCommitProcedure(): CommitTempRecordsProc<T> {
+    getCommitProcedure(): SProc<{}> {
         return this.pr;
         // return new CommitTempRecordsProc(`${schema}.CommitRecorded${this.srcTable.name.replace(/\./g, '')}`, this.dstTable, this.srcTable);
     }
@@ -320,11 +144,14 @@ export class SetUpTempTableProc<T extends TransactionResultStored | TransactionS
 export const setUpTempTransactionsTable = new SetUpTempTableProc(transactionsTable, transactionsDumpTable);
 export const setUpTempTransactionResultsTable = new SetUpTempTableProc(transactionResultsTable, transactionResultsDumpTable);
 
-export class QueryRes {
-    duds: number = 0;
-    newCount: number = 0;
-    rolledBack: boolean = false;
-}
-
-
+export const RotateTableArgs: Columns<{columns: number}> = {
+    columns: makeCol("columns", sqlTypes.int),
+};
+export type RotateTableResult = {removed: number, usedSpaceBytes: number, usedSpaceBytesNew: number};
+export const RotateTableResultC: Columns<RotateTableResult> = {
+    removed: makeCol("removed", sqlTypes.bigInt),
+    usedSpaceBytes: makeCol("usedSpaceBytes", sqlTypes.bigInt),
+    usedSpaceBytesNew: makeCol("usedSpaceBytesNew", sqlTypes.bigInt)
+};
+export const RotateTableProc = makeProc(`${schema}.rotateTables`, RotateTableArgs, maybeRrotateRowsQuery);
 
