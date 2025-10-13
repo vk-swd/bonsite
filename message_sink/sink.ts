@@ -1,16 +1,19 @@
 import { getEnv } from "./common/utils.js";
 
+import * as util from "util";
 import * as kf from "kafkajs";
 
 import { Offsets, UserConnection } from "./common/db/db_defines.js";
-import { InKafkaMessage, MetadataWrapperValidator } from "./common/event_types.js";
+import { InKafkaMessage, MetadataWrapperValidator, Offset } from "./common/event_types.js";
 import { logger } from "./common/logger.js";
 import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
-import { connectToKafka, subscribeToKafka, topic_transactions } from "./kafka_consumer.js";
-import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./common/db/procedures.js";
-import { TransactionResultStored, TransactionStored } from "./common/db/tables.js";
+import { connectToKafka, KafkaConnection, topic_transactions } from "./kafka_consumer.js";
+import { QueryRes, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./common/db/procedures.js";
+import { rawDataTable, statTable, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from "./common/db/tables.js";
+import { assert } from "console";
+import { off } from "process";
 
 
 
@@ -85,10 +88,9 @@ export async function getOffsetsWhenPartitionsAssigned(
  *  if the srevice is unable to write data to the database, then
  * it will log the error and crash the service.
  */
-export async function processConsumedBatch(topic: string, partition: number, messages: string[], lastOffset: string, db_connection: UserConnection) {
-    const batchInfo = () => `g:${groupId}, t:${topic}, p:${partition}, o: ${lastOffset}`;
+export async function processConsumedBatch(offset: Offset, messages: string[], dbSender: DbSender) {
     if (messages.length == 0) {
-        logger.log(`No messages in ${batchInfo()}`);
+        logger.log(`No messages in`, offset);
         return;
     }
     let sendRaw = false;
@@ -102,34 +104,21 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         */
         sendRaw = true;
         mtrx.metrics?.kafkaParseFailure?.inc(messages.length);
-        logger.error(`Failed to parse ${batchInfo()}: ${e}`);
-    }
-    const sendAsRaw = async () => {
-        // Not handling sendAsRaw exceptions, because raw table is a critical
-        // fallback storage and failure to write to it means something is very wrong
-        try {
-            await db_connection.writeRawMessages(messages,
-            {groupId, offset:lastOffset,
-                partition,
-                topic});
-            mtrx.metrics?.dbUnknownMessageWritten?.inc(messages.length);
-        } catch (e) {
-            mtrx.metrics?.dbQueryFailure?.inc(messages.length);
-            throw `Failed to write${batchInfo()} raw: ${e}`
-        }
+        logger.error(`Failed to parse` , offset, ":", e);
     }
     if (sendRaw) {
-        await sendAsRaw();
+        await dbSender.sendRaw(messages, offset);
         return;
     }
-    const writer  = (topic === topic_transactions ? setUpTempTransactionsTable
+    const writer  = (offset.topic === topic_transactions ? setUpTempTransactionsTable
         : setUpTempTransactionResultsTable) as SetUpTempTableProc<TransactionStored|TransactionResultStored>;
     try {
-        const res = await db_connection.writeDataTransactionally(
+        const res = await dbSender.sendMessagesTransactionally(
             writer,
             msgs!,
-            {groupId, offset: lastOffset, partition, topic})
-        if (res.rolledBack) {
+            offset
+        );
+        if (res.rolledBack === true) {
             // Loss of connection will reveal itself during raw data write
             sendRaw = true;
             mtrx.metrics?.dbRollbackCount?.inc(1);
@@ -139,10 +128,10 @@ export async function processConsumedBatch(topic: string, partition: number, mes
         }
     } catch (e) {
         mtrx.metrics?.dbQueryFailure?.inc(messages.length);
-        throw `Failed to write transaction data in ${batchInfo()}: ${JSON.stringify(e)}`
+        throw new Error(util.format(`Failed to write transaction data in`, offset, ":", e));
     }
     if (sendRaw) {
-        await sendAsRaw();
+        await dbSender.sendRaw(messages, offset);
     }
 }
 
@@ -167,39 +156,67 @@ export async function processConsumedBatch(topic: string, partition: number, mes
  */
 async function connectToDb(): Promise<UserConnection> {
     try {
-        return await UserConnection.create(DB_USER)
+        return await UserConnection.create("sa")
+        // return await UserConnection.create(DB_USER)
     } catch (e) {
         mtrx.metrics?.dbConnectionFailure?.inc(1);
         throw `Failed to connect to database: ${e}`
     }
 }
 
+const DB_SIZE_LIMIT = 1024 * 1024 * 100; // 100 MB
+export class DbSender {
+    constructor(public connection: UserConnection, private sizeLimit: number = DB_SIZE_LIMIT) {}
+    // TODO: move row rotation outside of "writeDataTransactionally"
+    async sendRaw(messages: string[], oInfo: Offset): Promise<void> {
+        // Not handling sendAsRaw exceptions, because raw table is a critical
+        // fallback storage and failure to write to it means something is very wrong
+        try {
+            await this.connection.writeRawMessages(messages, oInfo);
+            const rotated = await this.connection.rotateTableRows(messages.length);
+            mtrx.metrics?.dbRowsRotated?.inc(rotated);
+            mtrx.metrics?.dbUnknownMessageWritten?.inc(messages.length);
+        } catch (e) {
+            mtrx.metrics?.dbQueryFailure?.inc(messages.length);
+            throw new Error(util.format(`Failed to write`, oInfo, ":", e));
+        }
+    }
+    async sendMessagesTransactionally(tempTable: SetUpTempTableProc<TransactionResultStored | TransactionStored>,
+            records: InKafkaMessage[],
+            oInfo: Offset,
+            triggerRollback: boolean = false
+        ): Promise<QueryRes> {
+        try {
+            const res = await this.connection.writeDataTransactionally(tempTable, records, oInfo, triggerRollback);
+            const rotated = await this.connection.rotateTableRows(records.length);
+            mtrx.metrics?.dbRowsRotated?.inc(rotated);
+            return res;
+        } catch (e) {
+            logger.error(`Failed to write`, oInfo, ":", e);
+            throw e;
+        }
+    }
+} 
 export class Sink {
     static async create(): Promise<Sink> {
         const healthServer = new HealthCheckSever(false);
+        // TODO: make persistent service (in the same container) 
+        // where monitoring stats could be pushed on controlled crash
         await mtrx.startMonitoring()
-        const db_connection: UserConnection = await connectToDb();
-        const consumer: kf.Consumer = await connectToKafka(async (e: kf.ConsumerGroupJoinEvent) => {
-            const offsets = await db_connection.getOffsets();
-            logger.log(`Consumer group join event: ${JSON.stringify(e)}`);
-            return Array.from(Object.entries(e.payload.memberAssignment)).flatMap(o => {
-                return o[1].map(p => ({
-                    topic: o[0],
-                    partition: p,
-                    offset: offsets.getOffset(groupId, o[0], p) || "0"
-                }))
-            })
-        }, () => {
-            healthServer.isHealthy = true;
-            logger.log(`Consumer is ready to process messages`);
+        const dbSender = new DbSender(await connectToDb());
+        const offsets = await dbSender.connection.getOffsets();
+        const connection = await connectToKafka((topic: string, p: number) => {
+            return offsets.getOffset(groupId, topic, p) || "0";
+        }, async (msgs, o) => {
+            await processConsumedBatch(msgs, o, dbSender);
         });
-        await subscribeToKafka(consumer, async (t, p, msgs, o) => {
-            await processConsumedBatch(t, p, msgs, o, db_connection);
-        });
-        return new Sink(db_connection, consumer, healthServer);
+        logger.log(`Consumer is ready to process messages`);
+        healthServer.isHealthy = true;
+        return new Sink(dbSender, connection, healthServer);
     }
-    private constructor(public db_connection: UserConnection,
-        public consumer: kf.Consumer,
+    private constructor(
+        public db_connection: DbSender,
+        public consumer: KafkaConnection,
         public healthcheckServer: HealthCheckSever) {}
 }
 

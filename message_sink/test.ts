@@ -1,8 +1,8 @@
 import { UserConnection } from './common/db/db_defines.js';
 import { createSchema } from './common/db/init.js';
 import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, StatementType, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
-import { getEnv, last, RangeSet, testRangeSet } from './common/utils.js';
-import { groupId, processConsumedBatch } from './sink.js';
+import { getEnv, last, OverflowingCounter, RangeSet, testRangeSet } from './common/utils.js';
+import { DbSender, groupId, processConsumedBatch } from './sink.js';
 import { describe, it } from 'mocha'
 // addint as promised
 import chai, { expect } from 'chai';
@@ -10,8 +10,8 @@ import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
 import { logger } from './common/logger.js';
 import { connectToDatabase } from './common/db/common.js';
-import { parseQueryRes, RawTables, transactionResultsTable, transactionsTable } from './common/db/tables.js';
-import { setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
+import { parseQueryRes, RawTables, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
+import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
@@ -57,10 +57,10 @@ function getReturnedTransactions(tBatches: Batch[], resBatches: Batch[], user: n
         .map(([transaction, _]) => transaction);
 }
 
-function sendBatch(topic: string, batch: Batch, db_connection: UserConnection) {
+function sendBatch(topic: string, batch: Batch, sender: DbSender) {
     const offset = last(batch)!.o;
     const messages = batch.map(b => JSON.stringify(b.t));
-    return processConsumedBatch(topic, 0, messages, offset, db_connection);
+    return processConsumedBatch({topic, partition: 0, offset, groupId}, messages, sender);
 }
 
 async function testOffsets(topic: string, val: string, connection: UserConnection) {
@@ -70,26 +70,26 @@ async function testOffsets(topic: string, val: string, connection: UserConnectio
 
 async function sendTransactions(tBatch: Batch, msg: string) {
     const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);
-    await sendBatch(topic_transactions, tBatch, db_connection!);
-    const ignored = (await db_connection!.getRawData(expectedIgnored.length, RawTables.transactions))
+    await sendBatch(topic_transactions, tBatch, dbSender!);
+    const ignored = (await dbSender!.connection.getRawData(expectedIgnored.length, RawTables.transactions))
     const parsed = ignored.map(i => TransactionValidator.parse(parseQueryRes(i, transactionsTable.columns)));
     compareObjecs(parsed, expectedIgnored, msg);
 
-    await testOffsets(topic_transactions, last(tBatch)!.o, db_connection!);
+    await testOffsets(topic_transactions, last(tBatch)!.o, dbSender!.connection);
 }
 async function sendTResults(resBatch: Batch, msg: string) {
-    await sendBatch(topic_transaction_res, resBatch, db_connection!);
+    await sendBatch(topic_transaction_res, resBatch, dbSender!);
     const expectedIgnored = getIgnored<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
-    const ignored = ((await db_connection!.getRawData(expectedIgnored.length, RawTables.transaction_results)));
+    const ignored = ((await dbSender!.connection.getRawData(expectedIgnored.length, RawTables.transaction_results)));
     const parsed = ignored.map(i => TransactionResultValidator.parse(parseQueryRes(i, transactionResultsTable.columns)));
     compareObjecs(parsed, expectedIgnored, msg);
 
-    await testOffsets(topic_transaction_res, last(resBatch)!.o, db_connection!);
+    await testOffsets(topic_transaction_res, last(resBatch)!.o, dbSender!.connection);
 }
 async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
     const expectedReturned = getReturnedTransactions(tBatch, resBatches, user);
     const ts: Transaction[] = [];
-    await db_connection!.streamTransactions([{ userId: user, type: StatementType.FS }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
+    await dbSender!.connection.streamTransactions([{ userId: user, type: StatementType.FS }], async (userId: number, pidx: number, transaction: InKafkaMessage) => {
         ts.push(TransactionValidator.parse(transaction.payload));
     })
     compareObjecs(ts, expectedReturned, msg);
@@ -99,18 +99,33 @@ function compareObjecs<T>(actual: T[], expected: T[], message: string) {
     const e = expected;
     chai.expect(a, message).to.deep.equal(e);
 }
-let db_connection: UserConnection | undefined = undefined
+let dbSender: DbSender | undefined = undefined
 describe('Kafka Consumer Tests', function () {
-    this.timeout(10000); // Set timeout for the tests
+    this.timeout(10000000); // Set timeout for the tests
     this.beforeAll(async () => {
         const pool = await connectToDatabase(user_sa)!;
-        // pool.request().query(`use ${TEST_DB_NAME}`);
-        db_connection = new UserConnection(pool);
+        // await pool.request().query(`use ${TEST_DB_NAME}`);
+        dbSender = new DbSender(new UserConnection(pool));
     });
     this.beforeEach(async () => {
-        await createSchema(db_connection!.pool, "TestDB");
+        await createSchema(dbSender?.connection.pool!, TEST_DB_NAME);
     });
-
+    it.only(`Sanity check`, async () => {
+        async function async1() {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            logger.log("Async operation 1 complete");
+        }
+        function async2() {
+            return async1().then(() => {
+                logger.log("Waiter on async operation 1 then complete");
+            });
+        }
+        async2().then(async () => {
+            logger.info("After async operation 3 then call");
+        });
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        logger.log("After wait");
+    })
     it(`Test normal case`, async () => {
         let tIdx = 1;
         let rIdx = 1;
@@ -199,4 +214,39 @@ describe('Kafka Consumer Tests', function () {
         await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 1, `Checking valid transactions after batch 2 and 3`);
         await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 2, `Checking valid transactions after batch 2 and 3`);
     });
+    it(`Test database row rotation`, async () => {
+        const counter = new OverflowingCounter();
+        let ROWCOUNT = 12000;
+
+        while (true) {
+            let msgs: InKafkaMessage[] = [];
+            for (let i = 0; i < ROWCOUNT; i++) {
+                counter.inc();
+                msgs.push({ metadata: {},
+                            payload: { id: counter.value, 
+                                dateTime: 100.0 * counter.value, 
+                                amount: 1.00, 
+                                userIdFrom: 1, 
+                                userIdTo: 2 } as Transaction });
+            }
+            type eb = SetUpTempTableProc<TransactionStored|TransactionResultStored>;
+            const tempTable = setUpTempTransactionsTable as eb;
+            const t1 = Date.now();
+            if (Math.random() < 0.1) {
+                logger.warn(`triggering conflict`)
+                msgs.push({ metadata: {}, payload: { ...msgs[0].payload, id: msgs[0].payload.id} as Transaction });
+            }
+            await dbSender?.sendMessagesTransactionally(tempTable, msgs, 
+                {topic: topic_transactions, partition: 0, offset: `${counter.value}`, groupId},
+            Math.random() < 0.1); // 10% chance to trigger rollback
+            const tempTableRes = setUpTempTransactionResultsTable as eb;
+            await dbSender?.sendMessagesTransactionally(tempTableRes, msgs.map(n => {
+                return { metadata: n.metadata, payload: { id: n.payload.id, dateTime: n.payload.dateTime, state: TResult.CONFIRMED } as TransactionResult }
+            }), {topic: topic_transaction_res, partition: 0, offset: `${counter.value}`, groupId},
+            Math.random() < 0.1); // 10% chance to trigger rollback
+            const t2 = Date.now();
+            logger.log(`insertion time`, t2 - t1);
+            
+        }
+    })
 });
