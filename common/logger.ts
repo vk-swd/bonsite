@@ -4,7 +4,7 @@
 
 export class Logger {
     private static instance: Logger;
-    // private logLevel: LogLevel;
+    // TODO: make logs delivered to be a dedicated compressed kafka topic
 
     private constructor() {
         // this.logLevel = LogLevel.INFO; // Default log level

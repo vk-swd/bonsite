@@ -65,7 +65,7 @@ export class Serialiser extends BaseWorker<StatementRequestResult> implements Wo
         metrics?.servedStatementsCount.inc();
         metrics?.servedTransactionRecords.inc(this.rresult.length);
         // TODO: total count inference is not yet implemented. Should be returned as extra recordset
-        this.deferred.resolve({filePath: "", totalCount: this.rresult.length,
+        this.deferred.resolve({filePath: "", totalCount: this.totalCounter,
             offset: this.params.offset ?? 0, transactions: this.rresult});
         return Promise.resolve();
     }

@@ -182,7 +182,7 @@ services:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD}
     hostname: "${MSSQL_HOSTNAME}"
-    mem_limit: 5g
+    mem_limit: 10g
     memswap_limit: 0m
     networks:
         - backend_net

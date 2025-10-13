@@ -29,4 +29,7 @@ export class KClient {
   getProducer() {
     return this.kf.producer({retry: {retries: 10}})
   }
+  getAdmin() {
+    return this.kf.admin()
+  }
 };

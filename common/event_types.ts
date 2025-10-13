@@ -33,7 +33,10 @@ const DatePtrValidator = z.object({
 export const MetadataValidator = z.object({
     dateTime: z.number().optional(),
     userDatePtrs: z.array(DatePtrValidator).optional(),
-    state: z.enum(TResult).optional()
+    datePosted: z.number().optional(),
+    dateStored: z.number().optional(),
+    state: z.enum(TResult).optional(),
+    info: z.string().optional()
 })
 export const MetadataWrapperValidator = z.object({
     metadata: MetadataValidator,

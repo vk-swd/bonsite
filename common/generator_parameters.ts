@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { StatementParameters } from "./event_types";
 
 export const GenParametersValidator = z.object({
     userCount: z.number(),
@@ -8,7 +9,7 @@ export const GenParametersValidator = z.object({
     maxDelayMs: z.number().optional(),
     minUserId: z.number().optional(),
     minTransactionId: z.number().optional()
-}).register(z.globalRegistry, { description: "GeneratorParameters" });
+})
 export type GenParameters = z.infer<typeof GenParametersValidator>;
 
 export const PostTransactionValidator = z.object({
@@ -17,7 +18,7 @@ export const PostTransactionValidator = z.object({
     userTo: z.number(),
     amount: z.number(),
     date: z.number()
-}).register(z.globalRegistry, { description: "PostTransactionParameters" });
+});
 export type PostTransactionParams = z.infer<typeof PostTransactionValidator>;
 
 export const startUrl = "start"
@@ -30,13 +31,14 @@ export enum GenerationState {
     STOPPED = 2
 }
 export const ProgressReportValidator = z.object({
+    postedPending: z.number(),
     totalSent: z.number(),
     isRunning: z.enum(GenerationState),
     percentComplete: z.number(),
     maxUserId: z.number(),
     maxTransactionId: z.number(),
     generated: z.number()
-}).register(z.globalRegistry, { description: "ProgressReport" });
+});
 export type ProgressReport = z.infer<typeof ProgressReportValidator>;
 
 const MAGIC_UNDEFINED = -1;
@@ -76,11 +78,14 @@ export class Counters {
 }
 export class UserCounters {
     data = new Map<number, Counters>();
+    params: GenParameters | undefined;
+    maxId: number = 0;
     serialise(): string {
-        return Array.from(this.data.values()).map((c => c.serialise())).join(',\n');
+        return `${this.maxId}\n` + Array.from(this.data.values()).map((c => c.serialise())).join(',\n');
     }
-    reset(): void {
+    reset(params: GenParameters): void {
         this.data.clear();
+        this.params = params;
     }
     get(userId: number): Counters {
         if (!this.data.has(userId)) {
@@ -94,5 +99,24 @@ export class UserCounters {
         c.amountSum += amount;
         c.updateMinDate(date);
         c.updateMaxDate(date);
+    }
+}
+
+export enum GenRequestErrorType {
+    INVALID_PARAMS = "Invalid parameters",
+    QUEUE_FULL = "Generator queue is full",
+    KAFKA_FULL = "Kafka queue is full",
+    GENERATOR_BUSY = "Generator is busy",
+    GENERATOR_NOT_RUNNING = "Generator is not running",
+    STAT_REQUEST_ERROR = "Error getting statistics",
+    INTERNAL_ERROR = "Internal error"
+}
+export class GenRequestError extends Error {
+    constructor(public message: string, public type: GenRequestErrorType) {
+        super(message);
+        this.name = "GenRequestError";
+    }
+    toString() {
+        return JSON.stringify({stack: this.stack, error: this.name, message: this.message, type: this.type});
     }
 }

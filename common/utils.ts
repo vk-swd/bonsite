@@ -1,4 +1,5 @@
 import { clear } from "console";
+import { runInThisContext } from "vm";
 
 export function last<T>(a: Array<T>): T | undefined {
     return a[a.length - 1];
@@ -256,7 +257,7 @@ export class ProgressPrinter {
             process.stdout.clearLine(0);   // clear current line
             process.stdout.cursorTo(0);    // move cursor to beginning of line
         }
-        process.stdout.write(this.msg((this.it * 100 / this.total).toFixed(0).padStart(3)));
+        process.stdout.write(this.msg((this.it * 100 / this.total).toFixed(0).padStart(3)) + ` of ${this.total}`);
         if (this.newline) {
             process.stdout.write('\n'); // needed to flush the line
         }
@@ -286,5 +287,41 @@ export class ProgressPrinter {
             }
             this.writeMsg();
         }
+    }
+}
+
+export class OverflowingCounter {
+    private count = 0;
+    static MAX = (0x7FFFFFFFFFFFFFFF - 1) / 2;
+    static diff(from: number, to: number): number {
+        const oFrom = OverflowingCounter.eval(from);
+        const oTo = OverflowingCounter.eval(to);
+        if (oTo >= oFrom) {
+            return oTo - oFrom;
+        }
+        return OverflowingCounter.MAX - oFrom + oTo;
+    }
+    constructor() {}
+    set(value: number) {
+        this.count = OverflowingCounter.eval(value);
+    }
+    inc(value = 1) {
+        this.count = OverflowingCounter.eval(this.count + value);
+        return this.count;
+    }
+    evalInc(val: number): number {
+        return OverflowingCounter.eval(this.count + val);
+    }
+    static eval(val: number): number {
+        if (!Number.isInteger(val)) {
+            throw new Error("Value must be an integer")
+        }
+        return val % OverflowingCounter.MAX;
+    }
+    get(): number {
+        return this.count;
+    }
+    get value(): number {
+        return this.count;
     }
 }
