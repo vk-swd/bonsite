@@ -73,7 +73,6 @@ export const UserDataResultValidator = z.object({
     totalCount: z.number()
 });
 export type UserDataResult = z.infer<typeof UserDataResultValidator>;
-
 export const ServerStateValidator = z.object({
     lastTransactionPosted: z.string().optional().nullable(),
     lastTransactionRes: z.string().optional().nullable(),
@@ -127,3 +126,10 @@ export const StatementRequestResultValidator = z.object({
 
 export type StatementRequestResult = z.infer<typeof StatementRequestResultValidator>;
 
+
+export const LoginDataValidator = z.object({
+    user: z.string(),
+    password: z.string(),
+    metadata: z.string().optional()
+});
+export type LoginData = z.infer<typeof LoginDataValidator>;

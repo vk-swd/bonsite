@@ -1,16 +1,20 @@
 
-import CopyPlugin from "copy-webpack-plugin"
+import HtmlWebpackPlugin from "html-webpack-plugin"
 
 if (process.env.FRONTEND_DEPLOY_FOLDER === undefined) {
   throw new Error("FRONTEND_DEPLOY_FOLDER environment variable is not set");
 }
 
 export default {
-    entry: './main.tsx',
+    entry: {
+      main: './app/main.tsx',
+      login: './login/main.tsx'
+    },
     output: {
       path: process.env.FRONTEND_DEPLOY_FOLDER, //process.env.KAFKA_HOSTNAME
-      filename: 'main.js',
+      filename: '[name].js',
     },
+    devtool: 'source-map',
     module: {
       rules: [
         {
@@ -33,13 +37,23 @@ export default {
         ".mjs": [".mts", ".mjs"]
       }
     },
-    plugins: [
-      new CopyPlugin({
-        patterns: [
-          { from: 'index.html', to: process.env.FRONTEND_DEPLOY_FOLDER }, // copies all files from public/ into dist/
-        ],
-      })
-    ]
+    plugins: [new HtmlWebpackPlugin({
+      chunks: ['main'],
+      filename: 'index.html',
+      template: 'app/index.html'
+    }),
+    new HtmlWebpackPlugin({
+      chunks: ['login'],
+      filename: 'login.html',
+      template: 'login/index.html'
+    })],
+    // plugins: [
+    //   new CopyPlugin({
+    //     patterns: [
+    //       { from: 'index.html', to: process.env.FRONTEND_DEPLOY_FOLDER }, // copies all files from public/ into dist/
+    //     ],
+    //   })
+    // ]
   };
 
 

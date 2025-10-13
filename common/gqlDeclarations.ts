@@ -44,7 +44,6 @@ export function makeNamedZodType<T extends z.ZodRawShape>(schema: z.ZodObject<T>
     // TODO: tighen up the procedure here to make sure that no modification of the shape is possible
     return duplicateZodType(schema, false).register(z.globalRegistry, { description: name }) as z.ZodObject<T>;
 }
-
 export function parseReturnNames<T>(name: string, o: ZodType<T>): string {
     const lineFirst = name;
     let lineSecond = "";
@@ -78,7 +77,47 @@ export function getTypeName(val: z.ZodTypeAny): string {
 export type GqlIfy<T> = T extends Object ? {
     [K in keyof T]: T[K] extends number | undefined ? string : GqlIfy<T[K]>
 } : T extends number ? string : T;
-
+export const customHeaderParamClientId = "x-client-id";
+export const sessionIdCookie = "sessionId";
+export enum ApiErrorType {
+    NONE = 0,
+    INVALID_LOGIN = 1,
+    SERVER_ERROR = 2,
+    INVALID_STATEMENT_REQUEST = 3,
+    INVALID_TRANSACTION = 4,
+    INVALID_GENERATOR_PARAMETERS = 5,
+    GENERATOR_BUSY = 6,
+    NOT_AUTHENTICATED = 7,
+    SESSION_EXPIRED = 8,
+    INVALID_TOKEN = 9,
+    TOO_MANY_REQUESTS = 10
+}
+export class ApiError extends Error {
+    constructor(message: string, public type: ApiErrorType = ApiErrorType.SERVER_ERROR, public prevError?: any) {
+        super(message);
+        this.name = "ApiError";
+    }
+    static reconstruct(obj: any): ApiError | any {
+        if (obj && obj.name == "ApiError") {
+            const prev = ApiError.reconstruct(obj.prevError)??obj.prevError;
+            const err = new ApiError(obj.message, obj.type, prev);
+            err.stack = obj.stack;
+            err.cause = obj.cause;
+            return err;
+        }
+        return obj;
+    }
+    toJSON() {
+        return {
+            name: this.name,
+            message: this.message,
+            type: this.type,
+            prevError: this.prevError,
+            stack: this.stack,
+            cause: this.cause
+        };
+    }
+}
 class GqlFunction1<T, K> {
     declarationStr: string;
     queryStr: string;
@@ -117,7 +156,7 @@ class GqlFunction1<T, K> {
     gqlCall(): string {
         return this.queryStr;
     }
-    async fetchCall(url: string, params?: z.infer<typeof this.paramType>): Promise<z.infer<typeof this.coercedReturnType>> {
+    async fetchCall(url: string, params?: z.infer<typeof this.paramType>, clientId?: string): Promise<T> {
         const postData = this.gqlCall();
         const variables = params ? { input: params } : undefined;
         const body = JSON.stringify({query: postData, variables}, (key: string, value: any) => {
@@ -127,22 +166,32 @@ class GqlFunction1<T, K> {
             }
             return value;
         });
+        const headers = { 'Content-Type': 'application/json',
+            ...(clientId ? {[customHeaderParamClientId]: clientId} : {})
+        }
         try {
             const rewRes = await fetch(url, { method: "POST",
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body })
-            .catch(e => { throw new Error(`Error in fetch: ${e}`); });
+            .catch(e => { throw new ApiError(`Error in fetch: ${e}`, ApiErrorType.SERVER_ERROR, e); });
             if (!rewRes.ok) {
-                const text = await rewRes.text();
-                throw new Error(`Bad req status: ${text} ${rewRes.statusText}`);
+                const eMessage = `Bad req status: ${rewRes.status} - ${rewRes.statusText}`;
+                const contentType = rewRes.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    const data = ApiError.reconstruct(await rewRes.json());
+                    throw new ApiError(eMessage + ", json.", ApiErrorType.SERVER_ERROR, data);
+                } else {
+                    const text = await rewRes.text();
+                    throw new ApiError(eMessage + ", text.", ApiErrorType.SERVER_ERROR, text);
+                }
             }
             const raw = await rewRes.json() as any
             if (raw.errors) {
-                throw new Error(`GQL error: ${JSON.stringify(raw.errors)}`);
+                throw new ApiError(`GQL error: ${JSON.stringify(raw.errors)}`, ApiErrorType.SERVER_ERROR, raw.errors);
             }
             return this.coercedReturnType.parse(raw.data[this.name]);
         } catch (e) {
-            throw new Error(`Error in ${url} request ${body}:  ${e}`);
+            throw new ApiError(`Error in ${url} request ${body}:  ${e}`, ApiErrorType.SERVER_ERROR, e);
         }
     }
 }
