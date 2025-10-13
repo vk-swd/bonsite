@@ -1,23 +1,24 @@
+import { parse } from 'path';
 import { KClient } from './common/kafka_client.js';
 import { logger } from './common/logger.js';
-import { metrics, totalmsgSent, updateMaxKafkaSendLatencyMs } from './monitoring_local.js';
+import { metrics } from './monitoring_local.js';
 import EventEmitter from 'events';
 import * as kf from 'kafkajs';
+import { OverflowingCounter } from './common/utils.js';
 
-
-
+// 5 million messages can be buffered in memory. Then wait for cleanup.
+const MAX_UNCONSUMED_MESSAGE_COUNT = 2000000;
 export class KProducer extends EventEmitter {
     public static event = {
         requestMessages: 'requestMessages',
     }
-    retryTimer: NodeJS.Timeout | undefined = undefined;
-    outbox = new Array<{ topic: string, partition: number, msg: string, now: number }>();
-
     isConnected = false;
     isStopped = false;
     inFlight = 0;
-    producer: kf.Producer;
-
+    genTaskPending = 0;
+    postedPending= 0;
+    producer: Promise<kf.Producer>;
+    admin: Promise<kf.Admin>;
     /*  "outbox" is a simplified version of reliability guarantee
           during the delivery.
         For delivery of critical information some redundant storage
@@ -27,53 +28,53 @@ export class KProducer extends EventEmitter {
         Can automatically batch requests using "linger" and "max_batch_size"
           parameters like Kafka does.
     */
+    outbox = new Array<{ topic: string, partition: number, msg: string, now: number, genTask: boolean; }>();
+    retryTimer: NodeJS.Timeout | undefined = undefined;
+    totalMessageStoredInKafka = 0;
+    wailtingForReport = false;
     constructor(private client: KClient, private maxInFlight: number = 1000) {
         super();
-        this.producer = this.client.getProducer();
-        this.producer.on('producer.connect', () => {
+        const producer = this.client.getProducer();
+        const admin = this.client.getAdmin();
+        producer.on('producer.connect', () => {
             this.isConnected = true;
+            metrics?.connectCount.inc();
             // TODO: test that this will be triggered every time connection was established
             // TODO: also check that the connection will be restored after a break and this will be emit
         })
-        this.producer.on('producer.disconnect', () => {
+        producer.on('producer.disconnect', () => {
             metrics?.disconnectCount.inc();
             this.isConnected = false;
             if (!this.isStopped) {
-                this.producer.connect();
                 metrics?.reconnectAttempts.inc();
             }
             // TODO: should i reconnect manually if the connection was broken, or the producer will attempt reconnecting?
         })
-        this.producer.on('producer.network.request_timeout', () => {
+        producer.on('producer.network.request_timeout', () => {
             metrics?.networkRequestTOCount.inc();
             // TODO: should i reconnect manually if the connection was broken, or the producer will attempt reconnecting?
         })
-        this.producer.on('producer.network.request', (data) => {
+        producer.on('producer.network.request', (data) => {
             metrics?.networkRequestCount.inc();
             // logger.debug(`Network request: ${JSON.stringify(data)}`);
             // TODO: is this something that emit when producer sends? Why?
         })
-        this.producer.on('producer.network.request_queue_size', (data) => {
+        producer.on('producer.network.request_queue_size', (data) => {
             metrics?.networkRequestCount.inc();
             // logger.debug(`Network request queue size: ${JSON.stringify(data)}`);
             // TODO: is this something that emit when producer sends? Why?
         })
-        this.connect();
+        this.producer = producer.connect().then(_ => producer);
+        this.admin = admin.connect().then(_ => admin);
     }
-    connect() {
-        this.isStopped = false;
-        if (this.isConnected) {
-            return;
-        }
-        this.producer.connect();
+    checkAvailableCapacity(): number {
+        return MAX_UNCONSUMED_MESSAGE_COUNT - this.totalMessageStoredInKafka - this.outbox.length - this.inFlight;
     }
-    async disconnect() {
-        this.isStopped = true;
-        this.isConnected = false;
-        await this.producer.disconnect();
+    getGenTaskCountPending() {
+        return this.genTaskPending;
     }
-    getInFlight() {
-        return this.inFlight;
+    getPostedPending() {
+        return this.postedPending;
     }
     attemptDelivery() {
         if (!this.isConnected || this.retryTimer !== undefined || this.inFlight >= this.maxInFlight) {
@@ -107,11 +108,20 @@ export class KProducer extends EventEmitter {
                 const slice = b.splice(0, 20);
                 total += slice.length;
                 this.inFlight+= slice.length;
-                this.producer.send({
+                this.producer.then(producer=> producer.send({
                     topic: slice[0].topic,
                     messages: slice.map(m => ({ value: m.msg, partition: m.partition })),
-                }).then(_ => {
-                    updateMaxKafkaSendLatencyMs(Date.now() - slice[0].now);
+                })).then(_ => {
+                    slice.forEach(m => {
+                        if (m.genTask) {
+                            this.genTaskPending--;
+                        } else {
+                            this.postedPending--;
+                        }
+                    });
+                    this.totalMessageStoredInKafka += slice.length;
+                    metrics?.msgSent.inc(slice.length);
+                    metrics?.maxSendIntervalMs.set(Date.now() - slice[0].now);
                 }).catch(e => {
                     metrics?.msgFailed.inc();
                     if (!this.isStopped) {
@@ -124,16 +134,57 @@ export class KProducer extends EventEmitter {
                         this.attemptDelivery()
                     }
                 });
-                // logger.debug(`Sending to topic ${m.topic} partition ${m.partition} message: ${m.msg}`);
             }
             if (total == 0) {
                 break;
             }
         }
         this.outbox.splice(0, toSend);
-        if (this.inFlight < this.maxInFlight / 2) {
+        this.maybeCountKafkaMessages();
+        if (this.outbox.length == 0) {
             this.emit(KProducer.event.requestMessages, this.maxInFlight - this.inFlight);
         }
+    }
+    dropKafkaRecords() {
+        return this.admin.then(admin => 
+                admin.fetchTopicMetadata({topics: ["transactions", "transaction_results"]}).then(meta => 
+                    Promise.all(meta.topics.map(t => admin.fetchTopicOffsets(t.name)
+                    .then(offsets => offsets.map(o => ({topic: t.name, partition: o.partition, offset: o.high}))))))
+                .then(offsets => Promise.all(
+                    offsets.flat().flat().map(o => admin.deleteTopicRecords({ topic: o.topic, 
+                    partitions: [{ partition: o.partition, offset: o.offset}] }))))
+            );
+    }
+    maybeCountKafkaMessages() {
+        if (this.checkAvailableCapacity() < MAX_UNCONSUMED_MESSAGE_COUNT / 3 || this.wailtingForReport) {
+            return;
+        }
+        this.wailtingForReport = true;
+        const msgSentBefore = this.totalMessageStoredInKafka;
+        this.admin.then(admin => {
+            admin.listTopics()
+            .then(topics => 
+                Promise.all(topics.map(t => admin.fetchTopicOffsets(t)))
+                .then(offsets => {
+                    let total = 0;
+                    for (const offsetsPerTopic of offsets) {
+                        for (const offset of offsetsPerTopic) {
+                            const high = Number.parseInt(offset.high)
+                            const low = Number.parseInt(offset.low)
+                            total += OverflowingCounter.diff(low, high);
+                        }
+                    }
+                    const msgSentDuringCheck = this.totalMessageStoredInKafka - msgSentBefore;
+                    this.totalMessageStoredInKafka = total + msgSentDuringCheck;
+                    this.wailtingForReport = false;
+                })
+            ).catch(e => {
+                // Until ungraceful shutdown
+                setTimeout(() => {
+                    this.wailtingForReport = false;
+                    this.maybeCountKafkaMessages()}, 5000);
+            })
+        });
     }
     private retryDelivery() {
         if (this.retryTimer !== undefined) {
@@ -145,8 +196,16 @@ export class KProducer extends EventEmitter {
         }, 1000);
     }
 
-    write(msg: string, topic: string, partition ?: number) {
+    write(msg: string, topic: string, genTask = false) {
         metrics?.msgPosted.inc();
-        this.outbox.push({ topic, partition: partition ?? 0, msg, now: Date.now() });
+        if (genTask) {
+            this.genTaskPending++;
+        } else {
+            this.postedPending++;
+        }
+        this.outbox.push({ topic, partition: 0, msg, now: Date.now(), genTask });
+    }
+    isBusy(): boolean {
+        return this.outbox.length > 0;
     }
   }

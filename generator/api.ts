@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
-import { GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatUrl, stopUrl } from './common/generator_parameters.js';
+import { GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatUrl, stopUrl, PostTransactionParams, GenRequestError } from './common/generator_parameters.js';
 import { getEnv } from './common/utils.js';
 import * as mt from './monitoring_local.js'
 import { handleRequest } from './common/apiRequestHandler.js';
@@ -12,7 +12,7 @@ const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 
 const metricStats = {
     incrementApiCallCount: () => mt.metrics?.apiCallCount.inc(),
-    updateMaxResponseDelayMs: (ms:number) => mt.updateMaxApiResponseDelayMs(ms),
+    updateMaxResponseDelayMs: (ms:number) => mt.metrics?.maxResponseDelayMs.set(ms),
     incrementFailedApiCallCount: () => mt.metrics?.failedApiCallCount.inc(),
     incrementUnknownApiCallCount: () => mt.metrics?.unknownApiCallCount.inc()
 };
@@ -21,8 +21,7 @@ export class GenApiServer extends EventEmitter {
     private server: Server;
     public static event = {
         startGen: 'start',
-        stopGen: 'stop',
-        postTransaction: 'postTransaction'
+        stopGen: 'stop'
     }
     handleStart(req: IncomingMessage, res: ServerResponse) : boolean {
         return handleRequest('/' + startUrl, req, res, async (data?: string) => {
@@ -48,21 +47,36 @@ export class GenApiServer extends EventEmitter {
     }
     handleGetStat(req: IncomingMessage, res: ServerResponse): boolean {
         return handleRequest('/' + getStatUrl, req, res, async () => {
-            const r = await this.getStat()
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(r);
+            this.getStat().then(r => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(r);
+            }).catch(e => {
+                res.writeHead(500);
+                res.end(JSON.stringify(e));
+            });
         }, metricStats);
     }
     handlePostTransaction(req: IncomingMessage, res: ServerResponse): boolean {
         return handleRequest('/' + et.postTransactionsUrl, req, res, async (data?: string) => {
-            const parsedData = JSON.parse(data!);
-            const params = PostTransactionValidator.parse(parsedData);
-            this.emit(GenApiServer.event.postTransaction, params);
-            res.writeHead(200);
-            res.end();
+            try {
+                const parsedData = JSON.parse(data!);
+                const params = PostTransactionValidator.parse(parsedData);
+                this.postTransaction(params);
+                res.writeHead(200);
+                res.end();
+            } catch (e) {
+                if (e instanceof GenRequestError) {
+                    res.writeHead(500, "Content-Type: application/json");
+                    res.end(e.toString());
+                } else {
+                    throw e;
+                }
+            }
         }, metricStats);
     }
-    constructor(private progressReporter: () => ProgressReport, private getStat: () => Promise<string>) {
+    constructor(private progressReporter: () => ProgressReport, 
+                private getStat: () => Promise<string>,
+                private postTransaction: (userData: PostTransactionParams) => void) {
         super()
         this.server = createServer(async (req, res) => {
             logger.info(`RECEIVING SOME REQUEST ${req.url}`)

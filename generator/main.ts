@@ -1,4 +1,4 @@
-import { GenParameters } from "./common/generator_parameters.js";
+import { GenParameters, GenRequestError, GenRequestErrorType } from "./common/generator_parameters.js";
 import { GenApiServer } from "./api.js";
 import { startMonitoring } from "./monitoring_local.js";
 import { Sender } from "./sender.js";
@@ -12,7 +12,10 @@ const sender = new Sender();
 
 let requestCount = 0;
 const SHARED_DIR = getEnv('SHARED_DIR');
-const api = new GenApiServer(() => sender.progress(), () => {
+function getProgress() {
+    return sender.progress();
+}
+function getStat(): Promise<string> {
     logger.info(`Generating stats to shared storage in ${SHARED_DIR}`);
     const statsToSave = sender.generator.getStat().serialise();
     const fileName = `${requestCount++}-${Date.now()}.json`;
@@ -20,16 +23,17 @@ const api = new GenApiServer(() => sender.progress(), () => {
         fs.writeFile(SHARED_DIR + "/" + fileName, statsToSave, (err) => {
             if (err) {
                 logger.error(`Error writing stats to file ${fileName}: ` + err);
-                reject(err);
+                reject(new GenRequestError(`Error writing stats to file ${fileName}: ` + err, GenRequestErrorType.STAT_REQUEST_ERROR));
                 return;
             }
             resolve(fileName);
         })
     });
-});
-api.on(GenApiServer.event.postTransaction, (p: PostTransactionParams) => {
-    sender.postTransaction(p);
-});
+}
+function postTransaction(params: PostTransactionParams): Promise<void> {
+    return sender.postTransaction(params);
+}
+const api = new GenApiServer(getProgress, getStat,postTransaction);
 api.on(GenApiServer.event.startGen, (p: GenParameters) => {
     logger.log("Starting sender signaled by API with params" + JSON.stringify(p));
     sender.start(p);
