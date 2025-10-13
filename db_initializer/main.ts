@@ -52,5 +52,18 @@ for (const user of [sinkUser, statementUser]) {
 await runQuery(pool,`ALTER ROLE ${statementCreatorRole} ADD MEMBER ${statementUser};`);
 await runQuery(pool,`ALTER ROLE ${sinkRole} ADD MEMBER ${sinkUser};`);
 
+// TODO: make this configurable
+await runQuery(pool,`
+    EXECUTE sp_configure 'show advanced options', 1;
+    RECONFIGURE;
+    EXEC sp_configure 'max server memory (MB)', 8000000;
+    RECONFIGURE;
+    CREATE LOGIN [my_admin] WITH PASSWORD = '${demo_password}';
+    ALTER SERVER ROLE sysadmin ADD MEMBER [my_admin];
+    CREATE USER [my_admin] FOR LOGIN [my_admin];
+    ALTER ROLE db_owner ADD MEMBER [my_admin];
+`);
+
+
 
 pool.close()
