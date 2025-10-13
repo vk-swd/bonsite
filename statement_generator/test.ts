@@ -63,8 +63,8 @@ describe('Sanity check', function () {
     });
     const userCount = 100000;
     type MsgOffset = { msg: InKafkaMessage, offset: string };
-    const sendBatch = async <T extends TransactionStored | TransactionResultStored>(
-        tempTableGen: SetUpTempTableProc<T>, messages: MsgOffset[], topic: string, addConflicts: boolean = false) => {
+    const sendBatch = async (tempTableGen: SetUpTempTableProc<TransactionStored | TransactionResultStored>, 
+                             messages: MsgOffset[], topic: string, addConflicts: boolean = false) => {
         if (addConflicts) {
             // add something that would trigger "catch" clause in message commit procedure
             // duplicates should do
@@ -350,8 +350,8 @@ describe('Sanity check', function () {
         console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)
     })
     it(`User request`, async () => {
-        await createSchema(db_connection!.pool, "TestDBStatementGen");
-        await db_connection?.pool.query(`use TestDBStatementGen`);
+        await createSchema(db_connection!.pool, "TestDBStatementGenUserReq");
+        await db_connection?.pool.query(`use TestDBStatementGenUserReq`);
         const usersToInsert = [
             { id: 1, name: 'User1' },
             { id: 10, name: 'User10' },

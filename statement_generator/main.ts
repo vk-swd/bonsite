@@ -26,7 +26,7 @@ const db_conn = await UserConnection.create(statementUser);
 const praparer = new Preparer(db_conn);
 const api = new StatementGenApiServer((p: StatementParameters) => praparer.addTask(p),
     (p: UserDataRequestParameters) => db_conn.getUsers(p),
-() => db_conn.getDBState());
+() => db_conn.getDBState(), (p) => db_conn.getUserDateRange(p));
 const healthCheckServer = new HealthCheckSever();
 
 

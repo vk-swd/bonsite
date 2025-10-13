@@ -50,7 +50,7 @@ export class BaseWorker<O> implements Worker<O> {
 export class Serialiser extends BaseWorker<StatementRequestResult> implements Worker<StatementRequestResult> {
     rresult: Transaction[] = [];
     finished = false;
-    offsetCounter = 0;
+    totalCounter = 0;
     constructor(private params: StatementParameters) {
         super();
     }
@@ -71,6 +71,7 @@ export class Serialiser extends BaseWorker<StatementRequestResult> implements Wo
         return Promise.resolve();
     }
     handle(t: InKafkaMessage): void {
+        this.totalCounter++;
         if (!this.params.count) {
             this.rresult.push(t.payload as Transaction);
             return;
@@ -82,8 +83,7 @@ export class Serialiser extends BaseWorker<StatementRequestResult> implements Wo
             this.rresult.push(t.payload as Transaction);
             return;
         }
-        if (this.params.offset > this.offsetCounter) {
-            this.offsetCounter++;
+        if (this.params.offset >= this.totalCounter) {
             return;
         }
         this.rresult.push(t.payload as Transaction);
@@ -111,7 +111,6 @@ export class FileWriter extends BaseWorker<StatementRequestResult> implements Wo
             metrics?.filesGenerated.inc();
             metrics?.servedStatementsCount.inc();
             metrics?.servedTransactionRecords.inc(lineCount);
-            updateMaxResponseDelayMs(Date.now() - this.creationTime);
             this.deferred.resolve({filePath: this.fileName, totalCount: lineCount, offset: 0, transactions: []});
         }).catch(e => {
             metrics?.fileWriteErrors.inc();
@@ -129,7 +128,6 @@ export class FileWriter extends BaseWorker<StatementRequestResult> implements Wo
 
 export class BundleHandler<O> {
     waitingList: {user: number, task: Worker<O>, param: StatementParameters}[] = [];
-    statementParams: StatementParameters[] = [];
     bundleTimer: NodeJS.Timeout | undefined = undefined;
     inFlightResuests = 0;
     taskDelayReportTO: NodeJS.Timeout;
@@ -172,7 +170,6 @@ export class BundleHandler<O> {
     addTask(p: StatementParameters): Promise<O> {
         const task: Worker<O> = this.workerFactory(p);
         this.waitingList.push({user: p.userId, task, param: p});
-        this.statementParams.push(p);
         if (!this.bundleTimer) {
             this.start();
         }

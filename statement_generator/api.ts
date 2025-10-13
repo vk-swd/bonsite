@@ -50,10 +50,22 @@ export class StatementGenApiServer extends EventEmitter {
             })
         }, metricCB);
     }
+    handleGetUserDateRange(req: IncomingMessage, res: ServerResponse) : boolean {
+        return handleRequest('/' + userDateRange, req, res, async (data?: string) => {
+            return this.userDateRange(UserDateRangeValidator.parse(JSON.parse(data!)))
+            .then(r => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.write(JSON.stringify(r));
+                res.end();
+                metrics?.apiSuccess.inc();
+            })
+        }, metricCB);
+    }
     constructor(
         private statementWriter: (p: StatementParameters) => Promise<StatementRequestResult>,
         private getUsers: (params: UserDataRequestParameters) => Promise<UserDataResult>,
-        private getDBState: () => Promise<ServerState>) {
+        private getDBState: () => Promise<ServerState>,
+        private userDateRange: (p: UserDateRange) => Promise<UserDateRange>) {
         super()
         this.server = createServer(async (req, res) => {
             console.log(`RECEIVING SOME REQUEST ${req.method} ${req.url}`)
@@ -61,6 +73,7 @@ export class StatementGenApiServer extends EventEmitter {
             if (this.handleUserReq(req, res)) return;
             if (this.handleStatementReq(req, res)) return;
             if (this.handleGetServerState(req, res)) return;
+            if (this.handleGetUserDateRange(req, res)) return;
             res.writeHead(404);
             res.end('Not Found');
             metrics?.apiUnknown.inc();
