@@ -1,93 +1,115 @@
-import { createInterface } from "readline";
+import { createInterface, Interface } from "readline";
 import fs from "fs";
 import { once } from "events";
 import { logger } from "./logger.js";
 import { Deferred } from "./utils.js";
-import { fail } from "assert";
 
 
+type ReadLinesState = {
+    rl: Interface
+    timer: NodeJS.Timeout | undefined, done: boolean,
+    hardStop: boolean, inFlight: number, lineQueue: string[],
+    lineCount: number, paused: boolean,
+    maxInFlight: number,
+    deferred: Deferred<number>,
+    lines?: number
+};
 
-export async function processLineByLine(fileName: string, processor: (line: string) => Promise<void>, maxInFlight?: number): Promise<number> {
-    const deferred = new Deferred<number>();
-    const rl = createInterface({
-        input: fs.createReadStream(fileName),
-        crlfDelay: Infinity,
-    });
-    let inFlight = 0;
-    let done = false;
-    let failed = false;
-    let paused = false;
-    let lineCount = 0;
-    const errorLengthLimit = 100;
-    const lineQueue: string[] = [];
-    let timer: NodeJS.Timeout | undefined = undefined;
-    const setTimer = () => {
-        if (timer) {
-            return
+const setTimer = (state: ReadLinesState) => {
+    // Report line processing state at intervals
+    if (state.timer) {
+        return
+    }
+    state.timer = setTimeout(() => {
+        logger.warn(`Processing, ${state.lineQueue.length} lines in queue, ${state.inFlight} in flight`);
+        clearTimeout(state.timer);
+        state.timer = undefined;
+        if ((state.done && state.lineQueue.length == 0) || state.hardStop) {
+            return;
         }
-        timer = setTimeout(() => {
-            logger.warn(`Processing paused for too long ${lineQueue.length} lines in queue, ${inFlight} in flight`);
-            clearTimeout(timer);
-            timer = undefined;
-            if ((done && lineQueue.length == 0) || failed) {
+        setTimer(state);
+    }, 10000);
+}
+const processedQueued = (state: ReadLinesState, processor: (line: string) => Promise<void>) => {
+    if ((state.done && state.lineQueue.length == 0) || state.hardStop) {
+        return;
+    }
+    const toProcess = state.maxInFlight ? Math.min(state.maxInFlight - state.inFlight, state.lineQueue.length) : state.lineQueue.length;
+    state.inFlight += toProcess;
+    if (state.maxInFlight) {
+        if (state.inFlight >= state.maxInFlight && !state.paused) {
+            state.paused = true;
+            if (!state.done) {
+                state.rl.pause();
+            }
+            setTimer(state);
+        } else if (state.inFlight < state.maxInFlight && state.paused) {
+            state.paused = false;
+            clearTimeout(state.timer);
+            state.timer = undefined;
+            if (!state.done) {
+                state.rl.resume();
+            }
+        }
+    }
+    Promise.all(state.lineQueue.splice(0,toProcess).map(line => {
+        processor(line)
+        .then(() => {
+            state.inFlight--;
+            state.lineCount++;
+            if (state.lines && state.lineCount >= state.lines) {
+                state.deferred.resolve(state.lineCount);
+                state.hardStop = true;
+                state.rl.close();
+            }
+            if (state.inFlight === 0 && state.lineQueue.length === 0 && state.done) {
+                state.deferred.resolve(state.lineCount);
                 return;
             }
-            setTimer();
-        }, 10000);
-    }
-    const processedQueued = () => {
-        if ((done && lineQueue.length == 0) || failed) {
-            return;
-        }
-        const toProcess = maxInFlight ? Math.min(maxInFlight - inFlight, lineQueue.length) : lineQueue.length;
-        inFlight += toProcess;
-        if (maxInFlight) {
-            if (inFlight >= maxInFlight && !paused) {
-                paused = true;
-                if (!done) {
-                    rl.pause();
-                }
-                setTimer();
-            } else if (inFlight < maxInFlight && paused) {
-                paused = false;
-                clearTimeout(timer);
-                timer = undefined;
-                if (!done) {
-                    rl.resume();
-                }
+            processedQueued(state, processor);
+        })
+        .catch((e) => {
+            state.deferred.reject(e);
+            state.hardStop = true;
+            if (!state.done) {
+                state.rl.close();
             }
-        }
-        Promise.all(lineQueue.splice(0,toProcess).map(line => {
-            processor(line)
-            .then(() => {
-                inFlight--;
-                lineCount++;
-                if (inFlight === 0 && lineQueue.length === 0 && done) {
-                    deferred.resolve(lineCount);
-                    return;
-                }
-                processedQueued();
-            })
-            .catch((e) => {
-                deferred.reject(e);
-                failed = true;
-                if (!done) {
-                    rl.close();
-                }
-            })
-        }))
-    }
-    rl.on('line', async (line) => {
-        lineQueue.push(line);
-        if (paused) {
+        })
+    }))
+}
+export async function processLineByLine(fileName: string, 
+    /* state machine:
+        1. no_pause|no_done|no_hardStop|in_flight_low|lineQ=0|no_timer|linesPending
+        2. no_pause
+    */
+    processor: (line: string) => Promise<void>, maxInFlight?: number, lines?: number): Promise<number> {;
+    const state: ReadLinesState = { 
+        rl: createInterface({
+            input: fs.createReadStream(fileName),
+            crlfDelay: Infinity,
+        }),
+        deferred: new Deferred<number>(),
+        timer: undefined, 
+        done: false, 
+        hardStop: false, 
+        paused: false, 
+        inFlight: 0,
+        lineQueue: [], 
+        lineCount: 0,
+        maxInFlight: maxInFlight??1000000,
+        lines: lines
+    };
+    state.rl.on('line', async (line) => {
+        state.lineQueue.push(line);
+        if (state.paused) {
             return;
         }
-        processedQueued();
+        processedQueued(state, processor);
     });
-    await once(rl, 'close');
-    done = true;
-    if (inFlight == 0 && lineQueue.length === 0) {
-        deferred.resolve(lineCount);
+    await once(state.rl, 'close');
+    state.done = true;
+    if (state.inFlight == 0 && state.lineQueue.length === 0) {
+        state.deferred.resolve(state.lineCount);
     }
-    return deferred.promise;
+    return state.deferred.promise;
 }

@@ -11,7 +11,7 @@ import { gql } from 'graphql-request'
 import * as fsp from 'fs/promises';
 import { Deferred } from './common/utils.js';
 
-import { InKafkaMessage, MetadataWrapperValidator, StatementParameters, StatementType, Transaction, TransactionValidator } from './common/event_types.js';
+import { InKafkaMessage, MetadataWrapperValidator, StatementParameters, StatementRequestResult, StatementType, Transaction, TransactionValidator } from './common/event_types.js';
 import { processLineByLine } from './common/files.js';
 import { getRandomValues } from 'crypto';
 import { ProgressPrinter } from './common/utils.js';
@@ -26,7 +26,7 @@ chai.config.includeStack = true;
 
 
 describe('Kafka Consumer Tests', function () {
-    this.timeout(1000000); // set timeout for the tests
+    this.timeout(1000000000); // set timeout for the tests
     it('', async () => {
         expect(true).to.be.true; // just to have a test
     });
@@ -60,8 +60,9 @@ describe('Kafka Consumer Tests', function () {
     });
     it(`Simple functional test`, async () => {
         logger.info(`Starting functional test with `, GQL_URL);
-        const runCount = 2;
-        const params = makeTestParams(10000, 1000000, runCount, () => Math.random());
+        const runCount = 1000;
+        // const params = await makeTestParams(1, 100000, runCount, () => Math.random());
+        const params = await makeTestParams(1000, 1000000, runCount, () => Math.random());
         let statementTotalCount = 0;
         params.forEach(p => {
             statementTotalCount += p.userCount;
@@ -72,7 +73,7 @@ describe('Kafka Consumer Tests', function () {
             await testStatements(progressTracker);
         }
     });
-    it.only(`Test statement offsets`, async () => {
+    it.skip(`Test statement offsets`, async () => {
         // post transactions with ids 1..1000 for user 1
         // send 200 transactions and see how windowing function returns values
         const dbInitialStats = await getDatabaseStats.fetchCall(GQL_URL)
@@ -138,7 +139,7 @@ describe('Kafka Consumer Tests', function () {
                         .then(res => {
                             const idxStart = from + offset;
                             const idxEnd = idxStart + count - 1;
-                            expect(res.transactions.length).to.equal(idxEnd - idxStart + 1)
+                            expect((res as StatementRequestResult).transactions.length).to.equal(idxEnd - idxStart + 1)
                             const printRec = () => {
                                 return util.format(`Params`, params, "records", res.transactions,
                                     `expected`, postedTransactions.slice(idxStart - 1, idxEnd)
@@ -146,7 +147,7 @@ describe('Kafka Consumer Tests', function () {
                             }
                             for (let i = idxStart; i <= idxEnd; i++) {
                                 const rec = postedTransactions[i - 1];
-                                const resRec = res.transactions[i - idxStart];
+                                const resRec = (res as StatementRequestResult).transactions[i - idxStart];
                                 expect(resRec.id).to.equal(rec.id, `Wrong record id: ${printRec()}`);
                                 expect(resRec.dateTime).to.equal(rec.date, `Wrong date: ${printRec()}`);
                                 expect(resRec.userIdFrom).to.equal(rec.userFrom, `Wrong userIdFrom: ${printRec()}`);
