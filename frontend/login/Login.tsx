@@ -43,7 +43,6 @@ fetchHandleAuthLogin(hello.fetchCall.bind(hello, GQL_URL), undefined)
     }
 })
 function TurnstileWidget(tokenRef: React.MutableRefObject<string>) {
-  const turnstile = useTurnstile();
   return (
     <Turnstile
       sitekey="0x4AAAAAAB6_d2PuHoJS1Yze"
@@ -100,6 +99,15 @@ export default function Login() {
         <Typography variant="h6" gutterBottom>
           Sign In
         </Typography>
+        <Grid container spacing={2}>
+          {[loginInput,
+            passwordInput].map((el, idx) =>
+              <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
+          <Grid item xs={12}>
+            {makeButton("Sign in", () => waitingLogin, handleLogin)}
+            {TurnstileWidget(cfToken)}
+          </Grid>
+        </Grid>
       </Paper>
     </Container>
   );
