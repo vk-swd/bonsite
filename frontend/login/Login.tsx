@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -9,7 +9,7 @@ import { ApiError, GQL_URL, hello, customHeaderParamClientId } from "../common/g
 import { logger } from "../common/logger";
 import { LoginDataValidator } from "../common/event_types";
 import { textInput } from "../elements";
-
+import Turnstile, { useTurnstile } from "react-turnstile";
 
 
 function makeButton<T>(lab: string | (() => string), toggler: () => boolean, onClick: () => void) {
@@ -42,24 +42,40 @@ fetchHandleAuthLogin(hello.fetchCall.bind(hello, GQL_URL), undefined)
         temp = temp.prevError;
     }
 })
-
+function TurnstileWidget(tokenRef: React.MutableRefObject<string>) {
+  const turnstile = useTurnstile();
+  return (
+    <Turnstile
+      sitekey="0x4AAAAAAB6_d2PuHoJS1Yze"
+      onVerify={(token) => {
+        tokenRef.current = token;
+      }}
+      onError={(error?: Error | any) => {
+        logger.error("Turnstile error", error);
+      }}
+    />
+  );
+}
 export default function Login() {
   const loginInput = textInput<string>("Login", useState(""));
   const passwordInput = textInput<string>("Password", useState(""));
   const [waitingLogin, setWaitingLogin] = useState(false);
+  const cfToken = useRef("");
   async function handleLogin() {
     setWaitingLogin(true);
-    fetchHandleAuthLogin((clientId: string) => {
-      return fetch("/login", {
-        method: "POST", 
-        headers: { 
-          "Content-Type": "application/json", 
-          Accept: "application/json" ,
-          [customHeaderParamClientId]: clientId
-        },
-        body: JSON.stringify(LoginDataValidator.parse({ 
-          user: (loginInput.props as any).value, 
-          password: (passwordInput.props as any).value }))
+      fetchHandleAuthLogin((clientId: string) => {
+        return fetch("/login", {
+          method: "POST", 
+          headers: {
+            "Content-Type": "application/json", 
+            Accept: "application/json" ,
+            [customHeaderParamClientId]: clientId
+          },
+          body: JSON.stringify(LoginDataValidator.parse({ 
+            user: (loginInput.props as any).value, 
+            password: (passwordInput.props as any).value,
+            metadata: cfToken.current
+          }))
       }).then(res => {
         if (!res.ok) {
           return res.json().then(data => {
@@ -76,6 +92,7 @@ export default function Login() {
       setWaitingLogin(false);
     });
   }
+  
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
@@ -83,14 +100,6 @@ export default function Login() {
         <Typography variant="h6" gutterBottom>
           Sign In
         </Typography>
-        <Grid container spacing={2}>
-          {[loginInput,
-            passwordInput].map((el, idx) =>
-              <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
-          <Grid item xs={12}>
-            {makeButton("Sign in", () => waitingLogin, handleLogin)}
-          </Grid>
-        </Grid>
       </Paper>
     </Container>
   );

@@ -2,7 +2,9 @@ networks:
   backend_net:
     driver: bridge
     name: backend_net
-
+  frontend_net:
+    driver: bridge
+    name: frontend_net
 
 volumes:
   frontend_deploy_folder:
@@ -56,6 +58,8 @@ services:
       # restart: no
       # tty: false
       # stdin_open: false
+      networks:
+        - frontend_net
 
   frontend_server:
     image: nginx:mainline-alpine3.22
@@ -66,13 +70,17 @@ services:
       NGINX_ENVSUBST_TEMPLATE_SUFFIX: .template
       NGINX_PORT: ${NGINX_PORT}
       NGINX_FOLDER: ${NGINX_FOLDER}
+      AUTH_PORT: ${AUTH_PORT}
+      AUTH_APP_NAME: ${AUTH_APP_NAME}
+      CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
       <<: [*gql_env]
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
     - shared_dir:${SHARED_DIR}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
-    - "127.0.0.1:81:81"
+    - "127.0.0.1:9000:${NGINX_PORT}"
+    - "127.0.0.1:9005:${GRAPH_QL_PORT}"
     # depends_on:
     #   frontend_builder:
     #     condition: service_completed_successfully
@@ -80,6 +88,18 @@ services:
     #     condition: service_healthy
     networks:
       - backend_net
+      - frontend_net
+  auth:
+    extends:
+      file: base_services.yaml
+      service: node_monitored_app
+    volumes:
+    - ./${AUTH_APP_NAME}:${SOURCEDIR}
+    - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
+    - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
+    - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
+    environment:
+      AUTH_PORT: ${AUTH_PORT}
 
   gql:
       extends:

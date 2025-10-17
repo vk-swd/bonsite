@@ -10,6 +10,7 @@ services:
         - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
         - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
         - ./${COMMON_DIR_NAME}/healthcheck.ts:${WORKDIR}/${COMMON_DIR_NAME}/healthcheck.ts
+        - ./package.json:${WORKDIR}/package_dev.json
       working_dir: ${WORKDIR}
       entrypoint: ["/bin/bash", "-c"]
       command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm run deploy; exec bash"]

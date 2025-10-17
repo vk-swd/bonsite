@@ -6,6 +6,8 @@ if (process.env.FRONTEND_DEPLOY_FOLDER === undefined) {
 }
 
 export default {
+    mode: 'development',
+    cache: false, // DISABLE ALL CACHING,
     entry: {
       main: './app/main.tsx',
       login: './login/main.tsx'

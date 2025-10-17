@@ -1,0 +1,19 @@
+{
+    "name": "Front",
+    "version": "1.0.0",
+    "scripts": {
+        "deploy": "tsc; node build/main.js"
+    },
+    "type": "module",
+    "keywords": [],
+    "author": "",
+    "private": true,
+    "license": "UNLICENSED",
+    "description": "",
+    "prettier": {
+        "printWidth": 80
+    },
+    "devDependencies": {
+        "tsconfig-paths-webpack-plugin": "^4.2.0"
+    }
+}
