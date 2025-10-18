@@ -115,6 +115,8 @@ services:
         - ./${COMMON_DIR_NAME}/apiRequestHandler.ts:${WORKDIR}/${COMMON_DIR_NAME}/apiRequestHandler.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
+      ports:
+        - "127.0.0.1:${GRAPH_QL_PORT}:${GRAPH_QL_PORT}"
       environment:
         GENERATOR_PORT: ${GENERATOR_PORT}
         GENERATOR_HOST: ${GENERATOR_NAME}

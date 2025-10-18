@@ -4,8 +4,6 @@ import * as mtx from "./monitoring_local.js";
 import { HealthCheckSever } from "./common/healthcheck.js";
 import { GqlServer } from "./api.js";
 import { coreReg } from "./common/monitoring.js";
-import { AuthServer } from "./auth_server.js";
-
 
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
@@ -26,7 +24,6 @@ try {
       generatorAddress: httpG,
       statementGeneratorAddr: httpSG
   });
-  const autServer = new AuthServer(Number.parseInt(getEnv("GRAPH_QL_AUTH_PORT")));
   logger.info(`Running a GraphQL API server at http://localhost:${GRAPH_QL_PORT}/graphql`);
 } catch (e) {
   const msg = `Error starting GraphQL server: ${JSON.stringify(e)}`;
