@@ -12,7 +12,6 @@ volumes:
 
 x-gql-env: &gql_env
   GRAPH_QL_PORT: ${GRAPH_QL_PORT}
-  GRAPH_QL_AUTH_PORT: ${GRAPH_QL_AUTH_PORT}
   GRAPH_QL_HOSTNAME: ${GRAPH_QL_APP_NAME}
 
 x-environment: &mssql_env
@@ -73,13 +72,16 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       AUTH_APP_NAME: ${AUTH_APP_NAME}
       CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
-      <<: [*gql_env]
+      GRAPH_QL_PORT: "redacted"
+      GRAPH_QL_HOSTNAME: "redacted"
+      # <<: [*gql_env]
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
     - shared_dir:${SHARED_DIR}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:9000:${NGINX_PORT}"
+    # - "redacted":9010:${NGINX_PORT}"
     - "127.0.0.1:9005:${GRAPH_QL_PORT}"
     # depends_on:
     #   frontend_builder:

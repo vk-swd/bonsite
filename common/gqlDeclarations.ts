@@ -90,7 +90,8 @@ export enum ApiErrorType {
     NOT_AUTHENTICATED = 7,
     SESSION_EXPIRED = 8,
     INVALID_TOKEN = 9,
-    TOO_MANY_REQUESTS = 10
+    TOO_MANY_REQUESTS = 10,
+    NOT_REACHABLE = 11
 }
 export class ApiError extends Error {
     constructor(message: string, public type: ApiErrorType = ApiErrorType.SERVER_ERROR, public prevError?: any) {
@@ -176,6 +177,12 @@ class GqlFunction1<T, K> {
             .catch(e => { throw new ApiError(`Error in fetch: ${e}`, ApiErrorType.SERVER_ERROR, e); });
             if (!rewRes.ok) {
                 const eMessage = `Bad req status: ${rewRes.status} - ${rewRes.statusText}`;
+                if (rewRes.status == 401) {
+                    throw new ApiError(eMessage, ApiErrorType.NOT_AUTHENTICATED);
+                }
+                if (rewRes.status == 502) {
+                    throw new ApiError(eMessage, ApiErrorType.NOT_REACHABLE);
+                }
                 const contentType = rewRes.headers.get("content-type");
                 if (contentType && contentType.includes("application/json")) {
                     const data = ApiError.reconstruct(await rewRes.json());
