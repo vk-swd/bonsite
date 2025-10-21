@@ -91,7 +91,8 @@ export enum ApiErrorType {
     SESSION_EXPIRED = 8,
     INVALID_TOKEN = 9,
     TOO_MANY_REQUESTS = 10,
-    NOT_REACHABLE = 11
+    NOT_REACHABLE = 11,
+    RATE_LIMITED = 12
 }
 export class ApiError extends Error {
     constructor(message: string, public type: ApiErrorType = ApiErrorType.SERVER_ERROR, public prevError?: any) {

@@ -21,8 +21,8 @@ class Token {
         this.value = Math.random().toString(36).substring(2) + (counter++);
         this.createdAt = Date.now();
     }
-    assignCookie(res: express.Response, clientId: string): void {
-        logger.log("Assigning cookie", this.value, clientId, res);
+    assignCookie(res: express.Response, clientId: string, info: () => string): void {
+        logger.log("Assigning cookie", this.value, info());
         res.cookie(SESSION_COOKIE, this.value, { httpOnly: true, secure: true });
         res.cookie(customHeaderParamClientId, clientId, { httpOnly: true, secure: true });
     }
@@ -37,6 +37,7 @@ class ClientState {
     authorisedAt: number | undefined = undefined;
     token: Token | undefined = undefined;
     verifying: boolean = false;
+    lastRequestTime: number = 0;
 }
 
 
@@ -76,20 +77,37 @@ function cookieMap(cookieStr: string) {
 export class AuthServer {
     clients = new Map<string, ClientState>();
     inFlightLoginAttempts = 0;
+    rateLimit(client: ClientState, req: express.Request, res: express.Response): boolean {
+        const now = Date.now();
+        const elapsed = now - client.lastRequestTime
+        if (elapsed < 1000) {
+            res.status(400).json(new ApiError(`Try in ${1000 - elapsed} ms`, ApiErrorType.RATE_LIMITED));
+            res.end();
+            return true;
+        }
+        client.lastRequestTime = now;
+        return false;
+    }
+    checkClientId(res: express.Response, info: () => string) {
+        logger.info(info(), ": Missing client ID header");
+        res.status(401).json(new ApiError(`Missing client ID header`, ApiErrorType.NOT_AUTHENTICATED));
+        res.end();
+        return true;
+    }
     handleAuth(req: express.Request, res: express.Response): void {
         const cookies = cookieMap(req.headers.cookie??"");
-        const from = cookies[CONNECTIONG_IP_C]
-        const origUrl = req.header[ORIGINAL_URI];
-        const clientIdCookie: string | undefined = cookies[customHeaderParamClientId]
-        const info = () => `Check auth: ${from}:${clientIdCookie}->${origUrl}`
+        const from = req.headers[CONNECTIONG_IP_C]
+        const origUrl = req.headers[ORIGINAL_URI];
+        const clientId: string | undefined = req.headers[customHeaderParamClientId] as string ??cookies[customHeaderParamClientId]
+        const info = () => `Check auth: ${from}:${clientId}->${origUrl}` + JSON.stringify(req.headers)
         logger.info(info());
-        if (!clientIdCookie) {
-            logger.info(info(), ": Missing client ID header");
-            res.status(401).json(new ApiError(`Missing client ID header`, ApiErrorType.NOT_AUTHENTICATED));
-            res.end();
+        if ((!clientId || clientId.length == 0) && this.checkClientId(res, info)) {
             return;
         }
-        const client = this.clients.get(clientIdCookie);
+        const client = this.clients.get(clientId!);
+        if (client && this.rateLimit(client, req, res)) {
+            return;
+        }
         const sessionId: string | undefined = req.headers.cookie?.split(";").filter(
             (item) => item.trim().startsWith(SESSION_COOKIE + "="))[0]?.split("=")[1];
         let dropReason = "";
@@ -111,38 +129,41 @@ export class AuthServer {
         res.end();
     }
     handleLogin(req: express.Request, res: express.Response) {
-        logger.log("handleLogin", req.headers);
+        const cookies = cookieMap(req.headers.cookie??"");
+        const from = req.headers[CONNECTIONG_IP_C] as string
+        const origUrl = req.headers[ORIGINAL_URI];
+        const clientId: string | undefined = req.headers[customHeaderParamClientId] as string
+        const info = () => `Login: ${from}:${clientId}->${origUrl}`
+        logger.log(info());
         if (this.inFlightLoginAttempts > 5) {
-            res.status(429).json({ error: 'Many concurrent log ins. Wait.' });
+            res.status(429).json(new ApiError(`Many concurrent log ins. Wait.`, ApiErrorType.RATE_LIMITED));
             res.end();
             return;
         }
         this.inFlightLoginAttempts++;
-        const clientId: string = req.headers[customHeaderParamClientId] as string;
-        if (!clientId) {
-            res.status(401).json({ error: `Missing client ID header ${customHeaderParamClientId}` });
-            res.end();
+
+        if ((!clientId || clientId.length == 0) && !this.checkClientId(res, info)) {
             this.inFlightLoginAttempts--;
             return;
         }
-        let client = this.clients.get(clientId);
+        let client = this.clients.get(clientId!);
         if (!client) {
             client = new ClientState();
-            this.clients.set(clientId, client);
+            this.clients.set(clientId!, client);
         }
         if (client.token && client.token.isValid()) {
             this.inFlightLoginAttempts--;
-            return res.status(200);
+            res.status(200);
+            res.end();
+            return 
         }
         if (client.verifying) {
-            res.status(429).json({ error: 'Already verifying. Wait.' });
+            res.status(429).json(new ApiError(`Already verifying. Wait.`, ApiErrorType.RATE_LIMITED));
             res.end();
             this.inFlightLoginAttempts--;
             return;
         }
         client.verifying = true;
-        const cookies = cookieMap(req.headers.cookie??"")
-        const remoteIp = cookies["cf-connecting-ip"]
         const params: LoginData = LoginDataValidator.parse(req.body);
         //wait for authorisation items
         sleep(800 + Math.random() * 1000).then(() => {
@@ -153,7 +174,7 @@ export class AuthServer {
                 // TODO: Rate limit individual
                 return;
             }
-            return validateWithRetry(params.metadata, remoteIp, crypto.randomUUID(),0, 3).then(cfRes => {
+            return validateWithRetry(params.metadata, from, crypto.randomUUID(),0, 3).then(cfRes => {
                 // TODO: count time to update tunstile
                 if (cfRes.success !== true) {
                     res.status(401).json({ error: 'Invalid credentials' });
@@ -161,7 +182,7 @@ export class AuthServer {
                 }
                 logger.log("Login success", clientId, cfRes);
                 client.token = new Token();
-                client.token.assignCookie(res, clientId);
+                client.token.assignCookie(res, clientId!, info);
                 res.status(200);
                 res.end();
             })
