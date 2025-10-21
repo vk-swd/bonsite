@@ -2,9 +2,7 @@ networks:
   backend_net:
     driver: bridge
     name: backend_net
-  frontend_net:
-    driver: bridge
-    name: frontend_net
+    external: false
 
 volumes:
   frontend_deploy_folder:
@@ -58,7 +56,7 @@ services:
       # tty: false
       # stdin_open: false
       networks:
-        - frontend_net
+        - backend_net
 
   frontend_server:
     image: nginx:mainline-alpine3.22
@@ -72,8 +70,8 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       AUTH_APP_NAME: ${AUTH_APP_NAME}
       CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
-      GRAPH_QL_PORT: "redacted"
-      GRAPH_QL_HOSTNAME: "redacted"
+      GRAPH_QL_PORT: ${TUNNEL_PORT}
+      GRAPH_QL_HOSTNAME: ${TUNNEL_HOSTNAME}
       # <<: [*gql_env]
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
@@ -81,16 +79,8 @@ services:
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     ports:
     - "127.0.0.1:9000:${NGINX_PORT}"
-    # - "redacted":9010:${NGINX_PORT}"
-    - "127.0.0.1:9005:${GRAPH_QL_PORT}"
-    # depends_on:
-    #   frontend_builder:
-    #     condition: service_completed_successfully
-    #   gql:
-    #     condition: service_healthy
     networks:
       - backend_net
-      - frontend_net
   auth:
     extends:
       file: base_services.yaml
@@ -102,6 +92,22 @@ services:
     - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
     environment:
       AUTH_PORT: ${AUTH_PORT}
+  tunnel:
+    image:
+      lscr.io/linuxserver/openssh-server:latest
+    hostname: ${TUNNEL_HOSTNAME}
+    ports:
+      - "2222:2222" 
+    volumes:
+      - ./:${SOURCEDIR}
+      - ./${FRONTEND_NAME}/sshd_config:/config/sshd/sshd_config
+    environment:
+      - PUID=2000
+      - PGID=2000
+      - TZ=Etc/UTC
+      - PUBLIC_KEY=${MY_SSH_A_KEY}
+    networks:
+      - backend_net
 
   gql:
       extends:
@@ -284,7 +290,16 @@ services:
         condition: service_started
       prometheus:
         condition: service_started
-
+  frontend:
+    image: busybox
+    depends_on:
+      auth:
+        condition: service_started
+      tunnel:
+        condition: service_started
+      frontend_server:
+        condition: service_started
+        
   tester:
       extends:
         file: base_services.yaml

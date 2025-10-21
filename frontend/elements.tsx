@@ -1,7 +1,8 @@
 import TextField from '@mui/material/TextField';
 import React, { Dispatch, SetStateAction } from 'react';
 
-export function textInput<T>(lab: string, state: [T, Dispatch<SetStateAction<T>>], type: string = "text") {
+export function textInput<T>(lab: string, state: [T, Dispatch<SetStateAction<T>>]) {
+    const type = typeof state[0] == 'number' ? "number" : "text"
     return <TextField
       fullWidth
       label={lab}

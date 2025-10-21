@@ -11,7 +11,7 @@ import * as gqlp from "../common/gqlDeclarations.js"
 import { logger } from "../common/logger.js";
 import { StatementParametersValidator, StatementRequestResult, StatementType, Transaction, UserDataRequestParameters, UserDataResult } from "../common/event_types.js";
 import { getUserSelectItem } from "./MenuList.js";
-import { StatementContainer } from "./StatementList.js";
+import { StatementChild, StatementContainer } from "./StatementList.js";
 import { fetchHandleAuth } from "../fetchHandleAuth.js";
 import { textInput } from "../elements.js";
 type UserOption = {
@@ -21,14 +21,12 @@ type UserOption = {
   cursor: number;
 };
 enum StartGenButtonStates {
-  NothingHappens,
-  CalledToStartGeneration,
-  CalledToStopGeneration
+  Generating,
+  NotGenerating
 }
 const startGenButtonStates = new Map<StartGenButtonStates, { buttonLabel: string, buttonDisabled: boolean }>([
-  [StartGenButtonStates.NothingHappens, { buttonLabel: "Start Generation", buttonDisabled: false }],
-  [StartGenButtonStates.CalledToStartGeneration, { buttonLabel: "Stop Generation", buttonDisabled: false }],
-  [StartGenButtonStates.CalledToStopGeneration, { buttonLabel: "Stop Generation", buttonDisabled: true }]])
+  [StartGenButtonStates.NotGenerating, { buttonLabel: "Start Generation", buttonDisabled: false }],
+  [StartGenButtonStates.Generating, { buttonLabel: "Stop Generation", buttonDisabled: false }]])
 
 
 function dateTimeInput<T>(lab: string, state: [string, Dispatch<SetStateAction<string>>], min?: string, max?: string): JSX.Element {
@@ -124,16 +122,36 @@ export default function App() {
   const genTransactionMinUserId = textInput<number>("Min User Id", [minUserId, setMinUserId]);
   const genTransactionMinTransactionId = textInput<number>("Min Transaction Id", [minTransactionId, setMinTransactionId]);
   const genTransactionMaxDelayMs = textInput<number>("Transaction Result Delay Ms.", useState(100));
-  const [startGenButtonState, setStartGenButtonState] = useState(StartGenButtonStates.NothingHappens);
+  const [startGenButtonState, setStartGenButtonState] = useState(StartGenButtonStates.NotGenerating);
+  // TODO: output generation task id.
+  const recoverGenButtonState = useRef<boolean>(false);
+  async function recoverGenButton() {
+    if (recoverGenButtonState.current) {
+      return;
+    }
+    recoverGenButtonState.current = true;
+    while (true) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const lastProgressReport = await fetchHandleAuth(gqlp.getProgress.fetchCall.bind(gqlp.getProgress, gqlp.GQL_URL), undefined);
+      if (lastProgressReport.isRunning === GenerationState.RUNNING) {
+        setStartGenTxt(`Progress: Sent: ${lastProgressReport.totalSent}, ${lastProgressReport.percentComplete}%`);
+      } else {
+        setStartGenTxt(`Finished. Sent: ${lastProgressReport.totalSent}.`);
+        break;
+      }
+    }
+    recoverGenButtonState.current = false;
+    setStartGenButtonState(StartGenButtonStates.NotGenerating)
+  }
   async function startGeneration() {
     try {
-      if (startGenButtonState === StartGenButtonStates.NothingHappens) {
+      if (startGenButtonState === StartGenButtonStates.NotGenerating) {
         setStartGenTxt(``);
         // TODO: Updating page looses state
         // TODO: If fetch fails now it is unclear if the generation started or not.
         // TODO: Fetch db state to see the last transaction
         // Keep the button state for now but fix with constant state polling later.
-        setStartGenButtonState(StartGenButtonStates.CalledToStartGeneration);
+        setStartGenButtonState(StartGenButtonStates.Generating);
         const params = GenParametersValidator.parse({
           userCount: genTransactionUserCount.props.value,
           dateFrom: new Date(genTransactionDateFrom).getTime(),
@@ -145,51 +163,19 @@ export default function App() {
         });
         logger.info(`Starting generation with params: ${JSON.stringify(params)}`);
         await fetchHandleAuth(gqlp.startGen.fetchCall.bind(gqlp.startGen, gqlp.GQL_URL), params);
-      } else if (startGenButtonState === StartGenButtonStates.CalledToStartGeneration) {
-        // Disable the button until the previously called startGen is finished asynchroniously
-        setStartGenButtonState(StartGenButtonStates.CalledToStopGeneration);
-        await fetchHandleAuth(gqlp.stopGen.fetchCall.bind(gqlp.stopGen, gqlp.GQL_URL), undefined);
-        return;
+        // TODO: add task id in the request and progress report
+        // to make sure that progress report is relevant
+        recoverGenButton();
       } else {
+        await fetchHandleAuth(gqlp.stopGen.fetchCall.bind(gqlp.stopGen, gqlp.GQL_URL), undefined);
+        recoverGenButton();
         logger.info("Stop generation already called, waiting for previous Start generation to finish");
-        return;
       }
     } catch (err) {
       // TODO: when stopGen yields error but generation is running last progress report
       // will overwrite this error message. Fix it (More states?).
       setStartGenTxt(`Generation eror at state ${startGenButtonState}: ${err}`);
-      return;
-    }
-    let interval = 100;
-    const startTime = Date.now();
-    let runNum = 0;
-    let lastProgressReport: ProgressReport | undefined = undefined;
-    try {
-      while (true) {
-        runNum++;
-        await new Promise(resolve => setTimeout(resolve, interval));
-        lastProgressReport = await fetchHandleAuth(gqlp.getProgress.fetchCall.bind(gqlp.getProgress, gqlp.GQL_URL), undefined);
-        setMinUserId(lastProgressReport.maxUserId);
-        setMinTransactionId(lastProgressReport.maxTransactionId);
-        const now = Date.now();
-        if (lastProgressReport.isRunning === GenerationState.STOPPED) {
-          setStartGenButtonState(StartGenButtonStates.NothingHappens);
-          setStartGenTxt(`Generation done. Elapsed: ${now - startTime}, generated ${lastProgressReport.generated}.`);
-          break;
-        }
-        const elapsed = Math.max((now - startTime), 1)
-        const completionRate = elapsed / Math.max(1, lastProgressReport.percentComplete);
-        const timeToFinish = completionRate * (100 - lastProgressReport.percentComplete);
-        interval = Math.min(2000, Math.max(1000, timeToFinish));
-        setStartGenTxt(`Progress: ${JSON.stringify(lastProgressReport)}. Elapsed: ${now - startTime}.`);
-      }
-    } catch (err) {
-      // TODO: maybe it is worth sending progress requests non-stop
-      // and show the real time generation state even when no generation is running
-      setStartGenButtonState(StartGenButtonStates.NothingHappens);
-      setStartGenTxt(`Error during generation.
-        Last progress report: ${JSON.stringify(lastProgressReport)}.
-        Error: ${err}.`);
+      recoverGenButton();
     }
   }
 
@@ -227,7 +213,7 @@ export default function App() {
   const totalTransactionCount = useRef(0)
   const userIdRef = useRef<number|undefined>(undefined)
   const statementMaxLines = 50;
-  const [transactions, setTransactions] = useState<Array<Transaction>>([]);
+  const [transactions, setTransactions] = useState<Array<StatementChild>>([]);
   async function handleStatementFetch() {
     const selectedUserForStatement = userSelectElement.props.value;
     if (selectedUserForStatement.length === 0) {
@@ -242,7 +228,14 @@ export default function App() {
     })
     const res = await fetchHandleAuth(gqlp.getStatement.fetchCall.bind(gqlp.getStatement, gqlp.GQL_URL), params) as StatementRequestResult;
     logger.info(`Fetching statement`, params, res);
-    setTransactions(res.transactions);
+    const checkIds = new Set<number>();
+    res.transactions.forEach(t => checkIds.add(t.id));
+    if (checkIds.size != res.transactions.length) {
+      logger.warn(`Duplicate transactions received in:`, res.transactions);
+      setTransactions(res.transactions.map((t, idx) => ({...t, key: idx})));
+    } else {
+      setTransactions(res.transactions);
+    }
     totalTransactionCount.current = res.totalCount;
   }
   const transactionList = StatementContainer(transactions, offset.current, () => {
@@ -268,7 +261,7 @@ export default function App() {
             postTransactionUserIdTo,
             postTransactionAmount].map((el, idx) =>
               <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
-          <Grid item xs={12}>
+          <Grid item xs={12} key={10}>
             {makeButton("Create Transaction", () => postButtonState, postTransaction)}
             {label(() => postedStasTxt)}
           </Grid>
@@ -288,7 +281,7 @@ export default function App() {
             genTransactionMinTransactionId,
             genTransactionMaxDelayMs].map((el, idx) =>
               <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
-          <Grid item xs={12} spacing={2}>
+          <Grid item xs={12} container spacing={2} key={10}>
             {makeButton(() => startGenButtonStates.get(startGenButtonState)!.buttonLabel,
               () => startGenButtonStates.get(startGenButtonState)!.buttonDisabled, startGeneration)}
             {label(() => startGenTxt)}
@@ -305,13 +298,13 @@ export default function App() {
           {[userSelectElement,
             getStatementDateFromElement,
             getStatementDateToElement].map((el, idx) =>
-              <Grid item xs={12} sm={4}>{el}</Grid>)}
-          <Grid item xs={12}>
+              <Grid item xs={12} sm={4} key={idx}>{el}</Grid>)}
+          <Grid item xs={12}  key={10}>
             <Button variant="contained" onClick={handleStatementFetch}>
               Fetch Statement
             </Button>
           </Grid>
-          <Grid item xs={12}>
+          <Grid item xs={12} key={11}>
             <Button variant="contained" onClick={handleStatementFetch}>
               Download Statement
             </Button>

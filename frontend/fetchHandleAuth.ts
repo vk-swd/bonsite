@@ -18,8 +18,6 @@ export function fetchHandleAuth<P, R>(fetcher: (...params: any) => Promise<R>, .
     }).catch(error => {
         let temp = error;
         while (temp instanceof ApiError) {
-            logger.log("fetchHandleAuth unwrapping ApiError", JSON.stringify(temp), 
-            temp.type == ApiErrorType.NOT_AUTHENTICATED, temp.prevError instanceof ApiError);
             if (temp.type == ApiErrorType.NOT_AUTHENTICATED) {
                 alert("Session expired");
                 window.location.href = "/login.html";

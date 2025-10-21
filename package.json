@@ -44,14 +44,15 @@
       "@babel/preset-env": "^7.22.15",
       "@babel/preset-typescript": "^7.22.15",
       "@mui/material": "5.14.11",
-      "@emotion/react":"11.11.1",
-      "@emotion/styled":"11.11.0",
       "@types/react":"18.0.37",
       "@types/react-dom":"18.0.11",
       "react":"18.2.0",
       "react-dom":"18.2.0",
       "react-select":"5.7.3",
       "react-turnstile":"1.1.4"
+    },
+    "devDependencies": {
+      "@emotion/styled":"11.11.0"
     },
     "prettier": {
       "printWidth": 80

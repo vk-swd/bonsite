@@ -9,10 +9,12 @@ const COLUDFLARE_AUTH_SECRET = getEnv("CLOUDFLARE_SECRET")
 const PASSWORD = "sup#rS3cr3tB@nana========"
 const LOGIN = "user1"
 const SESSION_COOKIE = "sessionId"
+const CONNECTIONG_IP_C = "cf-connecting-ip"
+const ORIGINAL_URI = "x-original-uri"
 let counter = 0;
 class Token {
-    // static LIFETIME_MS = 30 * 60 * 1000; // 10 mins
-    static LIFETIME_MS = 10 * 1000; // 10 mins
+    static LIFETIME_MS = 30 * 60 * 1000; // 10 mins
+    // static LIFETIME_MS = 10 * 1000; // 10 mins
     value: string;
     createdAt: number;
     constructor(private lifeTimeMs: number = Token.LIFETIME_MS) {
@@ -75,10 +77,14 @@ export class AuthServer {
     clients = new Map<string, ClientState>();
     inFlightLoginAttempts = 0;
     handleAuth(req: express.Request, res: express.Response): void {
-        logger.log("Auth attempt", req.headers);
-        const clientIdCookie: string | undefined = cookieMap(req.headers.cookie??"")[customHeaderParamClientId]
+        const cookies = cookieMap(req.headers.cookie??"");
+        const from = cookies[CONNECTIONG_IP_C]
+        const origUrl = req.header[ORIGINAL_URI];
+        const clientIdCookie: string | undefined = cookies[customHeaderParamClientId]
+        const info = () => `Check auth: ${from}:${clientIdCookie}->${origUrl}`
+        logger.info(info());
         if (!clientIdCookie) {
-            logger.log(`Dropping request. Reason: Missing client ID header`);
+            logger.info(info(), ": Missing client ID header");
             res.status(401).json(new ApiError(`Missing client ID header`, ApiErrorType.NOT_AUTHENTICATED));
             res.end();
             return;
@@ -95,11 +101,12 @@ export class AuthServer {
             dropReason = "Session expired";
         }
         if (dropReason.length > 0) {
-            logger.log(`Dropping request from ${clientIdCookie}. Reason: ${dropReason}`);
+            logger.info(info(), ":", dropReason);
             res.status(401).json(new ApiError(dropReason, ApiErrorType.NOT_AUTHENTICATED));
             res.end();
             return;
         }
+        logger.info(info(), `success`);
         res.status(200);
         res.end();
     }

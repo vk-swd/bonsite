@@ -34,7 +34,6 @@
         "@babel/preset-env": "^7.22.15",
         "@babel/preset-typescript": "^7.22.15",
         "@mui/material": "5.14.11",
-        "@emotion/react":"11.11.1",
         "@emotion/styled":"11.11.0",
         "@types/react":"18.0.37",
         "@types/react-dom":"18.0.11",

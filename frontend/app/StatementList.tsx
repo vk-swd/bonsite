@@ -5,9 +5,10 @@ import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
 
 
+export type StatementChild = Transaction & { key?: number }
 // Simple container component - just handles the scrolling structure
 export const StatementContainer = ( 
-  children: Transaction[], 
+  children: StatementChild[], 
   offset: number,
   onLoadEarlier: () => void, 
   onLoadLater: () => void,
@@ -40,8 +41,8 @@ export const StatementContainer = (
   {/* Idx */}
   <Grid item flex={0} minWidth='4em'>
     <Box fontWeight="bold" mb={1} maxWidth='4em'>№</Box>
-    {children.map((_, idx) => (
-      <Box key={idx} maxWidth='4em'>{(offset + idx).toFixed().padStart(4, ' ') + ". "}</Box>
+    {children.map((tx, idx) => (
+      <Box key={tx.id} maxWidth='4em'>{(offset + idx).toFixed().padStart(4, ' ') + ". "}</Box>
     ))}
   </Grid>
   {/* Date column */}
@@ -130,44 +131,3 @@ const TransactionRow = (c1: any, c2: any, c3: any, c4: any) => (
   </Box>
 </Grid>
 );
-
-// Example usage
-// const BankStatementExample = () => {
-//   const [isLoading, setIsLoading] = React.useState(false);
-  
-//   const handleLoadEarlier = () => {
-//     setIsLoading(true);
-//     // Your API call here
-//     setTimeout(() => setIsLoading(false), 1000);
-//   };
-  
-//   const handleLoadLater = () => {
-//     setIsLoading(true);
-//     // Your API call here  
-//     setTimeout(() => setIsLoading(false), 1000);
-//   };
-
-//   return (
-//     <div className="max-w-2xl mx-auto p-6">
-//       <h1 className="text-xl font-bold mb-4">Bank Statement</h1>
-      
-//       <StatementContainer
-//         onLoadEarlier={handleLoadEarlier}
-//         onLoadLater={handleLoadLater}
-//         isLoading={isLoading}
-//       >
-//         {/* Your transaction rows go here */}
-//         <div className="p-3 border-b">Transaction 1: Coffee Shop -$4.50</div>
-//         <div className="p-3 border-b">Transaction 2: Salary +$3500.00</div>
-//         <div className="p-3 border-b">Transaction 3: Gas Station -$45.20</div>
-//         <div className="p-3 border-b">Transaction 4: Grocery Store -$87.32</div>
-//         <div className="p-3 border-b">Transaction 5: ATM Withdrawal -$60.00</div>
-//         <div className="p-3 border-b">Transaction 6: Restaurant -$28.90</div>
-//         <div className="p-3 border-b">Transaction 7: Online Transfer -$150.00</div>
-//         <div className="p-3">Transaction 8: Interest Payment +$12.45</div>
-//       </StatementContainer>
-//     </div>
-//   );
-// };
-
-// export default BankStatementExample;

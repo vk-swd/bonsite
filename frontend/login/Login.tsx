@@ -24,24 +24,7 @@ function label(toggler: () => string) {
     {toggler()}
   </Typography>
 }
-//check authentication by calling hello
-fetchHandleAuthLogin(hello.fetchCall.bind(hello, GQL_URL), undefined)
-.then(() => {
-    window.location.href = "/doc.html";
-}).catch((err) => {
-    if (!(err instanceof ApiError)) {
-        logger.log("Login fetch hello error not ApiError", err);
-        return;
-    }
-    let temp = err;
-    while (temp instanceof ApiError) {
-        if (temp.prevError == undefined) {
-            logger.log("login fetch hello error no prevError", temp.message, temp.type);
-            break;
-        }
-        temp = temp.prevError;
-    }
-})
+
 function TurnstileWidget(tokenRef: React.MutableRefObject<string>) {
   return (
     <Turnstile
@@ -91,7 +74,6 @@ export default function Login() {
       setWaitingLogin(false);
     });
   }
-  
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
@@ -101,12 +83,12 @@ export default function Login() {
         </Typography>
         <Grid container spacing={2}>
           {[loginInput,
-            passwordInput].map((el, idx) =>
+            passwordInput,
+            <Grid container spacing={2}>
+              {TurnstileWidget(cfToken)}
+              {makeButton("Sign in", () => waitingLogin, handleLogin)}
+            </Grid>].map((el, idx) =>
               <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
-          <Grid item xs={12}>
-            {makeButton("Sign in", () => waitingLogin, handleLogin)}
-            {TurnstileWidget(cfToken)}
-          </Grid>
         </Grid>
       </Paper>
     </Container>
