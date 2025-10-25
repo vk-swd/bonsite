@@ -3,6 +3,9 @@ networks:
     driver: bridge
     name: backend_net
     external: false
+  backend_net:
+    driver: bridge
+    name: tunnel_net
 
 volumes:
   frontend_deploy_folder:
@@ -92,12 +95,30 @@ services:
     - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
     environment:
       AUTH_PORT: ${AUTH_PORT}
+      KAFKA_HOST: ${KAFKA_HOST}
+      KAFKA_PORT: ${KAFKA_PORT}
+
+  tunnel_client:
+    build:
+        dockerfile_inline: |
+          FROM alpine:latest
+          RUN apk update; apk add openssh-client socat; adduser sshuser -h /home/suser -D
+          RUN su sshuser; cd ~/; mkdir .ssh; echo ${MY_SSH_A_KEY} > .ssh/k1.pub; echo ${MY_SSH_P_KEY} > .ssh/k1;
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ssh -N -R ${TUNNEL_PORT}:localhost:${GRAPH_QL_PORT} sshuser@${TUNNEL_HOSTNAME}"]
+    depends_on:
+      - kafka1:
+          condition: service_healthy
+    networks:
+      - backend_net
+      - tunnel_net
+    
   tunnel:
     image:
       lscr.io/linuxserver/openssh-server:latest
     hostname: ${TUNNEL_HOSTNAME}
     ports:
-      - "2222:2222" 
+      - "${TUNNEL_PORT}:${TUNNEL_PORT}" 
     volumes:
       - ./:${SOURCEDIR}
       - ./${FRONTEND_NAME}/sshd_config:/config/sshd/sshd_config
@@ -150,7 +171,7 @@ services:
         - SHARED_DIR=${SHARED_DIR}
       depends_on:
         kafka1:
-          condition: service_started
+          condition: service_healthy
 
 
   prometheus:
@@ -198,8 +219,12 @@ services:
       service: kafka-app
     environment:
       KAFKA_NODE_ID: 1
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:${KAFKA_PORT}'
     hostname: "${KAFKA_HOST}"
+    healthcheck:
+      test: ["CMD-SHELL", "./kafka-get-offsets.sh --bootstrap-server ${KAFKA_HOST}:${KAFKA_PORT} 2>> ~/kafka_healthcheck.log"]
+      <<: [*healthcheck_params]
+    
 
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -253,7 +278,7 @@ services:
       # stdin_open: false
       depends_on:
         kafka1:
-          condition: service_started
+          condition: service_healthy
         sqldb:
           condition: service_healthy
 
@@ -289,6 +314,8 @@ services:
       graphana:
         condition: service_started
       prometheus:
+        condition: service_started
+      tunnel_client:
         condition: service_started
   frontend:
     image: busybox
