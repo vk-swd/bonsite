@@ -73,7 +73,7 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       AUTH_APP_NAME: ${AUTH_APP_NAME}
       CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
-      GRAPH_QL_PORT: ${TUNNEL_PORT}
+      GRAPH_QL_PORT: ${GRAPH_QL_REMOTE_PORT}
       GRAPH_QL_HOSTNAME: ${TUNNEL_HOSTNAME}
       # <<: [*gql_env]
     volumes:
@@ -107,14 +107,15 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command: ["cp /tunnelkeys/* /home/${TUNNEL_USER_NAME}/.ssh/; \
                chown -R ${TUNNEL_USER_NAME} /home/${TUNNEL_USER_NAME}; \
-               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -R redacted:${KAFKA_HOST}:${KAFKA_PORT} ${TUNNEL_USER_NAME}@redacted -p ${TUNNEL_PORT} -i /home/${TUNNEL_USER_NAME}/.ssh/tunnel;'; \
-               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -L redacted:${AUTH_APP_NAME}:redacted ${TUNNEL_USER_NAME}@redacted -p ${TUNNEL_PORT} -i /home/${TUNNEL_USER_NAME}/.ssh/tunnel;'; \
+               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -R ${GRAPH_QL_REMOTE_PORT}:${GRAPH_QL_APP_NAME}:${GRAPH_QL_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST}-p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
+               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -L ${AUTH_SERVER_MON_PORT}:${AUTH_APP_NAME}:${MONITORING_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST} -p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
                exec sh"]
     tty: true
+    hostname: ${TUNNEL_CLIENT_NAME}
     stdin_open: true
     volumes:
-      - /home/redacted/.ssh/tunnel:/tunnelkeys/tunnel:ro
-      - /home/redacted/.ssh/tunnel.pub:/tunnelkeys/tunnel.pub:ro
+      - ${HOST_TUNNEL_KEY}:/tunnelkeys/tunnel:ro
+      - ${HOST_TUNNEL_KEY}.pub:/tunnelkeys/tunnel.pub:ro
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -131,7 +132,7 @@ services:
     volumes:
       - ./:${SOURCEDIR}
       - ./${FRONTEND_NAME}/sshd_config:/config/sshd/sshd_config
-      - ~/.ssh/tunnel.pub:/config/ssh/authKey.pub:ro
+      - ${HOST_TUNNEL_KEY}.pub:/config/ssh/authKey.pub:ro
     environment:
       - PUID=2000
       - PGID=2000
@@ -197,6 +198,8 @@ services:
       - GENERATOR_NAME=${GENERATOR_NAME}
       - MONITORING_PORT=${MONITORING_PORT}
       - MESSAGE_SINK_NAME=${MESSAGE_SINK_NAME}
+      - AUTH_SERVER_NAME=${TUNNEL_CLIENT_NAME}
+      - AUTH_SERVER_MON_PORT=${AUTH_SERVER_MON_PORT}
       - STATEMENT_GENERATOR_NAME=${STATEMENT_GENERATOR_NAME}
     entrypoint: ["sh", "-c"]
     tty: true

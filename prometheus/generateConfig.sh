@@ -15,3 +15,4 @@ job prometheus localhost 9090
 for svc in $services; do
     job "$svc" "$svc" "$MONITORING_PORT"
 done
+JOB auth_server $AUTH_SERVER_NAME $AUTH_SERVER_MON_PORT

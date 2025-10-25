@@ -2,7 +2,7 @@
     "name": "Front",
     "version": "1.0.0",
     "scripts": {
-        "deploy": "tsc; node build/main.js"
+        "deploy": "tsc; node build/main.js &>> $LOG_MOUNT/auth.log"
     },
     "type": "module",
     "keywords": [],
