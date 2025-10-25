@@ -87,20 +87,68 @@ function params<T>(params: T): RequestInit {
       })
   }
 let lastQuery = "";
+
+class GenerationState {
+  isInProgress = false;
+  lastReport: gp.ProgressReport | undefined = undefined;
+  lastReportTime: number = 0;
+  scheduledUpdate: NodeJS.Timeout | undefined = undefined;
+  subscriberCount = 0;
+  awaitedProgressRequest: Promise<gp.ProgressReport> | undefined = undefined
+}
+const genState = new GenerationState();
+class DatabaseState {
+
+}
+
+// to limit: post transaction / 
+// requests per user should be limited for 10 per minute...or actually...one per 10 seconds
+// or it could be incremental...1 per second, then next + 1 etc....adn then there are max number of requests in flight
+// and then i need to pace those one from another for multiple users...transaction posting should be stored in queue
+// and then this queue should be dequeued gradually.....
+// can return number of posted transactions as a post result
 export const Query = (generatorAddress: string, statementGeneratorAddr: string) => ({
   hello: () => {
     return lastQuery
   },
   stopGen: () => {
+    if (!genState.isInProgress) {
+      return;
+    }
     return getRequest<string>(generatorAddress + gp.stopUrl, res => res.text(), monitoring);
   },
   startGen: async (arg: {params: gqld.GqlIfy<gp.GenParameters>} ) => {
     logger.info("startGen called with params: %o", arg.params);
+    if (genState.isInProgress) {
+        throw new gqld.ApiError(`Generation in progress`, gqld.ApiErrorType.GENERATOR_BUSY)
+    }
+    genState.isInProgress = true;
+    genState.lastReport = undefined;
     const param = gqld.startGen.coercedParamType?.parse(arg.params);
     return getRequest<string>(generatorAddress + gp.startUrl, defaultDataHandler, monitoring, params(param));
   },
   getProgress: async (): Promise<gp.ProgressReport> => {
-      return await getRequest(generatorAddress + gp.progressUrl, res => res.json() as Promise<gp.ProgressReport>, monitoring);
+      if (genState.subscriberCount > 20) {
+        throw new gqld.ApiError(`Too many requests`, gqld.ApiErrorType.TOO_MANY_REQUESTS)
+      }
+      if (genState.awaitedProgressRequest) {
+        genState.subscriberCount++;
+        return genState.awaitedProgressRequest.finally(() => genState.subscriberCount--);
+      }
+      if (genState.lastReport && Date.now() - genState.lastReportTime < 800) {
+        return genState.lastReport;
+      }
+      genState.subscriberCount++;
+      genState.awaitedProgressRequest = getRequest(generatorAddress + gp.progressUrl, res => res.json() as Promise<gp.ProgressReport>, monitoring)
+      .then(res => {
+        genState.lastReport = res;
+        genState.lastReportTime = Date.now();
+        genState.awaitedProgressRequest = undefined;
+        genState.isInProgress = (res.isRunning == gp.GenerationState.RUNNING);
+        return res;
+      })
+      .finally(() => genState.subscriberCount--);
+      return genState.awaitedProgressRequest;
   },
   getGeneratorStats: async (): Promise<string> => {
       return await getRequest<string>(generatorAddress + gp.getStatUrl, res => res.text(), monitoring);

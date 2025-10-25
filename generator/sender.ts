@@ -27,7 +27,7 @@ export class Sender {
         }
     }
     async postTransaction(userData: PostTransactionParams) {
-        this.checkCapacity(2); //throws
+        // this.checkCapacity(2); //throws
         this.generator.postTransaction(userData);
         this.maybeStartSending();
     }
