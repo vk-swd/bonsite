@@ -17,6 +17,7 @@ services:
       environment:
         - NODE_PRESERVE_SYMLINKS=1
         - HEALTHCHECK_PORT=${HEALTHCHECK_PORT}
+        - LOGGING=info
       networks:
         - backend_net
       tty: true

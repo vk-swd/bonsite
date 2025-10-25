@@ -3,7 +3,7 @@ networks:
     driver: bridge
     name: backend_net
     external: false
-  backend_net:
+  tunnel_net:
     driver: bridge
     name: tunnel_net
 
@@ -88,6 +88,7 @@ services:
     extends:
       file: base_services.yaml
       service: node_monitored_app
+    hostname: "${AUTH_APP_NAME}"
     volumes:
     - ./${AUTH_APP_NAME}:${SOURCEDIR}
     - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
@@ -97,18 +98,26 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       KAFKA_HOST: ${KAFKA_HOST}
       KAFKA_PORT: ${KAFKA_PORT}
-
   tunnel_client:
     build:
         dockerfile_inline: |
           FROM alpine:latest
-          RUN apk update; apk add openssh-client socat; adduser sshuser -h /home/suser -D
-          RUN su sshuser; cd ~/; mkdir .ssh; echo ${MY_SSH_A_KEY} > .ssh/k1.pub; echo ${MY_SSH_P_KEY} > .ssh/k1;
+          RUN apk update; apk add openssh-client socat; adduser ${TUNNEL_USER_NAME} -h /home/${TUNNEL_USER_NAME} -D
+          RUN su ${TUNNEL_USER_NAME} -c "mkdir ~/.ssh";
     entrypoint: ["/bin/sh", "-c"]
-    command: ["ssh -N -R ${TUNNEL_PORT}:localhost:${GRAPH_QL_PORT} sshuser@${TUNNEL_HOSTNAME}"]
+    command: ["cp /tunnelkeys/* /home/${TUNNEL_USER_NAME}/.ssh/; \
+               chown -R ${TUNNEL_USER_NAME} /home/${TUNNEL_USER_NAME}; \
+               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -R redacted:${KAFKA_HOST}:${KAFKA_PORT} ${TUNNEL_USER_NAME}@redacted -p ${TUNNEL_PORT} -i /home/${TUNNEL_USER_NAME}/.ssh/tunnel;'; \
+               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -L redacted:${AUTH_APP_NAME}:redacted ${TUNNEL_USER_NAME}@redacted -p ${TUNNEL_PORT} -i /home/${TUNNEL_USER_NAME}/.ssh/tunnel;'; \
+               exec sh"]
+    tty: true
+    stdin_open: true
+    volumes:
+      - /home/redacted/.ssh/tunnel:/tunnelkeys/tunnel:ro
+      - /home/redacted/.ssh/tunnel.pub:/tunnelkeys/tunnel.pub:ro
     depends_on:
-      - kafka1:
-          condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     networks:
       - backend_net
       - tunnel_net
@@ -122,11 +131,13 @@ services:
     volumes:
       - ./:${SOURCEDIR}
       - ./${FRONTEND_NAME}/sshd_config:/config/sshd/sshd_config
+      - ~/.ssh/tunnel.pub:/config/ssh/authKey.pub:ro
     environment:
       - PUID=2000
       - PGID=2000
       - TZ=Etc/UTC
-      - PUBLIC_KEY=${MY_SSH_A_KEY}
+      - PUBLIC_KEY_FILE=/config/ssh/authKey.pub
+      - USER_NAME=${TUNNEL_USER_NAME}
     networks:
       - backend_net
 
@@ -222,9 +233,32 @@ services:
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://${KAFKA_HOST}:${KAFKA_PORT}'
     hostname: "${KAFKA_HOST}"
     healthcheck:
-      test: ["CMD-SHELL", "./kafka-get-offsets.sh --bootstrap-server ${KAFKA_HOST}:${KAFKA_PORT} 2>> ~/kafka_healthcheck.log"]
+      test: ["CMD-SHELL", "/bin/bash", "-c nc -v -z ${KAFKA_HOST} ${KAFKA_PORT} &>> ~/kafka_healthcheck.log"]
       <<: [*healthcheck_params]
     
+  kafka-init:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      kafka1:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: [ "echo 'Initializing topics...' && ls && \
+          kafka-topics --create --if-not-exists \
+        --topic ${KAFKA_TOPICS_TRANSACTIONS} \
+        --partitions 1 \
+        --replication-factor 1 \
+        --bootstrap-server ${KAFKA_HOST}:${KAFKA_PORT} \
+        --config retention.bytes=500000000 &&
+      kafka-topics --create --if-not-exists \
+        --topic ${KAFKA_TOPICS_TRANSACTION_RESULTS} \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.bytes=500000000 \
+        --bootstrap-server ${KAFKA_HOST}:${KAFKA_PORT} &&
+        echo 'Topics initialized' && exec sh" ]
+    networks:
+      - backend_net
+
 
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -341,7 +375,7 @@ services:
       environment:
         SHARED_DIR: ${SHARED_DIR}
         <<: [*gql_env]
-        TESTER_PORT: ${TESTER_PORT}
+        TESTER_PORT: TESTER_PORT
         TESTER_HOST: ${TESTER_NAME}
       # tty: false
       # stdin_open: false

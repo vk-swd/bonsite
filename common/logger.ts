@@ -1,6 +1,7 @@
+import { getEnv } from "./utils.js";
 
 
-
+const logging = getEnv("LOGGING")
 
 export class Logger {
     private static instance: Logger;
@@ -31,6 +32,9 @@ export class Logger {
         console.info("%s " + message, new Date().toISOString(), ...params);
     }
     public debug(message: any, ...params: any): void {
+        if (logging !== "debug") {
+            return;
+        }
         console.debug("%s " + message, new Date().toISOString(), ...params);
     }
     public log(message: any, ...params: any): void {

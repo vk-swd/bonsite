@@ -23,11 +23,12 @@ chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 
 
-
+const tp = getEnv('TESTER_PORT')
+logger.info(`Using tester port ${tp}`)
 
 describe('Kafka Consumer Tests', function () {
     this.timeout(1000000000); // set timeout for the tests
-    it('', async () => {
+    it.only('', async () => {
         expect(true).to.be.true; // just to have a test
     });
     it.skip('Sanity check', async () => {

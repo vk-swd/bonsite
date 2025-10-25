@@ -2,7 +2,7 @@
     "name": "Generator",
     "version": "1.0.0",
     "scripts": {
-      "deploy": "tsc && node --trace-warnings build/main.js",
+      "deploy": "tsc && node --trace-warnings build/main.js &>> generator.log",
       "test": "tsc && node build/test.js"
     },
     "private": true,

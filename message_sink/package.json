@@ -2,7 +2,7 @@
     "name": "DB Consumer",
     "version": "1.0.0",
     "scripts": {
-      "deploy": "tsc && node build/main.js | grep -v -E 'Pausing|Resuming'",
+      "deploy": "tsc && node build/main.js &>> message_sink.log",
       "test": "tsc && mocha build/test.js --exit"
     },
     "private": true,
