@@ -72,7 +72,6 @@ services:
       NGINX_FOLDER: ${NGINX_FOLDER}
       AUTH_PORT: ${AUTH_PORT}
       AUTH_APP_NAME: ${AUTH_APP_NAME}
-      CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
       GRAPH_QL_PORT: ${GRAPH_QL_REMOTE_PORT}
       GRAPH_QL_HOSTNAME: ${TUNNEL_HOSTNAME}
       # <<: [*gql_env]
@@ -98,6 +97,7 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       KAFKA_HOST: ${KAFKA_HOST}
       KAFKA_PORT: ${KAFKA_PORT}
+      CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
   tunnel_client:
     build:
         dockerfile_inline: |
@@ -222,6 +222,8 @@ services:
       - PROMETHEUS_HOST=${PROMETHEUS_NAME}
       - PROMETHEUS_PORT=${PROMETHEUS_PORT}
       - GRAPHANA_DASHBOARD_FOLDER=${GRAPHANA_DASHBOARD_FOLDER}
+    tty: true
+    stdin_open: true
     ports:
       - "127.0.0.1:${GRAPHANA_PORT_HOST}:3000"
     networks:
@@ -280,6 +282,7 @@ services:
     networks:
         - backend_net
     healthcheck:
+    # test: ["CMD-SHELL", "wget --spider --timeout=2 --tries=1 http://127.0.0.1:14341 >/dev/null 2>&1; [ $? -eq 4 ]"]
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd  -S localhost -U ${MSSQL_CONSUMER_USERNAME} -P ${MSSQL_PASSWORD} -C -Q exit"]
       <<: [*healthcheck_params]
 
@@ -358,7 +361,7 @@ services:
     image: busybox
     depends_on:
       auth:
-        condition: service_started
+        condition: service_healthy
       tunnel:
         condition: service_started
       frontend_server:

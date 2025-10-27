@@ -2,7 +2,7 @@
     "name": "Generator",
     "version": "1.0.0",
     "scripts": {
-      "deploy": "tsc && node --prof build/main.js",
+      "deploy": "tsc; node --prof build/main.js >> $LOG_MOUNT/statement_generator.log 2>&1",
       "test": "tsc && mocha build/test.js --trace-warnings --exit"
     },
     "private": true,

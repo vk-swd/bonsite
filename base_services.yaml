@@ -19,6 +19,7 @@ services:
         - NODE_PRESERVE_SYMLINKS=1
         - HEALTHCHECK_PORT=${HEALTHCHECK_PORT}
         - LOGGING=info
+        - LOG_MOUNT=${LOG_MOUNT}
       networks:
         - backend_net
       tty: true
