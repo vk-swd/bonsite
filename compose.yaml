@@ -73,7 +73,7 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       AUTH_APP_NAME: ${AUTH_APP_NAME}
       GRAPH_QL_PORT: ${GRAPH_QL_REMOTE_PORT}
-      GRAPH_QL_HOSTNAME: ${TUNNEL_HOSTNAME}
+      GRAPH_QL_HOSTNAME: ${TUNNEL_SERVICE_NAME}
       # <<: [*gql_env]
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
@@ -83,6 +83,7 @@ services:
     - "127.0.0.1:9000:${NGINX_PORT}"
     networks:
       - backend_net
+
   auth:
     extends:
       file: base_services.yaml
@@ -102,26 +103,36 @@ services:
     build:
         dockerfile_inline: |
           FROM alpine:latest
-          RUN apk update; apk add openssh-client socat autossh; adduser ${TUNNEL_USER_NAME} -h /home/${TUNNEL_USER_NAME} -D
+          COPY tunnel/activate.sh /tunnelkeys/activate.sh
+          RUN adduser ${TUNNEL_USER_NAME} -h /home/${TUNNEL_USER_NAME} -D
+          RUN apk update; apk add openssh-client socat autossh;
+          RUN su ${TUNNEL_USER_NAME} -c "cp /tunnelkeys/activate.sh ~/activate.sh";
+          RUN chmod +x /home/${TUNNEL_USER_NAME}/activate.sh;
           RUN su ${TUNNEL_USER_NAME} -c "mkdir ~/.ssh";
     entrypoint: ["/bin/sh", "-c"]
-    command: ["cp /tunnelkeys/* /home/${TUNNEL_USER_NAME}/.ssh/; \
-                echo $TESTVAR; \
-               chown -R ${TUNNEL_USER_NAME} /home/${TUNNEL_USER_NAME}; \
-               su ${TUNNEL_USER_NAME} -c 'ssh -f   -N -R ${GRAPH_QL_REMOTE_PORT}:${GRAPH_QL_APP_NAME}:${GRAPH_QL_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST}-p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
-               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -L ${AUTH_SERVER_MON_PORT}:${AUTH_APP_NAME}:${MONITORING_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST} -p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
-               exec sh"]
+    command: ["sh /tunnelkeys/activate.sh; exec sh"]
     tty: true
-    environment:
-      - TESTVAR=12
     hostname: ${TUNNEL_CLIENT_NAME}
     stdin_open: true
+    environment:
+      - CLIENT_KEY=${TUNNEL_CLIENT_KEY}
+      - TUNNEL_USER_NAME=${TUNNEL_USER_NAME}
+      - REMOTE_CONNECT_ADDR=${AUTH_APP_NAME}
+      - REMOTE_CONNECT_PORT=${MONITORING_PORT}
+      - LOCAL_CONNECT_PORT=${AUTH_SERVER_MON_PORT}
+      - REMOTE_LISTEN_PORT=${GRAPH_QL_REMOTE_PORT}
+      - LOCAL_LISTEN_PORT=${GRAPH_QL_PORT}
+      - LOCAL_LISTEN_ADDR=${GRAPH_QL_APP_NAME}
+      - REMOTE_END_ADDR=${REMOTE_END_ADDR}
+      - REMOTE_END_PORT=${TUNNEL_PORT}
+      - LOG_MOUNT=${LOG_MOUNT}
     volumes:
-      - ${HOST_TUNNEL_KEY}:/tunnelkeys/tunnel:ro
-      - ${HOST_TUNNEL_KEY}.pub:/tunnelkeys/tunnel.pub:ro
+      - ${HOST_TUNNEL_KEY}:${TUNNEL_CLIENT_KEY}:ro
+      - ${HOST_TUNNEL_KEY}.pub:${TUNNEL_CLIENT_KEY}.pub:ro
+      - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
     depends_on:
-      kafka-init:
-        condition: service_completed_successfully
+      gql:
+        condition: service_healthy
     networks:
       - backend_net
       - tunnel_net
@@ -129,7 +140,7 @@ services:
   tunnel:
     image:
       lscr.io/linuxserver/openssh-server:latest
-    hostname: ${TUNNEL_HOSTNAME}
+    hostname: ${TUNNEL_SERVICE_NAME}
     ports:
       - "${TUNNEL_PORT}:${TUNNEL_PORT}" 
     volumes:
@@ -296,7 +307,7 @@ services:
         file: base_services.yaml
         service: node_app
       volumes:
-        - ./${DB_INITIALIZER_NAME}:${SOURCEDIR}
+        - ./${DB_INITIALIZER_NAME}${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:

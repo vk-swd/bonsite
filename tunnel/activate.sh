@@ -1,19 +1,21 @@
-#!/bin/bash
+#!/bin/sh
 
-
-su ${TUNNEL_USER_NAME} -c 'ssh -f   -N -R ${GRAPH_QL_REMOTE_PORT}:${GRAPH_QL_APP_NAME}:${GRAPH_QL_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST}-p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
-su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -L ${AUTH_SERVER_MON_PORT}:${AUTH_APP_NAME}:${MONITORING_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST} -p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
-            
-ssh 
--f -N 
--R ${GRAPH_QL_REMOTE_PORT}:${GRAPH_QL_APP_NAME}:${GRAPH_QL_PORT} 
-${TUNNEL_USER_NAME}@${FRONTEND_HOST}
--p ${TUNNEL_PORT} 
--i ~/.ssh/tunnel;
-
-
-AUTOSSH_GATETIME=0 AUTOSSH_LOGFILE=/home/sshuser/autologs  AUTOSSH
-_GATETIME=0 autossh -M 0 -f -o ExitOnForwardFailure=yes -o ServerAlive
-Interval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no -N -R 
-redacted:localhost:redacted sshuser@redacted -p 2222  -i /home/sshuser/.s
-sh/tunnel
+CLIENT_KEY_IN_CONTAINER="/home/$TUNNEL_USER_NAME/.ssh/tunnel"
+cp $CLIENT_KEY $CLIENT_KEY_IN_CONTAINER
+cp $CLIENT_KEY.pub $CLIENT_KEY_IN_CONTAINER.pub
+chown -R ${TUNNEL_USER_NAME} /home/${TUNNEL_USER_NAME}/.ssh
+echo "Client key copied to container."
+su ${TUNNEL_USER_NAME} -c "AUTOSSH_GATETIME=0 \
+    AUTOSSH_LOGFILE="$LOG_MOUNT/autossh_logs.log" \
+    autossh -M 0 \
+    -f \
+    -o StrictHostKeyChecking=no \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=10 \
+    -o ServerAliveCountMax=2 \
+    -vv \
+    -R $REMOTE_LISTEN_PORT:$LOCAL_LISTEN_ADDR:$LOCAL_LISTEN_PORT \
+    -L $LOCAL_CONNECT_PORT:$REMOTE_CONNECT_ADDR:$REMOTE_CONNECT_PORT \
+    -N $TUNNEL_USER_NAME@$REMOTE_END_ADDR \
+    -i $CLIENT_KEY_IN_CONTAINER \
+    -p $REMOTE_END_PORT;"
