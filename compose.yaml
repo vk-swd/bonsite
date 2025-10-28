@@ -102,15 +102,18 @@ services:
     build:
         dockerfile_inline: |
           FROM alpine:latest
-          RUN apk update; apk add openssh-client socat; adduser ${TUNNEL_USER_NAME} -h /home/${TUNNEL_USER_NAME} -D
+          RUN apk update; apk add openssh-client socat autossh; adduser ${TUNNEL_USER_NAME} -h /home/${TUNNEL_USER_NAME} -D
           RUN su ${TUNNEL_USER_NAME} -c "mkdir ~/.ssh";
     entrypoint: ["/bin/sh", "-c"]
     command: ["cp /tunnelkeys/* /home/${TUNNEL_USER_NAME}/.ssh/; \
+                echo $TESTVAR; \
                chown -R ${TUNNEL_USER_NAME} /home/${TUNNEL_USER_NAME}; \
-               su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -R ${GRAPH_QL_REMOTE_PORT}:${GRAPH_QL_APP_NAME}:${GRAPH_QL_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST}-p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
+               su ${TUNNEL_USER_NAME} -c 'ssh -f   -N -R ${GRAPH_QL_REMOTE_PORT}:${GRAPH_QL_APP_NAME}:${GRAPH_QL_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST}-p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
                su ${TUNNEL_USER_NAME} -c 'ssh -f -o StrictHostKeyChecking=no -N -L ${AUTH_SERVER_MON_PORT}:${AUTH_APP_NAME}:${MONITORING_PORT} ${TUNNEL_USER_NAME}@${FRONTEND_HOST} -p ${TUNNEL_PORT} -i ~/.ssh/tunnel;'; \
                exec sh"]
     tty: true
+    environment:
+      - TESTVAR=12
     hostname: ${TUNNEL_CLIENT_NAME}
     stdin_open: true
     volumes:
@@ -133,6 +136,7 @@ services:
       - ./:${SOURCEDIR}
       - ./${FRONTEND_NAME}/sshd_config:/config/sshd/sshd_config
       - ${HOST_TUNNEL_KEY}.pub:/config/ssh/authKey.pub:ro
+      - ${DEFINED_HOST_KEYS_VOLUME}:/config/ssh_host_keys
     environment:
       - PUID=2000
       - PGID=2000
