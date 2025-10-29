@@ -114,7 +114,8 @@ class LoggedIps {
                 entries.sort((a, b) => b[1] - a[1]).splice(30);
             }
             this.ipMap.clear();
-            logger.info(this.label, ". Visitor count: ", size, "attempts:", this.count, "ips:", entries);
+            logger.info(this.label, ". Visitor count: ", size, ", attempts:", this.count, ", ips:", entries);
+            this.count = 0;
         }
     }
 }
@@ -132,7 +133,10 @@ export class AuthServer {
         this.wrongPasswordsIps.logAndClear();
         this.successLoginIps.logAndClear();
     }, 1000);
-    rateLimit(client: ClientState, req: express.Request, res: express.Response): boolean {
+    limitRate(client: ClientState) {
+        client.lastRequestTime = Date.now();
+    }
+    checkRateLimit(client: ClientState, res: express.Response): boolean {
         const now = Date.now();
         const elapsed = now - client.lastRequestTime
         if (elapsed < 1000) {
@@ -140,12 +144,11 @@ export class AuthServer {
             res.end();
             return true;
         }
-        client.lastRequestTime = now;
         return false;
     }
-    checkClientId(res: express.Response, info: string) {
-        logger.debug(info, ": Missing client ID header");
-        res.status(401).json(new ApiError(`Missing client ID header`, ApiErrorType.NOT_AUTHENTICATED));
+    failAuth(res: express.Response, info: string, reason: string) {
+        logger.debug(info, ":", reason);
+        res.status(401).json(new ApiError(reason, ApiErrorType.NOT_AUTHENTICATED));
         res.end();
         return true;
     }
@@ -158,21 +161,24 @@ export class AuthServer {
         const info = `${from}:${clientId}->${origUrl}`
         logger.debug(info + " auth");
         if ((!clientId || clientId.length == 0)) {
-            this.checkClientId(res, info);
+            this.failAuth(res, info, `Missing client ID header`);
             metrics?.noClientIdCount.inc();
             this.noCLientIdIps.logIp(info);
             return;
         }
         const client = this.clients.get(clientId!);
-        if (client && this.rateLimit(client, req, res)) {
+        if (!client) {
+            this.failAuth(res, info, `Unauthorised client`);
+            return;
+        }
+        if (this.checkRateLimit(client, res)) {
             metrics?.rateLimitedCount.inc();
             this.rateLimitedIps.logIp(info);
             return;
         }
-        const sessionId: string | undefined = req.headers.cookie?.split(";").filter(
-            (item) => item.trim().startsWith(SESSION_COOKIE + "="))[0]?.split("=")[1];
+        const sessionId: string | undefined = cookies[SESSION_COOKIE]
         let dropReason = "";
-        if (!sessionId || !client?.token) {
+        if (!sessionId || !client.token) {
             dropReason = "Not authorized";
             this.notAuthorisedIps.logIp(info);
         } else if (client.token.value !== sessionId) {
@@ -182,9 +188,9 @@ export class AuthServer {
             dropReason = "Session expired";
         }
         if (dropReason.length > 0) {
+            this.limitRate(client);
+            this.failAuth(res, info, dropReason);
             logger.debug(info, ":", dropReason);
-            res.status(401).json(new ApiError(dropReason, ApiErrorType.NOT_AUTHENTICATED));
-            res.end();
             return;
         }
         metrics?.authorisedActions.inc();
@@ -209,7 +215,7 @@ export class AuthServer {
         this.inFlightLoginAttempts++;
 
         if ((!clientId || clientId.length == 0)) {
-            this.checkClientId(res, info);
+            this.failAuth(res, info, `Missing client ID header`);
             metrics?.noClientIdCount.inc();
             this.noCLientIdIps.logIp(info);
             this.inFlightLoginAttempts--;
@@ -219,6 +225,11 @@ export class AuthServer {
         if (!client) {
             client = new ClientState();
             this.clients.set(clientId!, client);
+        } else if (this.checkRateLimit(client, res)) {
+            metrics?.rateLimitedCount.inc();
+            this.rateLimitedIps.logIp(info);
+            this.inFlightLoginAttempts--;
+            return;
         }
         if (client.token && client.token.checkExpiredAndReportIsValid()) {
             this.inFlightLoginAttempts--;
@@ -243,7 +254,7 @@ export class AuthServer {
                 this.wrongPasswordsIps.logIp(info);
                 res.status(401).json({ error: 'Invalid credentials' });
                 res.end();
-                // TODO: Rate limit individual
+                this.limitRate(client!);
                 return;
             }
             return validateWithRetry(params.metadata, from, crypto.randomUUID(),0, 3).then(cfRes => {
@@ -264,7 +275,7 @@ export class AuthServer {
             metrics?.loginAsyncErrors.inc();
             res.status(400).json({ error: `Login error: ${e}` })
             res.end();
-            // TODO: Rate limit individual
+            // TODO: Rate limit individual?
         })
         .finally(() => {
             client.verifying = false;

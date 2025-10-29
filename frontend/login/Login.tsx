@@ -6,7 +6,7 @@ import Grid from '@mui/material/Grid';
 import Paper from '@mui/material/Paper';
 import { fetchHandleAuthLogin } from "../fetchHandleAuth";
 import { ApiError, GQL_URL, hello, customHeaderParamClientId } from "../common/gqlDeclarations";
-import { logger } from "../common/logger";
+import { logger } from "../logger";
 import { LoginDataValidator } from "../common/event_types";
 import { textInput } from "../elements";
 import Turnstile, { useTurnstile } from "react-turnstile";
@@ -46,6 +46,7 @@ export default function Login() {
   async function handleLogin() {
     setWaitingLogin(true);
       fetchHandleAuthLogin((clientId: string) => {
+        logger.info('trying to login')
         return fetch("/login", {
           method: "POST", 
           headers: {

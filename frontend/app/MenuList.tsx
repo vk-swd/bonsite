@@ -2,7 +2,7 @@ import React, { Children, useRef, useState } from "react";
 import { last } from "../common/utils";
 import { renderMenuButton } from "./SuperButton";
 import Select, { InputActionMeta, components } from 'react-select'
-import { logger } from "../common/logger";
+import { logger } from "../logger";
 
 
 

@@ -8,7 +8,7 @@ import Paper from '@mui/material/Paper';
 
 import { GenerationState, GenParametersValidator, ProgressReport } from "../common/generator_parameters.js";
 import * as gqlp from "../common/gqlDeclarations.js"
-import { logger } from "../common/logger.js";
+import { logger } from "../logger.js";
 import { StatementParametersValidator, StatementRequestResult, StatementType, Transaction, UserDataRequestParameters, UserDataResult } from "../common/event_types.js";
 import { getUserSelectItem } from "./MenuList.js";
 import { StatementChild, StatementContainer } from "./StatementList.js";

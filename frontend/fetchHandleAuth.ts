@@ -1,5 +1,5 @@
 import { ApiError, ApiErrorType } from "./common/gqlDeclarations";
-import { logger } from "./common/logger";
+import { logger } from "./logger";
 
 export function getClientId() {
   let id = localStorage.getItem('clientId');
@@ -20,6 +20,7 @@ export function fetchHandleAuth<P, R>(fetcher: (...params: any) => Promise<R>, .
         while (temp instanceof ApiError) {
             if (temp.type == ApiErrorType.NOT_AUTHENTICATED) {
                 alert("Session expired");
+                logger.info(`switching page to login because`, temp.message)
                 window.location.href = "/login.html";
                 throw temp;
             }

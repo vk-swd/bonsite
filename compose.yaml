@@ -74,11 +74,13 @@ services:
       AUTH_APP_NAME: ${AUTH_APP_NAME}
       GRAPH_QL_PORT: ${GRAPH_QL_REMOTE_PORT}
       GRAPH_QL_HOSTNAME: ${TUNNEL_SERVICE_NAME}
+      LOG_MOUNT: ${LOG_MOUNT}
       # <<: [*gql_env]
     volumes:
     - frontend_deploy_folder:/${NGINX_FOLDER}
     - shared_dir:${SHARED_DIR}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
+    - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
     ports:
     - "127.0.0.1:9000:${NGINX_PORT}"
     networks:
@@ -307,7 +309,7 @@ services:
         file: base_services.yaml
         service: node_app
       volumes:
-        - ./${DB_INITIALIZER_NAME}${SOURCEDIR}
+        - ./${DB_INITIALIZER_NAME}:${SOURCEDIR}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
       environment:
@@ -353,8 +355,8 @@ services:
         condition: service_completed_successfully
       message_sink:
         condition: service_healthy
-      graphana:
-        condition: service_started
+      # graphana:
+      #   condition: service_started
       prometheus:
         condition: service_started
       tunnel_client:
