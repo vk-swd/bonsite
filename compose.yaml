@@ -321,21 +321,8 @@ services:
 
   message_sink:
       extends:
-        file: base_services.yaml
-        service: node_kafka_app
-      hostname: "${MESSAGE_SINK_NAME}"
-      volumes:
-        - ./${MESSAGE_SINK_NAME}:${SOURCEDIR}
-        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
-      environment:
-        << : [*mssql_env]
-      # tty: false
-      # stdin_open: false
-      depends_on:
-        kafka1:
-          condition: service_healthy
-        sqldb:
-          condition: service_healthy
+        file: message_sink.yaml
+        service: message_sink
 
   statement_generator:
       extends:

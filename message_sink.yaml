@@ -1,0 +1,21 @@
+services:
+  message_sink:
+      extends:
+        file: base_services.yaml
+        service: node_kafka_app
+      hostname: "${MESSAGE_SINK_NAME}"
+      volumes:
+        - ./${MESSAGE_SINK_NAME}:${SOURCEDIR}
+        - ./${COMMON_DIR_NAME}/db:${WORKDIR}/${COMMON_DIR_NAME}/db
+      env_file:
+        - ./.sql_env
+      environment:
+        GRAPH_QL_PORT: ${GRAPH_QL_PORT}
+        GRAPH_QL_HOSTNAME: ${GRAPH_QL_APP_NAME}
+      # tty: false
+      # stdin_open: false
+      depends_on:
+        kafka-init:
+          condition: service_completed_successfully
+        sqldb:
+          condition: service_healthy
