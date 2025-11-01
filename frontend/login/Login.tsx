@@ -84,13 +84,19 @@ export default function Login() {
         </Typography>
         <Grid container spacing={2}>
           {[loginInput,
-            passwordInput,
-            <Grid container spacing={2}>
-              {TurnstileWidget(cfToken)}
-              {makeButton("Sign in", () => waitingLogin, handleLogin)}
-            </Grid>].map((el, idx) =>
+            passwordInput].map((el, idx) =>
               <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
+              <Grid item> 
+                <Grid container direction="row" spacing={2} sx={{
+                    justifyContent: "flex-start",
+                    alignItems: "flex-start",
+                  }}>
+                    <Grid item key={1} xs="auto">{makeButton("Sign in", () => waitingLogin, handleLogin)}</Grid>
+                    <Grid item key={2} xs="auto">{TurnstileWidget(cfToken)}</Grid>
+                </Grid>
+            </Grid>
         </Grid>
+       
       </Paper>
     </Container>
   );

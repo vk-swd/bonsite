@@ -129,9 +129,12 @@ export class AuthServer {
     wrongPasswordsIps = new LoggedIps("Wrong password IPs");
     successLoginIps = new LoggedIps("Successful login IPs");
     loggerTimer = setInterval(() => {
-        this.rateLimitedIps.logAndClear();
-        this.wrongPasswordsIps.logAndClear();
-        this.successLoginIps.logAndClear();
+        this.noCLientIdIps.logAndClear()
+        this.wrongCredentialIps.logAndClear()
+        this.notAuthorisedIps.logAndClear()
+        this.rateLimitedIps.logAndClear()
+        this.wrongPasswordsIps.logAndClear()
+        this.successLoginIps.logAndClear()
     }, 1000);
     limitRate(client: ClientState) {
         client.lastRequestTime = Date.now();
