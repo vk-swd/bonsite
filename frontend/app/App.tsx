@@ -134,7 +134,7 @@ export default function App() {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const lastProgressReport = await fetchHandleAuth(gqlp.getProgress.fetchCall.bind(gqlp.getProgress, gqlp.GQL_URL), undefined);
       if (lastProgressReport.isRunning === GenerationState.RUNNING) {
-        setStartGenTxt(`Progress: Sent: ${lastProgressReport.totalSent}, ${lastProgressReport.percentComplete}%`);
+        setStartGenTxt(`Sent: ${lastProgressReport.totalSent}, Progress: ${lastProgressReport.percentComplete}%`);
       } else {
         setStartGenTxt(`Finished. Sent: ${lastProgressReport.totalSent}.`);
         break;
@@ -273,18 +273,32 @@ export default function App() {
           Generate Transactions
         </Typography>
         <Grid container spacing={2}>
-          {[genTransactionDateFromElement,
+          {[
+            genTransactionDateFromElement,
             genTransactionDateToElement,
             genTransactionUserCount,
             genTransactionTransactionCount,
             genTransactionMinUserId,
             genTransactionMinTransactionId,
-            genTransactionMaxDelayMs].map((el, idx) =>
-              <Grid item xs={12} sm={6} key={idx}>{el}</Grid>)}
-          <Grid item xs={12} container spacing={2} key={10}>
-            {makeButton(() => startGenButtonStates.get(startGenButtonState)!.buttonLabel,
-              () => startGenButtonStates.get(startGenButtonState)!.buttonDisabled, startGeneration)}
-            {label(() => startGenTxt)}
+            genTransactionMaxDelayMs
+          ].map((el, idx) => (
+            <Grid item xs={12} sm={6} key={idx}>
+              {el}
+            </Grid>
+          ))}
+          {/* Button + label below */}
+          <Grid item xs={12}>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item>
+                {makeButton(
+                  () => startGenButtonStates.get(startGenButtonState)!.buttonLabel,
+                  () => startGenButtonStates.get(startGenButtonState)!.buttonDisabled, 
+                  startGeneration)}
+              </Grid>
+              <Grid item>
+                {label(() => startGenTxt)}
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
       </Paper>
