@@ -1,0 +1,19 @@
+@startuml
+
+participant "WebSite" as W
+participant "GraphQL\nServer" as Gql
+participant "Kafka" as K
+participant "Message Sink" as sink
+participant "Microsoft\nSQL Server" as sql
+
+W -> Gql: Post\nTransaction T1\nbetween C1 and C2
+Gql -> K: Send T1 Kafka
+sink <-> K: consume T1
+sink -> sql: store T1\nand save offset
+
+W -> Gql: Request transactions\nfor C1
+Gql -> sql: Query transacions\nfor C1
+sql -> Gql: return T1
+Gql -> W: present T1
+
+@enduml

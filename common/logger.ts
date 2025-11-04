@@ -1,7 +1,8 @@
 import { getEnv } from "./utils.js";
 
 
-const logging = getEnv("LOGGING")
+// const logging = getEnv("LOGGING")
+const logging = "debug"
 
 export class Logger {
     private static instance: Logger;

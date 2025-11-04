@@ -9,6 +9,7 @@ import { metrics } from "./monitoring_local.js";
 const COLUDFLARE_AUTH_SECRET = getEnv("CLOUDFLARE_SECRET")
 const PASSWORD = "sup#rS3cr3tB@nana========"
 const LOGIN = "user1"
+const LOGIN1 = "user"
 const SESSION_COOKIE = "sessionId"
 const CONNECTIONG_IP_C = "cf-connecting-ip"
 const ORIGINAL_URI = "x-original-uri"
@@ -171,7 +172,7 @@ export class AuthServer {
         }
         const client = this.clients.get(clientId!);
         if (!client) {
-            this.failAuth(res, info, `Unauthorised client`);
+            this.failAuth(res, info, `Unauthorised client ${clientId}`);
             return;
         }
         if (this.checkRateLimit(client, res)) {
@@ -251,7 +252,7 @@ export class AuthServer {
         const params: LoginData = LoginDataValidator.parse(req.body);
         //wait for authorisation items
         sleep(800 + Math.random() * 1000).then(() => {
-            if (params.user !== LOGIN || params.password !== PASSWORD 
+            if ((params.user !== LOGIN && params.user !== LOGIN1) || params.password !== PASSWORD 
                 || !params.metadata || params.metadata.length == 0) {
                 metrics?.wrongPasswords.inc();
                 this.wrongPasswordsIps.logIp(info);

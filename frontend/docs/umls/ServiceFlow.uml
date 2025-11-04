@@ -6,5 +6,6 @@ participant "Client2" as C2
 
 C1 -> S: Transaction (T1) with C2
 S -> C2: Statement with T1
+S -> C1: Statement with T1
 
 @enduml

@@ -250,7 +250,7 @@ export default function App() {
       {/* Create Transaction */}
       <Paper sx={{ p: 3, mb: 4 }}>
       <Typography variant="h6" gutterBottom>
-          Docs: <a href="doc.html">doc.html</a>
+          <a href="doc.html">Back To Title Page</a>
         </Typography>
         <Typography variant="h6" gutterBottom>
           Create Transaction
@@ -318,11 +318,11 @@ export default function App() {
               Fetch Statement
             </Button>
           </Grid>
-          <Grid item xs={12} key={11}>
+          {/* <Grid item xs={12} key={11}>
             <Button variant="contained" onClick={handleStatementFetch}>
               Download Statement
             </Button>
-          </Grid>
+          </Grid> */}
         </Grid>
       </Paper>
       {/* Output */}
