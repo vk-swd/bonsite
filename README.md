@@ -11,7 +11,7 @@ A full-stack learning project demonstrating distributed system concepts.
 - **Infrastructure:** Docker, Oracle Cloud Infrastructure
 
 ## Architecture
-Event-driven system using Kafka for transaction processing, GraphQL API for data access, and MS SQL Server for persistence. Deployed on OCI with VPN connectivity.
+Full-stack banking transaction system with event-driven write path and request-response read path. User transactions are published to Kafka and consumed asynchronously for bulk writes to MS SQL Server, while account statements are queried on-demand via GraphQL. Deployed on personal infrastructure with OCI compute instance providing VPN connectivity.
 
 ---
 *Code available during technical interview*
