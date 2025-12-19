@@ -11,7 +11,7 @@ A full-stack learning project demonstrating distributed system concepts.
 - **Infrastructure:** Docker, Oracle Cloud Infrastructure
 
 ## Architecture
-Full-stack banking transaction system simulation with event-driven write path and request-response read path. User transactions are published to Kafka and consumed asynchronously for bulk writes to MS SQL Server, while account statements are queried on-demand via GraphQL. Deployed on personal infrastructure with OCI compute instance providing VPN connectivity.
+Full-stack banking transaction system. Uses Kafka for asynchronous transaction processing with bulk database writes, GraphQL for querying account statements, and MS SQL Server for data persistence. Deployed on personal infrastructure with VPN connectivity via OCI.
 
 ---
 *Code available during technical interview*
