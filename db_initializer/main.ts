@@ -12,13 +12,13 @@ const now = Date.now();
 const user_sa = getEnv('MSSQL_SA_USERNAME')
 logger.log(`Starting DB initialization at ${new Date(now).toISOString()}`)
 let pool: sql.ConnectionPool | undefined = undefined;
-let retries = 10;
+let retries = 100;
 while (!pool && retries > 0) {
     try {
         pool = await connectToDatabase(user_sa);
         retries = 0;
     } catch (e) {
-        logger.log(`Waiting for DB to be ready... ${retries} retries left`);
+        logger.log(`Waiting for DB to be ready... ${retries} retries left. Error: `, e);
         await new Promise(res => setTimeout(res, 1000));
         retries--;
     }

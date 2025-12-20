@@ -50,7 +50,7 @@ services:
         - FRONTEND_DEPLOY_FOLDER=${FRONTEND_DEPLOY_FOLDER}
       volumes:
         - ./${FRONTEND_NAME}:${SOURCEDIR}
-        - frontend_deploy_folder:${FRONTEND_DEPLOY_FOLDER}
+        - ${FRONTEND_DEPLOY_FOLDER_HOST}:${FRONTEND_DEPLOY_FOLDER}
         - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
         - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
         - ./${COMMON_DIR_NAME}/gqlDeclarations.ts:${WORKDIR}/${COMMON_DIR_NAME}/gqlDeclarations.ts
@@ -77,7 +77,7 @@ services:
       LOG_MOUNT: ${LOG_MOUNT}
       # <<: [*gql_env]
     volumes:
-    - frontend_deploy_folder:/${NGINX_FOLDER}
+    - ${FRONTEND_DEPLOY_FOLDER_HOST}:/${NGINX_FOLDER}
     - shared_dir:${SHARED_DIR}
     - ./${FRONTEND_NAME}/f.conf:${NGINX_TEMPLATE_FOLDER}/f.conf.template
     - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
@@ -101,6 +101,9 @@ services:
       KAFKA_HOST: ${KAFKA_HOST}
       KAFKA_PORT: ${KAFKA_PORT}
       CLOUDFLARE_SECRET: ${CLOUDFLARE_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
   tunnel_client:
     build:
         dockerfile_inline: |
@@ -288,6 +291,8 @@ services:
       - "${WORKDIR}"
     working_dir: ${WORKDIR}
     # Uncomment ports to connect to the database from outside
+    tmpfs:
+      - "/tmp"
     ports:
     - "127.0.0.1:1433:1433"
     environment:
@@ -355,8 +360,8 @@ services:
         condition: service_completed_successfully
       message_sink:
         condition: service_healthy
-      # graphana:
-      #   condition: service_started
+      graphana:
+        condition: service_started
       prometheus:
         condition: service_started
       tunnel_client:
@@ -390,3 +395,10 @@ services:
       # tty: false
       # stdin_open: false
       restart: no
+
+  fiddle:
+    extends:
+        file: base_services.yaml
+        service: node_app
+    volumes:
+        - ./fiddle:${SOURCEDIR}

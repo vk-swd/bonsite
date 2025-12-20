@@ -130,6 +130,7 @@ export type StatementRequestResult = z.infer<typeof StatementRequestResultValida
 export const LoginDataValidator = z.object({
     user: z.string(),
     password: z.string(),
-    metadata: z.string().optional()
+    metadata: z.string().optional(),
+    googleToken: z.string().optional()
 });
 export type LoginData = z.infer<typeof LoginDataValidator>;

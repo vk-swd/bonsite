@@ -5,15 +5,25 @@ import { LoginData, LoginDataValidator } from "./common/event_types.js";
 import { getEnv, sleep } from "./common/utils.js";
 import { metrics } from "./monitoring_local.js";
 
+import {OAuth2Client} from 'google-auth-library'
+import session from "express-session";
+import { log } from "console";
+// const session = require("express-session")
 
 const COLUDFLARE_AUTH_SECRET = getEnv("CLOUDFLARE_SECRET")
 const PASSWORD = "sup#rS3cr3tB@nana========"
+const PASSWORD1 = "genericPublicPassword"
 const LOGIN = "user1"
 const LOGIN1 = "user"
 const SESSION_COOKIE = "sessionId"
 const CONNECTIONG_IP_C = "cf-connecting-ip"
 const ORIGINAL_URI = "x-original-uri"
 let counter = 0;
+
+// Google OAuth configuration
+const GOOGLE_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
+const GOOGLE_CLIENT_SECRET = getEnv("GOOGLE_CLIENT_SECRET");
+
 class Token {
     static LIFETIME_MS = 30 * 60 * 1000; // 10 mins
     // static LIFETIME_MS = 10 * 1000; // 10 mins
@@ -61,7 +71,7 @@ class ClientState {
 }
 
 
-async function validateWithRetry(token: string, remoteip: string, 
+async function validateCFWithRetry(token: string, remoteip: string, 
     idempotencyKey: string, attempt: number, maxRetries = 1): Promise<any> {
     //https://developers.cloudflare.com/turnstile/get-started/server-side-validation/#advanced-validation-techniques
 
@@ -83,7 +93,7 @@ async function validateWithRetry(token: string, remoteip: string,
                 return response.json()
             } else {
                 return new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000))
-                .then(_ => validateWithRetry(token, remoteip, idempotencyKey, attempt + 1, maxRetries))
+                .then(_ => validateCFWithRetry(token, remoteip, idempotencyKey, attempt + 1, maxRetries))
             }
         })
     } else {
@@ -123,6 +133,8 @@ class LoggedIps {
 export class AuthServer {
     clients = new Map<string, ClientState>();
     inFlightLoginAttempts = 0;
+    // Store OAuth state to link back to clientId
+    oauthStates = new Map<string, { clientId: string; createdAt: number }>();
     noCLientIdIps = new LoggedIps("No client id IPs");
     wrongCredentialIps = new LoggedIps("WrongCredential IPs");
     notAuthorisedIps = new LoggedIps("Not authorised IPs");
@@ -156,6 +168,39 @@ export class AuthServer {
         res.end();
         return true;
     }
+    sessions = new Set<string>();
+    handleAuthGgl(req: express.Request, res: express.Response): void {
+        logger.info("getting url", req.url)
+        const myUrl = new URL(req.url, 'http://bonsite.org');
+        const code: string = myUrl.searchParams.get('code')??"dolbocode";    // "XYZ123"
+        const state = myUrl.searchParams.get('state');  // "abc"
+
+        logger.log("code, state", code, state, req.headers.cookie);
+
+        // //wait for authorisation items
+        const oAuth2Client = new OAuth2Client({
+            clientId: GOOGLE_CLIENT_ID,
+            clientSecret: GOOGLE_CLIENT_SECRET,
+            redirectUri: 'https://bonsite.org/authggl'
+        });
+        // Make sure to set the credentials on the OAuth2 client.
+        oAuth2Client.getToken(code)
+        .then(res => logger.log("2", res))
+        .catch(e => logger.error("error", e))
+        .finally(() => {
+            logger.info("WIP test");
+        })
+        res.redirect("/hello.html")
+        res.status(200);
+        res.cookie("mycooke", new Date().toISOString())
+        res.end();
+    }
+    handleSession(req: express.Request, res: express.Response): void {
+        logger.info("handleSession", req.headers.cookie);
+        res.status(200);
+        res.redirect("/login.html");
+        res.end();
+    }
     handleAuth(req: express.Request, res: express.Response): void {
         metrics?.authRequests.inc();
         const cookies = cookieMap(req.headers.cookie??"");
@@ -163,6 +208,13 @@ export class AuthServer {
         const origUrl = req.headers[ORIGINAL_URI];
         const clientId: string | undefined = req.headers[customHeaderParamClientId] as string ??cookies[customHeaderParamClientId]
         const info = `${from}:${clientId}->${origUrl}`
+        res.cookie("CurrentTime", new Date().toISOString())
+        if (!this.sessions.has(req.sessionID)) {
+            logger.info(info, `new session`);
+            res.status(403);
+            res.end();
+            return;
+        }
         logger.debug(info + " auth");
         if ((!clientId || clientId.length == 0)) {
             this.failAuth(res, info, `Missing client ID header`);
@@ -202,6 +254,7 @@ export class AuthServer {
         res.status(200);
         res.end();
     }
+
     handleLogin(req: express.Request, res: express.Response) {
         metrics?.loginRequests.inc();
         const from = req.headers[CONNECTIONG_IP_C] as string
@@ -248,11 +301,10 @@ export class AuthServer {
             this.inFlightLoginAttempts--;
             return;
         }
-        client.verifying = true;
         const params: LoginData = LoginDataValidator.parse(req.body);
-        //wait for authorisation items
         sleep(800 + Math.random() * 1000).then(() => {
-            if ((params.user !== LOGIN && params.user !== LOGIN1) || params.password !== PASSWORD 
+            if ((params.user !== LOGIN && params.user !== LOGIN1) 
+                || (params.password !== PASSWORD && params.password != PASSWORD1) 
                 || !params.metadata || params.metadata.length == 0) {
                 metrics?.wrongPasswords.inc();
                 this.wrongPasswordsIps.logIp(info);
@@ -261,7 +313,7 @@ export class AuthServer {
                 this.limitRate(client!);
                 return;
             }
-            return validateWithRetry(params.metadata, from, crypto.randomUUID(),0, 3).then(cfRes => {
+            return validateCFWithRetry(params.metadata, from, crypto.randomUUID(),0, 3).then(cfRes => {
                 // TODO: count time to update tunstile
                 if (cfRes.success !== true) {
                     metrics?.cfTokenRejectionCount.inc();
@@ -269,6 +321,7 @@ export class AuthServer {
                     res.end();
                 } else {
                     this.successLoginIps.logIp(info);
+                    logger.info("sf results", cfRes);
                     client.assignToken(new Token(), res, clientId!, info);
                     res.status(200);
                     res.end();
@@ -294,8 +347,21 @@ export class AuthServer {
     app: express.Express
     constructor(port: number) {
         this.app = express();
+        this.app.set('trust proxy',1) //do i need it? it works without it.
+        this.app.use(session({
+            secret: "your environment variable could be here",
+            cookie: {
+                maxAge: 60 * 1000,
+                secure: false,
+                httpOnly: true
+            },
+            resave: false,
+            saveUninitialized: true
+        }))
         this.app.post('/login', express.json(), this.handleLogin.bind(this));
+        this.app.get('/session', express.json(), this.handleSession.bind(this));
         this.app.get('/auth', express.json(), this.handleAuth.bind(this));
+        this.app.get('/authggl', express.json(), this.handleAuthGgl.bind(this));
         this.app.listen(port, () => {
             logger.info(`Auth server started at http://localhost:${port}`);
         });

@@ -14,6 +14,7 @@ import { getUserSelectItem } from "./MenuList.js";
 import { StatementChild, StatementContainer } from "./StatementList.js";
 import { fetchHandleAuth } from "../fetchHandleAuth.js";
 import { textInput } from "../elements.js";
+import { cacheBuster } from "../utils.js";
 type UserOption = {
   value: string;
   label: string;
@@ -249,8 +250,8 @@ export default function App() {
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
       <Paper sx={{ p: 3, mb: 4 }}>
-      <Typography variant="h6" gutterBottom>
-          <a href="doc.html">Back To Title Page</a>
+        <Typography variant="h6" gutterBottom>
+          <a href="#" onClick={() => window.location.href = "/doc.html=" + cacheBuster()}>Back To Title Page</a>
         </Typography>
         <Typography variant="h6" gutterBottom>
           Create Transaction

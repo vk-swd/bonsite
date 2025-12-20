@@ -59,6 +59,8 @@ services:
 
   kafka-app:
     image: apache/kafka:3.9.1
+    tmpfs:
+      - "/tmp"
     volumes:
       - "${WORKDIR}"
     working_dir: ${WORKDIR}

@@ -1,10 +1,11 @@
 #!/bin/sh
 
-CLIENT_KEY_IN_CONTAINER="/home/$TUNNEL_USER_NAME/.ssh/tunnel"
+export CLIENT_KEY_IN_CONTAINER="/home/$TUNNEL_USER_NAME/.ssh/tunnel"
 cp $CLIENT_KEY $CLIENT_KEY_IN_CONTAINER
 cp $CLIENT_KEY.pub $CLIENT_KEY_IN_CONTAINER.pub
 chown -R ${TUNNEL_USER_NAME} /home/${TUNNEL_USER_NAME}/.ssh
-echo "Client key copied to container."
+chown  ${TUNNEL_USER_NAME} ${LOG_MOUNT}
+echo "Client key copied to container. $CLIENT_KEY_IN_CONTAINER"
 su ${TUNNEL_USER_NAME} -c "AUTOSSH_GATETIME=0 \
     AUTOSSH_LOGFILE="$LOG_MOUNT/autossh_logs.log" \
     autossh -M 0 \
@@ -19,3 +20,5 @@ su ${TUNNEL_USER_NAME} -c "AUTOSSH_GATETIME=0 \
     -N $TUNNEL_USER_NAME@$REMOTE_END_ADDR \
     -i $CLIENT_KEY_IN_CONTAINER \
     -p $REMOTE_END_PORT;"
+
+echo "activated $?"

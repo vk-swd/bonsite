@@ -75,7 +75,20 @@
   <section>
     <h2 id="P1">The project</h2>
     <section>
-      <h3><a href="index.html" class="project-link">===============>The Link To The Demo Page<===============</a></h3>
+      <h3><a href="#" id="demoLink" class="project-link">===============>The Link To The Demo Page<===============</a></h3>
+      <script>
+        function random13() {
+          const arr = new Uint32Array(2);
+          crypto.getRandomValues(arr);
+          return ((arr[0] * 4294967296 + arr[1]) % 1e13)
+            .toString()
+            .padStart(13, "0");
+        }
+        document.getElementById("demoLink").addEventListener("click", function(e) {
+          e.preventDefault();
+          window.location.href = "index.html=" + random13();
+        });
+      </script>
       <h3>Sometimes backend requests might fail. Please see <a href="#Note1">technical note 7</a>.</h3>
     </section>
     <section>
@@ -167,6 +180,8 @@
       <h3>Technical notes:</h3>
       <ol>
         <li>
+          <p style="line-height: 100%; margin-bottom: 0cm">There is a single account, so login and password exist just to keep bots and prying eyes out. Having single account means that many simultenuous users may get in each others way but in a given context it wouldn't hurt anyone much. Requests are rate limited and you will get a chance to track individual transactions. However the database is rotated when it reaches a defined size, so data might get lost but again - it is intentional for demo purposes.</p>
+        <li>
           <p style="line-height: 100%; margin-bottom: 0cm">The
             implementation of server has another two components that I omitted
             before for simplicity:</p>
@@ -236,7 +251,7 @@
                 rotated in SQL Server by deleting oldest rows to maintain the
                 database file size of 2G and setting a SIMPLE recovery mode to
                 avoid a growing transaction log. Transaction log is also flushed
-                after every transaction.</p>
+                after every transaction [ts].</p>
               <p style="line-height: 100%; margin-bottom: 0cm"></p>
               <ol>
                 <p style="line-height: 100%; margin-bottom: 0cm"></p>

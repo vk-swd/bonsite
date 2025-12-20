@@ -18,13 +18,13 @@ export async function createSchema(pool: sql.ConnectionPool, databaseA: string =
         await runQuery(pool, `create database [${databaseA}] 
             ON PRIMARY(
                 NAME = ${databaseA}_dat,
-                FILENAME = '/var/opt/mssql/data/${databaseA}.mdf',
+                FILENAME = '/tmp/${databaseA}.mdf',
                 SIZE = 100 MB,
                 MAXSIZE = 4 GB,
                 FILEGROWTH = 15 %
             )LOG ON (
                 NAME = ${databaseA}_log,
-                FILENAME = '/var/opt/mssql/data/${databaseA}_log.ldf',
+                FILENAME = '/tmp/${databaseA}_log.ldf',
                 SIZE = 500 MB,
                 MAXSIZE = 500 MB,
                 FILEGROWTH = 0
