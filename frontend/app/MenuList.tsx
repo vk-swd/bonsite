@@ -110,19 +110,27 @@ export function getUserSelectItem<UserOption>(
         }
         lockUserRetrieval(true);
         userPatternDebounceState.current.isLookingUp = true;
-        try {
-            while (userPatternDebounceState.current.scheduled) {
-                const params = userPatternDebounceState.current.scheduled;
-                userPatternDebounceState.current.scheduled = undefined;
-                logger.info(`Requesting user list for pattern`, params.val, params.item);
-                const res = await fetchUsers(params.val, params.item);
-                setFoundUserData(res);
+        const userRetriever = (debounceState: any): Promise<void> => {
+            if (!debounceState.current.scheduled) {
+                return Promise.resolve();
             }
-        } catch (err) {
-            logger.error("Error fetching user list: ", err);
+            const params = debounceState.current.scheduled;
+            debounceState.current.scheduled = undefined;
+            logger.info(`Requesting user list for pattern`, params.val, params.item);
+            return fetchUsers(params.val, params.item)
+            .then(res => {
+                setFoundUserData(res);
+                return userRetriever(debounceState);
+            });
         }
-        lockUserRetrieval(false);
-        userPatternDebounceState.current.isLookingUp = false;
+        userRetriever(userPatternDebounceState)
+        .catch(err => {
+            logger.error("Error fetching user list: ", err);
+        })
+        .finally(() => {
+            lockUserRetrieval(false);
+            userPatternDebounceState.current.isLookingUp = false;
+        });
     }
     function handleUserSelect(users: UserOption[]) {
         setSelectedUserForStatement(users);

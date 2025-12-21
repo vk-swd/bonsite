@@ -8,6 +8,9 @@ import { metrics } from "./monitoring_local.js";
 import {OAuth2Client} from 'google-auth-library'
 import session from "express-session";
 import { log } from "console";
+import {RedisStore} from "connect-redis"
+import {createClient, RedisClientType} from "redis"
+
 // const session = require("express-session")
 
 const COLUDFLARE_AUTH_SECRET = getEnv("CLOUDFLARE_SECRET")
@@ -23,6 +26,14 @@ let counter = 0;
 // Google OAuth configuration
 const GOOGLE_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
 const GOOGLE_CLIENT_SECRET = getEnv("GOOGLE_CLIENT_SECRET");
+
+declare module 'express-session' {
+    interface Session {
+        state: string,
+        tokenInfo: Object,
+        passInfo: string
+    }
+}
 
 class Token {
     static LIFETIME_MS = 30 * 60 * 1000; // 10 mins
@@ -163,40 +174,74 @@ export class AuthServer {
         return false;
     }
     failAuth(res: express.Response, info: string, reason: string) {
-        logger.debug(info, ":", reason);
+        logger.info(info, ":", reason);
         res.status(401).json(new ApiError(reason, ApiErrorType.NOT_AUTHENTICATED));
         res.end();
         return true;
     }
     sessions = new Set<string>();
-    handleAuthGgl(req: express.Request, res: express.Response): void {
-        logger.info("getting url", req.url)
-        const myUrl = new URL(req.url, 'http://bonsite.org');
-        const code: string = myUrl.searchParams.get('code')??"dolbocode";    // "XYZ123"
-        const state = myUrl.searchParams.get('state');  // "abc"
-
-        logger.log("code, state", code, state, req.headers.cookie);
-
+    handleGoogleAuth(req: express.Request, res: express.Response): void {
         // //wait for authorisation items
         const oAuth2Client = new OAuth2Client({
             clientId: GOOGLE_CLIENT_ID,
             clientSecret: GOOGLE_CLIENT_SECRET,
             redirectUri: 'https://bonsite.org/authggl'
         });
-        // Make sure to set the credentials on the OAuth2 client.
-        oAuth2Client.getToken(code)
-        .then(res => logger.log("2", res))
-        .catch(e => logger.error("error", e))
-        .finally(() => {
-            logger.info("WIP test");
-        })
-        res.redirect("/hello.html")
-        res.status(200);
-        res.cookie("mycooke", new Date().toISOString())
+        req.session.state = crypto.randomUUID();
+        const authorizeUrl = oAuth2Client.generateAuthUrl({
+            access_type: 'offline',
+            scope: ['https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/userinfo.email'],
+            prompt: 'consent select_account',
+            state: req.session.state
+        });
+        logger.info("sid on g1", req.sessionID)
+        // res.redirect(authorizeUrl)
+        res.status(200).json({urii: authorizeUrl});
         res.end();
     }
+    handleAuthGgl(req: express.Request, res: express.Response): void {
+        const myUrl = new URL(req.url, 'http://bonsite.org');
+        const code: string = myUrl.searchParams.get('code')??"dolbocode";    // "XYZ123"
+        const state = myUrl.searchParams.get('state');  // "abc"
+
+        if (!state || state != req.session.state) {
+            this.failAuth(res, "handleAuthGgl", `different states: ${state} vs ${req.session.state}`)
+            return;
+        }
+        // //wait for authorisation items
+        const oAuth2Client = new OAuth2Client({
+            clientId: GOOGLE_CLIENT_ID,
+            clientSecret: GOOGLE_CLIENT_SECRET,
+            redirectUri: 'https://bonsite.org/authggl'
+        });
+
+        // Make sure to set the credentials on the OAuth2 client.
+        oAuth2Client.getToken(code)
+        .then(r => {
+            logger.log("2", r, (r as any).tokens.access_token)
+            return oAuth2Client.getTokenInfo(
+                (r as any).tokens.access_token
+              ).then(tokenInfo => {
+                    req.session.tokenInfo = tokenInfo;
+                    logger.log("tokenInfo", tokenInfo)
+                    res.redirect("/doc.html")
+                    res.status(200);
+                })
+        })
+        .catch(e => {
+            res.redirect("/doc.html") //check auth and redirect to login if need be
+            res.status(200);
+            logger.error("error", e)
+        })
+        .finally(() => {
+            logger.info("WIP test");
+            res.end();
+        })
+        // res.cookie("mycooke", new Date().toISOString())
+    }
     handleSession(req: express.Request, res: express.Response): void {
-        logger.info("handleSession", req.headers.cookie);
+        logger.info("resp cookies ", res.get("Set-Cookie"), "req cookies", req.headers.cookie);
+        logger.info("handleSession", req.headers.cookie, req.sessionID);
         res.status(200);
         res.redirect("/login.html");
         res.end();
@@ -208,47 +253,49 @@ export class AuthServer {
         const origUrl = req.headers[ORIGINAL_URI];
         const clientId: string | undefined = req.headers[customHeaderParamClientId] as string ??cookies[customHeaderParamClientId]
         const info = `${from}:${clientId}->${origUrl}`
-        res.cookie("CurrentTime", new Date().toISOString())
-        if (!this.sessions.has(req.sessionID)) {
-            logger.info(info, `new session`);
-            res.status(403);
-            res.end();
-            return;
-        }
-        logger.debug(info + " auth");
-        if ((!clientId || clientId.length == 0)) {
-            this.failAuth(res, info, `Missing client ID header`);
+        logger.info(info + " auth");
+        logger.info(info, req.session, req.sessionID, req.session.tokenInfo, req.session.passInfo);
+        if (!req.session || (!req.session.tokenInfo && !req.session.passInfo)) {
+            this.failAuth(res, info, `Unauthenticated guys. recorded as no client id.`);
             metrics?.noClientIdCount.inc();
             this.noCLientIdIps.logIp(info);
-            return;
+            res.status(403);
+            res.end();
+            return
         }
-        const client = this.clients.get(clientId!);
-        if (!client) {
-            this.failAuth(res, info, `Unauthorised client ${clientId}`);
-            return;
-        }
-        if (this.checkRateLimit(client, res)) {
-            metrics?.rateLimitedCount.inc();
-            this.rateLimitedIps.logIp(info);
-            return;
-        }
-        const sessionId: string | undefined = cookies[SESSION_COOKIE]
-        let dropReason = "";
-        if (!sessionId || !client.token) {
-            dropReason = "Not authorized";
-            this.notAuthorisedIps.logIp(info);
-        } else if (client.token.value !== sessionId) {
-            dropReason = "Wrong credentials";
-            this.wrongCredentialIps.logIp(info);
-        } else if (client.token.checkExpiredAndReportIsValid() !== true) {
-            dropReason = "Session expired";
-        }
-        if (dropReason.length > 0) {
-            this.limitRate(client);
-            this.failAuth(res, info, dropReason);
-            logger.debug(info, ":", dropReason);
-            return;
-        }
+        // if ((!clientId || clientId.length == 0)) {
+        //     this.failAuth(res, info, `Missing client ID header`);
+        //     metrics?.noClientIdCount.inc();
+        //     this.noCLientIdIps.logIp(info);
+        //     return;
+        // }
+        // const client = this.clients.get(clientId!);
+        // if (!client) {
+        //     this.failAuth(res, info, `Unauthorised client ${clientId}`);
+        //     return;
+        // }
+        // if (this.checkRateLimit(client, res)) {
+        //     metrics?.rateLimitedCount.inc();
+        //     this.rateLimitedIps.logIp(info);
+        //     return;
+        // }
+        // const sessionId: string | undefined = cookies[SESSION_COOKIE]
+        // let dropReason = "";
+        // if (!sessionId || !client.token) {
+        //     dropReason = "Not authorized";
+        //     this.notAuthorisedIps.logIp(info);
+        // } else if (client.token.value !== sessionId) {
+        //     dropReason = "Wrong credentials";
+        //     this.wrongCredentialIps.logIp(info);
+        // } else if (client.token.checkExpiredAndReportIsValid() !== true) {
+        //     dropReason = "Session expired";
+        // }
+        // if (dropReason.length > 0) {
+        //     this.limitRate(client);
+        //     this.failAuth(res, info, dropReason);
+        //     logger.debug(info, ":", dropReason);
+        //     return;
+        // }
         metrics?.authorisedActions.inc();
         logger.debug(info, `success`);
         res.status(200);
@@ -323,6 +370,7 @@ export class AuthServer {
                     this.successLoginIps.logIp(info);
                     logger.info("sf results", cfRes);
                     client.assignToken(new Token(), res, clientId!, info);
+                    req.session.passInfo = "passed";
                     res.status(200);
                     res.end();
                 }
@@ -345,26 +393,49 @@ export class AuthServer {
     }, 60 * 1000); // 1 mins
 
     app: express.Express
+    sessionMid: any
+    redisClient: any
     constructor(port: number) {
         this.app = express();
-        this.app.set('trust proxy',1) //do i need it? it works without it.
-        this.app.use(session({
-            secret: "your environment variable could be here",
-            cookie: {
-                maxAge: 60 * 1000,
-                secure: false,
-                httpOnly: true
-            },
-            resave: false,
-            saveUninitialized: true
-        }))
-        this.app.post('/login', express.json(), this.handleLogin.bind(this));
-        this.app.get('/session', express.json(), this.handleSession.bind(this));
-        this.app.get('/auth', express.json(), this.handleAuth.bind(this));
-        this.app.get('/authggl', express.json(), this.handleAuthGgl.bind(this));
-        this.app.listen(port, () => {
-            logger.info(`Auth server started at http://localhost:${port}`);
-        });
+        const redisClient = createClient({socket: { host: "redis", port: 6379 }})
+        this.redisClient = redisClient;
+        redisClient.connect()
+        .then(_=> {
+            this.app.set('trust proxy',1) //do i need it? it works without it.
+            this.app.use((req: express.Request, res: express.Response, next: any) => {
+                logger.info("getting request", req.headers, req.url)
+                next();
+            })
+            this.sessionMid = session({
+                secret: "your environment variable could be here",
+                cookie: {
+                    maxAge: 60 * 1000,
+                    secure: false,
+                    httpOnly: true
+                },
+                genid: req => {
+                    const id =  crypto.randomUUID(); // must be unique & unpredictable
+                    logger.info("generating session id", id, "current store ", this.sessionMid.store)
+                    return id;
+                },
+                store: new RedisStore({
+                    client: this.redisClient,
+                    prefix: "myapp:",
+                }),
+                resave: false,
+                saveUninitialized: true
+            })
+            this.app.use(this.sessionMid)
+            this.app.post('/login', express.json(), this.handleLogin.bind(this));
+            this.app.get('/session', express.json(), this.handleSession.bind(this));
+            this.app.get('/auth', express.json(), this.handleAuth.bind(this));
+            this.app.get('/googleAuth', express.json(), this.handleGoogleAuth.bind(this));
+            this.app.get('/authggl', express.json(), this.handleAuthGgl.bind(this));
+            this.app.listen(port, () => {
+                logger.info(`Auth server started at http://localhost:${port}`);
+            });
+        })
+        .catch(console.error)
     }
     cleanupSessions(): void {
         const now = Date.now();

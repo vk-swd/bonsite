@@ -85,6 +85,9 @@ services:
     - "127.0.0.1:9000:${NGINX_PORT}"
     networks:
       - backend_net
+    depends_on:
+      auth:
+        condition: service_started
 
   auth:
     extends:
@@ -104,6 +107,10 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+    depends_on:
+      redis:
+        condition: service_started
+
   tunnel_client:
     build:
         dockerfile_inline: |
@@ -351,6 +358,11 @@ services:
       depends_on:
         db_initializer:
           condition: service_completed_successfully
+  redis:
+    extends:
+      file: redis.yaml
+      service: redis
+
   backend:
     image: busybox
     depends_on:
@@ -374,6 +386,8 @@ services:
       tunnel:
         condition: service_started
       frontend_server:
+        condition: service_started
+      redis:
         condition: service_started
         
   tester:

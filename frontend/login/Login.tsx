@@ -4,15 +4,13 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Grid from '@mui/material/Grid';
 import Paper from '@mui/material/Paper';
-import { fetchHandleAuthLogin, getClientId } from "../fetchHandleAuth";
-import { ApiError, GQL_URL, hello, customHeaderParamClientId } from "../common/gqlDeclarations";
+import { fetchHandleAuthLogin } from "../fetchHandleAuth";
+import { customHeaderParamClientId } from "../common/gqlDeclarations";
 import { logger } from "../logger";
 import { LoginDataValidator } from "../common/event_types";
 import { textInput } from "../elements";
-import Turnstile, { useTurnstile } from "react-turnstile";
+import Turnstile from "react-turnstile";
 import { cacheBuster } from "../utils";
-import { GoogleOAuthProvider, GoogleLogin, useGoogleLogin } from '@react-oauth/google';
-import { sleep } from "../common/utils";
 
 function makeButton<T>(lab: string | (() => string), toggler: () => boolean, onClick: () => void) {
   return <Button variant="contained"
@@ -26,6 +24,7 @@ function label(toggler: () => string) {
     {toggler()}
   </Typography>
 }
+
 
 export default function Login() {
   const loginInput = textInput<string>("Login", useState(""));
@@ -60,24 +59,7 @@ export default function Login() {
         }}
       />
     );
-  }
-
-  const login = useGoogleLogin({
-      onSuccess: tokenResponse => {
-        logger.log(tokenResponse)
-        googleToken.current = tokenResponse.code
-        handleLogin()
-      },
-      onError: () => 
-        // setWaitingGoogle(false)
-        logger.log('Google Login Failed')
-      ,
-      scope: "email",
-      flow: 'auth-code',
-      ux_mode: "redirect",
-      redirect_uri: "https://bonsite.org/authggl"
-    }) 
-  
+  }  
   async function handleLogin() {
     setWaitingLogin(true);
       fetchHandleAuthLogin((clientId: string) => {
@@ -151,10 +133,15 @@ export default function Login() {
                     fullWidth
                     disabled={waitingGoogle || waitingLogin || cfToken == ""}
                     onClick={() => 
-                      login()
+                      fetch("/googleAuth").then(res => {
+                        res.json().then(jr => {
+                          logger.info("receiving", jr)
+                          window.location.href = jr.urii
+                        })
+                      })
                     }
                   >
-                    {waitingGoogle ? "Connecting..." : "WIP"}
+                    {waitingGoogle ? "Connecting..." : "Continue with Google"}
                   </Button>}
                 </Grid>
             </Grid>

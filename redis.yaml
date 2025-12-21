@@ -1,0 +1,8 @@
+
+services:
+  redis:
+    image: redis:8.4-alpine
+    tmpfs:
+      - "/data"
+    networks:
+    - backend_net
