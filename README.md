@@ -2,7 +2,7 @@
 A learning project to study different storage systems.
 
 🔗 **Live Demo:** https://bonsite.org  
-📝 **Login:** user / genericPublicPassword
+📝 **Login:** user / genericPublicPassword (or with OpenID)
 
 ## Tech Stack
 - **Backend:** Node.js, GraphQL, Apache Kafka, MS SQL Server
