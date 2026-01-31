@@ -120,10 +120,11 @@ services:
           RUN apk update; apk add openssh-client socat autossh;
           RUN su ${TUNNEL_USER_NAME} -c "cp /tunnelkeys/activate.sh ~/activate.sh";
           RUN chmod +x /home/${TUNNEL_USER_NAME}/activate.sh;
-          RUN su ${TUNNEL_USER_NAME} -c "mkdir ~/.ssh";
+          RUN su ${TUNNEL_USER_NAME} -c "mkdir ~/.ssh;  cp ${TUNNEL_CLIENT_KEY}* ~/.ssh";
     entrypoint: ["/bin/sh", "-c"]
     command: ["sh /tunnelkeys/activate.sh; exec sh"]
     tty: true
+    user: ${TUNNEL_USER_NAME}
     hostname: ${TUNNEL_CLIENT_NAME}
     stdin_open: true
     environment:

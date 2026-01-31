@@ -61,7 +61,7 @@
     <p> Hello, my name is Valentin. </p>
     <p> This is a personal website to attach to my resume. </p>
     <p> I am looking for work as a software engineer. </p>
-    <p> Even though I primarily worked with c++ for 7 years, I am open to work in other stacks. </p>
+    <p> Even though I primarily worked with C++ for 7 years, I am open to work in other stacks. </p>
     <p> This website contains a demo <a href="#P1">project</a> with the components frequently used in modern backend
       engineering.</p>
     <p> The project was done with components that were out of my area of expertise, but I picked it up to a reasonable
@@ -89,7 +89,6 @@
           window.location.href = "index.html=" + random13();
         });
       </script>
-      <h3>Sometimes backend requests might fail. Please see <a href="#Note1">technical note 7</a>.</h3>
     </section>
     <section>
       <h3>Basic overview</h3>
@@ -238,32 +237,29 @@
           <p style="line-height: 100%; margin-bottom: 0cm">Everything is
             deployed using docker compose.</p>
         <li>
-          <p style="line-height: 100%; margin-bottom: 0cm">Databases are
-            deployed in tmpfs to not to damage my SSD as the project is hosted
-            on my home server.</p>
-          <ol>
-            <li>
-              <p style="line-height: 100%; margin-bottom: 0cm">For those
-                reasons data is rotated in Kafka by configuring retention bytes to
-                500 MB per topic.</p>
-            <li>
-              <p style="line-height: 100%; margin-bottom: 0cm">Also data is
-                rotated in SQL Server by deleting oldest rows to maintain the
-                database file size of 2G and setting a SIMPLE recovery mode to
-                avoid a growing transaction log. Transaction log is also flushed
-                after every transaction [ts].</p>
-              <p style="line-height: 100%; margin-bottom: 0cm"></p>
-              <ol>
-                <p style="line-height: 100%; margin-bottom: 0cm"></p>
-              </ol>
-          </ol>
-
+          <p style="line-height: 100%; margin-bottom: 0cm">Growing data causes performance degradation.
+            It could be handled with techniques like data partitioning, but this handling was
+            intentionally out of scope for this demo. Instead, data is rotated. </p>
+        <ol>
+          <li>
+            <p style="line-height: 100%; margin-bottom: 0cm">Data is rotated in Kafka by configuring retention bytes to
+              500 MB per topic.</p>
+          <li>
+            <p style="line-height: 100%; margin-bottom: 0cm">Also data is
+              rotated in SQL Server by deleting oldest rows to maintain the
+              database file size of 2G and setting a SIMPLE recovery mode to
+              avoid a growing transaction log. Transaction log is also flushed
+              after every transaction [ts].</p>
+        </ol>
         <li>
           <p style="line-height: 100%; margin-bottom: 0cm">Web pages are served and requests are proxied by Nginx, with a Node.js application handling authorisation.
           </p>
         <li>
-          <p style="line-height: 100%; margin-bottom: 0cm" id="Note1">Frontend and backend bundles are hosted from different machines in my house and backend machine will be off sometimes. I will try to keep everything up as much as possible, but if it is not, backend requests will get 502 error.
+          <p style="line-height: 100%; margin-bottom: 0cm">The edge layer (NGINX and authorization service) are deployed on Raspberry Pi 4B.
           </p>
+        <li>
+        <p style="line-height: 100%; margin-bottom: 0cm" id="Note1"> All backend components — Kafka, GraphQL API server, MS SQL Server, Node.js backend services, and the observability stack (Prometheus and Grafana) — are deployed on an x86_64 system (Ryzen 5 3550H, 16 GB RAM, 512G SSD).
+        </p>
       </ol>
 
     </section>

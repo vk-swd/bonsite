@@ -408,8 +408,9 @@ export class AuthServer {
             })
             this.sessionMid = session({
                 secret: "your environment variable could be here",
+                rolling: true,
                 cookie: {
-                    maxAge: 60 * 1000,
+                    maxAge: 60 * 10000,
                     secure: false,
                     httpOnly: true
                 },
