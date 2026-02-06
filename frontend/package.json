@@ -2,7 +2,7 @@
     "name": "Front",
     "version": "1.0.0",
     "scripts": {
-        "deploy": "webpack-cli --stats-error-details"
+        "deploy": "bash deploy.sh"
     },
     "type": "module",
     "keywords": [],

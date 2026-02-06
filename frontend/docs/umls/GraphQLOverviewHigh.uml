@@ -1,4 +1,5 @@
 @startuml
+skinparam backgroundColor transparent
 
 participant "Client1" as C
 participant "GraphQL\nCoordinator #1" as Gq

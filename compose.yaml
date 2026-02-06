@@ -8,7 +8,6 @@ networks:
     name: tunnel_net
 
 volumes:
-  frontend_deploy_folder:
   shared_dir:
 
 x-gql-env: &gql_env
@@ -40,8 +39,9 @@ services:
         VOLUME [${WORKDIR}]
         WORKDIR ${WORKDIR}
         COPY ./package.json ${WORKDIR}/package.json
-        RUN apt update; apt install -y procps net-tools iputils-ping curl wget apache2-utils; npm install; rm package*.json
+        RUN apt update; apt install -y procps net-tools iputils-ping curl wget apache2-utils; npm install
     image: my-backend
+
   frontend_builder:
       extends:
         file: base_services.yaml
@@ -72,10 +72,10 @@ services:
       NGINX_FOLDER: ${NGINX_FOLDER}
       AUTH_PORT: ${AUTH_PORT}
       AUTH_APP_NAME: ${AUTH_APP_NAME}
-      GRAPH_QL_PORT: ${GRAPH_QL_REMOTE_PORT}
-      GRAPH_QL_HOSTNAME: ${TUNNEL_SERVICE_NAME}
+      # GRAPH_QL_PORT: ${GRAPH_QL_REMOTE_PORT}
+      # GRAPH_QL_HOSTNAME: ${TUNNEL_SERVICE_NAME}
       LOG_MOUNT: ${LOG_MOUNT}
-      # <<: [*gql_env]
+      <<: [*gql_env]
     volumes:
     - ${FRONTEND_DEPLOY_FOLDER_HOST}:/${NGINX_FOLDER}
     - shared_dir:${SHARED_DIR}
@@ -149,7 +149,13 @@ services:
     networks:
       - backend_net
       - tunnel_net
-    
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.0
+    container_name: dynamodb
+    ports:
+      - "8000:8000"
+    networks:
+      - backend_net
   tunnel:
     image:
       lscr.io/linuxserver/openssh-server:latest
@@ -182,8 +188,8 @@ services:
         - ./${COMMON_DIR_NAME}/apiRequestHandler.ts:${WORKDIR}/${COMMON_DIR_NAME}/apiRequestHandler.ts
       container_name: "${GRAPH_QL_APP_NAME}"
       hostname: "${GRAPH_QL_APP_NAME}"
-      ports:
-        - "127.0.0.1:${GRAPH_QL_PORT}:${GRAPH_QL_PORT}"
+      # ports:
+      #   - "127.0.0.1:${GRAPH_QL_PORT}:${GRAPH_QL_PORT}"
       environment:
         GENERATOR_PORT: ${GENERATOR_PORT}
         GENERATOR_HOST: ${GENERATOR_NAME}
@@ -312,7 +318,6 @@ services:
     networks:
         - backend_net
     healthcheck:
-    # test: ["CMD-SHELL", "wget --spider --timeout=2 --tries=1 http://127.0.0.1:14341 >/dev/null 2>&1; [ $? -eq 4 ]"]
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd  -S localhost -U ${MSSQL_CONSUMER_USERNAME} -P ${MSSQL_PASSWORD} -C -Q exit"]
       <<: [*healthcheck_params]
 
@@ -363,6 +368,31 @@ services:
     extends:
       file: redis.yaml
       service: redis
+  eben:
+    image: busybox
+    depends_on:
+      auth:
+        condition: service_healthy
+  all:
+    image: busybox
+    depends_on:
+      gql:
+        condition: service_healthy
+      db_initializer:
+        condition: service_completed_successfully
+      message_sink:
+        condition: service_healthy
+      graphana:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      auth:
+        condition: service_healthy
+      frontend_server:
+        condition: service_started
+      redis:
+        condition: service_started
+
 
   backend:
     image: busybox

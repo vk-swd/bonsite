@@ -1,4 +1,5 @@
 @startuml
+skinparam backgroundColor transparent
 
 participant "WebSite" as W
 participant "GraphQL\nServer" as Gql

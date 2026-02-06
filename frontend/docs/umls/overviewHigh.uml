@@ -1,5 +1,6 @@
 
 @startuml
+skinparam backgroundColor transparent
 
 participant "Web\ntesting\nboard" as W
 participant "<u><font color=blue>Client\n<u><font color=blue>Event\n<u><font color=blue>Generator" as C [[/components/generator.html]]

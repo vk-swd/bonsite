@@ -1,6 +1,5 @@
 
 services:
-
   node_app:
       image: my-backend
       volumes:
@@ -10,7 +9,6 @@ services:
         - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
         - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
         - ./${COMMON_DIR_NAME}/healthcheck.ts:${WORKDIR}/${COMMON_DIR_NAME}/healthcheck.ts
-        - ./package.json:${WORKDIR}/package_dev.json
         - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
       working_dir: ${WORKDIR}
       entrypoint: ["/bin/bash", "-c"]
@@ -33,7 +31,7 @@ services:
         timeout: 10s
         retries: 3
         start_period: 40s
-        start_interval: 1s
+        start_interval: 1s 
 
   node_monitored_app:
     extends:
