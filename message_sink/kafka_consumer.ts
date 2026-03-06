@@ -1,10 +1,10 @@
 
 import * as kf from "kafkajs";
-import { Deferred, getEnv, last, RangeSet, sleep } from "./common/utils.js";
-import { logger } from "./common/logger.js";
+import { Deferred, getEnv, last, RangeSet, sleep } from "../common/utils.js";
+import { logger } from "../common/logger.js";
 import * as mtrx from "./monitoring_local.js";
 import { assert, log } from "console";
-import { InKafkaMessage, Offset } from "./common/event_types.js";
+import { InKafkaMessage, Offset } from "../common/event_types.js";
 
 const groupId = getEnv("KAFKA_GROUP_ID");
 

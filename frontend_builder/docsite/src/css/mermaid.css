@@ -1,0 +1,15 @@
+
+/* src/css/custom.css */
+.mermaid {
+  background-color: #ffffff !important; /* diagram background */
+  color: #000000; /* default text */
+}
+
+.mermaid .actor {
+  fill: #f8f8f8;
+  stroke: #000000;
+}
+
+.mermaid .label {
+  fill: #000000;
+}

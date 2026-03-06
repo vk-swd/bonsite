@@ -1,25 +1,28 @@
 
+volumes:
+  build_folder:
+    external: true
+
 services:
   node_app:
       image: my-backend
       volumes:
         - ./tsconfig.json:${WORKDIR}/tsconfig.json
         - ./healthcheck.js:${WORKDIR}/healthcheck.js
-        - ${WORKDIR}/${COMMON_DIR_NAME}
-        - ./${COMMON_DIR_NAME}/utils.ts:${WORKDIR}/${COMMON_DIR_NAME}/utils.ts
-        - ./${COMMON_DIR_NAME}/logger.ts:${WORKDIR}/${COMMON_DIR_NAME}/logger.ts
-        - ./${COMMON_DIR_NAME}/healthcheck.ts:${WORKDIR}/${COMMON_DIR_NAME}/healthcheck.ts
+        - build_folder:${WORKDIR}/build
+        - ./${COMMON_DIR_NAME}:${WORKDIR}/${COMMON_DIR_NAME}
+        - ./package.json:${WORKDIR}/package.json
         - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
       working_dir: ${WORKDIR}
       entrypoint: ["/bin/bash", "-c"]
-      command: ["ln -s ${SOURCEDIR}/* ${WORKDIR}; npm run deploy; exec bash"]
+      command: ["npm run buildrun; exec bash"]
+      env_file:
+        - ./.env
       environment:
         - NODE_PRESERVE_SYMLINKS=1
         - HEALTHCHECK_PORT=${HEALTHCHECK_PORT}
         - LOGGING=info
         - LOG_MOUNT=${LOG_MOUNT}
-      networks:
-        - backend_net
       tty: true
       stdin_open: true
       mem_limit: 3g
@@ -32,56 +35,3 @@ services:
         retries: 3
         start_period: 40s
         start_interval: 1s 
-
-  node_monitored_app:
-    extends:
-      service: node_app
-    volumes:
-      - ./${COMMON_DIR_NAME}/monitoring.ts:${WORKDIR}/${COMMON_DIR_NAME}/monitoring.ts
-    environment:
-      - MONITORING_PORT=${MONITORING_PORT}
-
-  node_kafka_app:
-    extends:
-      service: node_monitored_app
-    volumes:
-      - ./${COMMON_DIR_NAME}/event_types.ts:${WORKDIR}/${COMMON_DIR_NAME}/event_types.ts
-      - ./${COMMON_DIR_NAME}/kafka_client.ts:${WORKDIR}/${COMMON_DIR_NAME}/kafka_client.ts
-      - ./${COMMON_DIR_NAME}/generator_parameters.ts:${WORKDIR}/${COMMON_DIR_NAME}/generator_parameters.ts
-    environment:
-      - KAFKA_HOSTNAME=${KAFKA_HOST}
-      - KAFKA_BROKERS=${KAFKA_BROKERS}
-      - KAFKA_GROUP_ID=${KAFKA_GROUP_ID}
-      - KAFKA_TOPICS_TRANSACTIONS=${KAFKA_TOPICS_TRANSACTIONS}
-      - KAFKA_TOPICS_TRANSACTION_RESULTS=${KAFKA_TOPICS_TRANSACTION_RESULTS}
-
-  kafka-app:
-    image: apache/kafka:3.9.1
-    tmpfs:
-      - "/tmp"
-    volumes:
-      - "${WORKDIR}"
-    working_dir: ${WORKDIR}
-    tty: true
-    environment:
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@${KAFKA_HOST}:9093'
-      KAFKA_LISTENERS: 'CONTROLLER://:9093,PLAINTEXT://:${KAFKA_PORT}'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
-      KAFKA_LOG_CLEANER_DELETE_RETENTION_MS: 5000
-      KAFKA_LOG_LOCAL_RETENTION_BYTES: 100000000
-      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 15000
-      KAFKA_TRANSACTION_STATE_LOG_SEGMENT_BYTES: 10000000
-      KAFKA_LOG_SEGMENT_BYTES: 10000000
-      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-    networks:
-        - backend_net

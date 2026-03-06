@@ -1,7 +1,7 @@
 import express from "express";
 import { createHandler } from "graphql-http/lib/use/express";
 import { Query, schema } from "./schema.js";
-import { Deferred } from "./common/utils.js";
+import { Deferred } from "../common/utils.js";
 
 type GqlServerConfig = {
     port: number,

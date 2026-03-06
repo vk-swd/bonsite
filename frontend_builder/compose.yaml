@@ -1,0 +1,21 @@
+volumes:
+  build_folder:
+    external: true
+
+
+services:
+  frontend_builder:
+      extends:
+        file: ../base_services.yaml
+        service: node_app
+      env_file:
+        - ../.env
+      working_dir: ${WORKDIR}/${FRONTEND_NAME}
+      command: ["npx webpack-cli --stats-error-details"]
+      volumes:
+        - ./:${WORKDIR}/${FRONTEND_NAME}
+        - build_folder:${FRONTEND_DEPLOY_FOLDER}
+      container_name: frontend_builder
+      restart: "no"
+      tty: false
+      stdin_open: false

@@ -1,8 +1,8 @@
 import express from "express";
-import { ApiError, ApiErrorType, customHeaderParamClientId } from "./common/gqlDeclarations.js";
-import { logger } from "./common/logger.js";
-import { LoginData, LoginDataValidator } from "./common/event_types.js";
-import { getEnv, sleep } from "./common/utils.js";
+import { ApiError, ApiErrorType, customHeaderParamClientId } from "../common/gqlDeclarations.js";
+import { logger } from "../common/logger.js";
+import { LoginData, LoginDataValidator } from "../common/event_types.js";
+import { getEnv, sleep } from "../common/utils.js";
 import { metrics } from "./monitoring_local.js";
 
 import {OAuth2Client} from 'google-auth-library'

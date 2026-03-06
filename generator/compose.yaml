@@ -1,0 +1,19 @@
+
+
+volumes:
+  shared_dir:
+    name: shared_dir
+    external: true
+
+services:
+  generator:
+      extends:
+        file: ../base_services.yaml
+        service: node_app
+      volumes:
+        - ./:${WORKDIR}/${GENERATOR_NAME}
+        - shared_dir:${SHARED_DIR}
+      hostname: "${GENERATOR_HOST_NAME}"
+      environment:
+        - LOCALVAR=${GENERATOR_NAME}
+

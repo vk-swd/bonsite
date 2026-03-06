@@ -1,7 +1,7 @@
 
 import * as kf from 'kafkajs'
 import { KClient } from '../common/kafka_client.js'
-import { getEnv, testQ } from './common/utils.js';
+import { getEnv, testQ } from '../common/utils.js';
 import { exit } from 'process';
 
 import * as prom from 'prom-client'

@@ -1,0 +1,58 @@
+  
+  
+x-healthcheck-params: &healthcheck_params
+  interval: 20s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+  start_interval: 1s
+
+x-healthcheck-test: &test-healthcheck
+  test: ["CMD-SHELL", "test -f healthy.txt"]
+  <<: [*healthcheck_params]
+
+
+
+services:
+  generator_test:
+    extends: 
+      file: generator/compose.yaml
+      service: generator
+    command: ["npm run test"]
+    healthcheck:  *test-healthcheck
+  gql_test:
+    extends: 
+      file: gql/compose.yaml
+      service: gql
+    command: ["npm run test"]
+    healthcheck:  *test-healthchecks
+  message_sink_test:
+    extends: 
+      file: message_sink/compose.yaml
+      service: message_sink
+    command: ["npm run test"]
+    healthcheck:  *test-healthcheck
+  statement_generator_test:
+    extends: 
+      file: statement_generator/compose.yaml
+      service: statement_generator
+    command: ["npm run test"]
+    healthcheck:  *test-healthcheck
+  
+
+
+
+  # tester:
+  #     extends:
+  #       file: base_services.yaml
+  #       service: node_app
+  #     volumes:
+  #       - ./${TESTER_NAME}:${WORKDIR}/${TESTER_NAME}
+  #       - shared_dir:${SHARED_DIR}
+  #     env_file:
+  #       - ./.env
+  #     environment:
+  #       LOCALVAR: ${TESTER_NAME}
+  #     # tty: false
+  #     # stdin_open: false
+  #     restart: no

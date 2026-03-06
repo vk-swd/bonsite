@@ -1,6 +1,6 @@
-import { getEnv } from "./common/utils.js";
+import { getEnv } from "../common/utils.js";
 import { AuthServer } from "./auth_server.js";
-import { HealthCheckSever } from "./common/healthcheck.js"
+import { HealthCheckSever } from "../common/healthcheck.js"
 import { startMonitoring } from "./monitoring_local.js";
 
 

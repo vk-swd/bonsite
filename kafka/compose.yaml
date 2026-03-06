@@ -1,0 +1,41 @@
+
+
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    tmpfs:
+      - "/tmp"
+    volumes:
+      - "${WORKDIR}"
+    working_dir: ${WORKDIR}
+    tty: true
+    env_file:
+      - ../.env
+    hostname: "${KAFKA_HOST_NAME}"
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/bash", "-c nc -v -z ${KAFKA_HOST_NAME} ${KAFKA_PORT} &>> ~/kafka_healthcheck.log"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      start_interval: 1s
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    entrypoint: ["/bin/sh", "-c"]
+    command: [ "echo 'Initializing topics...' && ls && \
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
+        --topic ${KAFKA_TOPICS_TRANSACTIONS} \
+        --partitions 1 \
+        --replication-factor 1 \
+        --bootstrap-server ${KAFKA_HOST_NAME}:${KAFKA_PORT} \
+        --config retention.bytes=500000000 &&
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
+        --topic ${KAFKA_TOPICS_TRANSACTION_RESULTS} \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.bytes=500000000 \
+        --bootstrap-server ${KAFKA_HOST_NAME}:${KAFKA_PORT} &&
+        echo 'Topics initialized' && exec sh" ]
+

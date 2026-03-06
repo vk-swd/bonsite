@@ -1,6 +1,6 @@
 #!/bin/sh
 
-services="$MESSAGE_SINK_NAME $GRAPH_QL_APP_NAME $GENERATOR_NAME $STATEMENT_GENERATOR_NAME"
+services=$PROM_LOCAL_SERVICES_HOSTNAMES
 
 job() {
     echo "  - job_name: '$1'"
@@ -11,8 +11,8 @@ job() {
 }
 
 echo "scrape_configs:"
-job prometheus localhost 9090
+job prometheus localhost $PROMETHEUS_PORT
 for svc in $services; do
     job "$svc" "$svc" "$MONITORING_PORT"
 done
-JOB auth_server $AUTH_SERVER_NAME $AUTH_SERVER_MON_PORT
+JOB auth_server $PROM_AUTH_APP_HOSTNAME $PROM_AUTH_APP_MONITORING_PORT

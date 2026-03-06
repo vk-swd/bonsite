@@ -1,12 +1,12 @@
-import { GenParameters, GenRequestError, GenRequestErrorType } from "./common/generator_parameters.js";
+import { GenParameters, GenRequestError, GenRequestErrorType } from "../common/generator_parameters.js";
 import { GenApiServer } from "./api.js";
 import { startMonitoring } from "./monitoring_local.js";
 import { Sender } from "./sender.js";
-import { HealthCheckSever } from "./common/healthcheck.js";
+import { HealthCheckSever } from "../common/healthcheck.js";
 import fs from 'fs';
-import { getEnv } from "./common/utils.js";
-import { logger } from "./common/logger.js";
-import { PostTransactionParams } from "./common/generator_parameters.js";
+import { getEnv } from "../common/utils.js";
+import { logger } from "../common/logger.js";
+import { PostTransactionParams } from "../common/generator_parameters.js";
 await startMonitoring();
 const sender = new Sender();
 

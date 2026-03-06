@@ -1,0 +1,38 @@
+
+services:
+  sqldb:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    volumes:
+      - "${WORKDIR}"
+    working_dir: ${WORKDIR}
+    tmpfs:
+      - "/tmp"
+    env_file:
+      - ../.env
+    hostname: "${MSSQL_HOSTNAME}"
+    mem_limit: 10g
+    memswap_limit: 0m
+
+  sql_monitor:
+    image: busybox
+    healthcheck:
+      test: ["CMD", "nc", "-z", "${MSSQL_HOSTNAME}", "${MSSQL_PORT}"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      start_interval: 1s
+    tty: true
+    stdin_open: true
+
+  db_initializer:
+      extends:
+        file: ../base_services.yaml
+        service: node_app
+      volumes:
+        - ./${DB_INITIALIZER_NAME}:${WORKDIR}/${DB_INITIALIZER_NAME}
+      environment:
+        LOCALVAR: ${DB_INITIALIZER_NAME}
+      restart: "no"
+      tty: false
+      stdin_open: false

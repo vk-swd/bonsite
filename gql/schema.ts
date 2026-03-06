@@ -1,11 +1,11 @@
 import { buildSchema, GraphQLSchema } from "graphql";
-import * as gqld from "./common/gqlDeclarations.js";
-import { MetricStats } from "./common/apiRequestHandler.js";
+import * as gqld from "../common/gqlDeclarations.js";
+import { MetricStats } from "../common/apiRequestHandler.js";
 
 import * as mtx from "./monitoring_local.js";
-import * as gp from "./common/generator_parameters.js";
-import { StatementParameters, reqUsersUrl, postTransactionsUrl, reqStatementUrl, UserDataResult, UserDataRequestParameters, UserDataRequestValidator, UserDataValidator, UserDataResultValidator, StatementParametersValidator, StatementType, serverStateUrl, ServerState, ServerStateValidator, TransactionValidator, StatementRequestResultValidator, StatementRequestResult, UserDateRange, userDateRange } from "./common/event_types.js";
-import { logger } from "./common/logger.js";
+import * as gp from "../common/generator_parameters.js";
+import { StatementParameters, reqUsersUrl, postTransactionsUrl, reqStatementUrl, UserDataResult, UserDataRequestParameters, UserDataRequestValidator, UserDataValidator, UserDataResultValidator, StatementParametersValidator, StatementType, serverStateUrl, ServerState, ServerStateValidator, TransactionValidator, StatementRequestResultValidator, StatementRequestResult, UserDateRange, userDateRange } from "../common/event_types.js";
+import { logger } from "../common/logger.js";
 
 /*  ===============================================
     ALL NUMBER VALUES ARE REPLACED WITH STRINGS

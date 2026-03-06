@@ -1,0 +1,12 @@
+
+services:
+  gql:
+    extends:
+      file: ../base_services.yaml
+      service: node_app
+    volumes:
+      - ./:${WORKDIR}/${GQL_APP_NAME}
+    container_name: "${GQL_APP_NAME}"
+    hostname: "${GQL_HOSTNAME}"
+    environment:
+      LOCALVAR: ${GQL_APP_NAME}

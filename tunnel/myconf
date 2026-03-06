@@ -1,0 +1,8 @@
+AllowTcpForwarding yes 
+GatewayPorts yes 
+X11Forwarding no
+Port 2222
+PidFile /config/sshd.pid
+PermitTunnel yes 
+PasswordAuthentication no
+AuthorizedKeysFile	.ssh/authorized_keys

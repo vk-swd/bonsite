@@ -1,6 +1,6 @@
 import * as prom from 'prom-client'
-import { logger } from './common/logger.js';
-import { makeCounter, MaxCounter, MonitoringServer, PromRegistryNamed } from "./common/monitoring.js";
+import { logger } from '../common/logger.js';
+import { makeCounter, MaxCounter, MonitoringServer, PromRegistryNamed } from "../common/monitoring.js";
 
 
 export const localReg = new PromRegistryNamed("local", new prom.Registry());
@@ -38,4 +38,4 @@ export async function startMonitoring() {
     });
 }
 
-export { dumpRegistry } from "./common/monitoring.js";
+export { dumpRegistry } from "../common/monitoring.js";

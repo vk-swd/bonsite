@@ -1,0 +1,16 @@
+
+
+
+
+services:
+  tunnel:
+    image:
+      lscr.io/linuxserver/openssh-server:latest
+    hostname: ${TUNNEL_SERVER_HOST_NAME}
+    ports:
+      - "${TUNNEL_SERVER_EXPOSED_PORT}:2222" # port 2222 is defined by default in the image
+    volumes:
+      - ${TUNNEL_CLIENT_PUBLIC_KEY_TO_MOUNT}:${TUNNEL_SERVER_AUTHORISED_KEY_MOUNT_PATH}:ro
+      - ./myconf:/config/sshd/sshd_config
+    env_file:
+      - .env

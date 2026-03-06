@@ -15,7 +15,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/home/duser/app
 Environment=DOCKER_HOST=unix:///run/user/1002/docker.sock
-ExecStart=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env up tunnel auth frontend_server -d
+ExecStart=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env up tunnel auth nginx_server -d
 ExecStop=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env  down -t 0
 
 RestartSec=5s

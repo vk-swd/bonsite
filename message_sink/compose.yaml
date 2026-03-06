@@ -1,0 +1,13 @@
+
+
+
+services:
+  message_sink:
+      extends:
+        file: ../base_services.yaml
+        service: node_app
+      hostname: "${MESSAGE_SINK_HOST_NAME}"
+      volumes:
+        - ./:${WORKDIR}/${MESSAGE_SINK_NAME}
+      environment:
+        LOCALVAR: ${MESSAGE_SINK_NAME}

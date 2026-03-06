@@ -1,10 +1,10 @@
 import { parse } from 'path';
-import { KClient } from './common/kafka_client.js';
-import { logger } from './common/logger.js';
+import { KClient } from '../common/kafka_client.js';
+import { logger } from '../common/logger.js';
 import { metrics } from './monitoring_local.js';
 import EventEmitter from 'events';
 import * as kf from 'kafkajs';
-import { OverflowingCounter } from './common/utils.js';
+import { OverflowingCounter } from '../common/utils.js';
 
 // 5 million messages can be buffered in memory. Then wait for cleanup.
 const MAX_UNCONSUMED_MESSAGE_COUNT = 2000000;

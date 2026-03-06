@@ -1,0 +1,22 @@
+
+networks:
+  split_hosting_isolated_net:
+    external: true
+
+services:
+  redis:
+    image: redis:8.4-alpine
+    tmpfs:
+      - "/data"
+    
+  auth:
+    extends:
+      file: ../base_services.yaml
+      service: node_app
+    hostname: "${AUTH_APP_HOSTNAME}"
+    volumes:
+    - ./:${WORKDIR}/${AUTH_APP_NAME}
+    env_file:
+      - ../.env
+    environment:
+      LOCALVAR: ${AUTH_APP_NAME}

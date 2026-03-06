@@ -1,19 +1,19 @@
 
 import { BundleHandler, FileWriter, BaseWorker, Preparer } from './preparer.js';
-import { UserConnection } from './common/db/db_defines.js';
-import { createSchema } from './common/db/init.js';
-import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult, UserDataValidator } from './common/event_types.js';
-import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from './common/utils.js';
+import { UserConnection } from '../common/db/db_defines.js';
+import { createSchema } from '../common/db/init.js';
+import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult, UserDataValidator } from '../common/event_types.js';
+import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from '../common/utils.js';
 import {it, describe} from 'mocha'
 import fsp from 'fs/promises';
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import { logger } from './common/logger.js';
-import { connectToDatabase, runQuery } from './common/db/common.js';
-import { Counters, UserCounters } from './common/generator_parameters.js';
-import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
-import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from './common/db/tables.js';
-import { processLineByLine } from './common/files.js';
+import { logger } from '../common/logger.js';
+import { connectToDatabase, runQuery } from '../common/db/common.js';
+import { Counters, UserCounters } from '../common/generator_parameters.js';
+import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from '../common/db/procedures.js';
+import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from '../common/db/tables.js';
+import { processLineByLine } from '../common/files.js';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;

@@ -1,9 +1,9 @@
-import { getEnv } from "./common/utils.js";
-import { connectToDatabase } from "./common/db/common.js";
-import { createSchema } from "./common/db/init.js";
-import { logger } from "./common/logger.js";
-import { runQuery } from "./common/db/common.js";
-import { sinkRole, statementCreatorRole } from "./common/db/auth.js";
+import { getEnv } from "../common/utils.js";
+import { connectToDatabase } from "../common/db/common.js";
+import { createSchema } from "../common/db/init.js";
+import { logger } from "../common/logger.js";
+import { runQuery } from "../common/db/common.js";
+import { sinkRole, statementCreatorRole } from "../common/db/auth.js";
 import * as sql from 'mssql'
 
 

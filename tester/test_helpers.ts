@@ -1,10 +1,10 @@
 import utils from "util";
-import { MetadataWrapperValidator, StatementParameters, StatementType, Transaction, TransactionResultValidator, TransactionValidator } from "./common/event_types.js";
-import { processLineByLine } from "./common/files.js";
-import { Counters, GenerationState, GenParameters } from "./common/generator_parameters.js";
-import { getDatabaseStats, getGeneratorStats, getProgress, getStatement, startGen, stopGen } from "./common/gqlDeclarations.js";
-import { logger } from "./common/logger.js";
-import { getEnv, ProgressPrinter, sleep } from "./common/utils.js";
+import { MetadataWrapperValidator, StatementParameters, StatementType, Transaction, TransactionResultValidator, TransactionValidator } from "../common/event_types.js";
+import { processLineByLine } from "../common/files.js";
+import { Counters, GenerationState, GenParameters } from "../common/generator_parameters.js";
+import { getDatabaseStats, getGeneratorStats, getProgress, getStatement, startGen, stopGen } from "../common/gqlDeclarations.js";
+import { logger } from "../common/logger.js";
+import { getEnv, ProgressPrinter, sleep } from "../common/utils.js";
 import chai, { expect } from 'chai';
 import z from "zod";
 
@@ -12,9 +12,8 @@ import z from "zod";
 import fs, { stat } from 'fs'
 import fsp from 'fs/promises'
 
-export const GRAPH_QL_HOSTNAME = getEnv("GRAPH_QL_HOSTNAME");
-const GRAPH_QL_PORT = getEnv("GRAPH_QL_PORT");
-export const GQL_URL = `http://${GRAPH_QL_HOSTNAME}:${GRAPH_QL_PORT}/graphql`
+
+export const GQL_URL = `http://${getEnv("TESTER_GQL_HOSTNAME")}:${getEnv("TESTER_GQL_PORT")}/graphql`
 export const SHARED_DIR = getEnv('SHARED_DIR');
 
 function getLastRecordDate(res: number, record: string | undefined | null, validator: typeof TransactionValidator | typeof TransactionResultValidator): number {

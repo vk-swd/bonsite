@@ -1,7 +1,7 @@
 
 
 import * as fsp from 'fs/promises';
-import { Deferred } from './common/utils.js';
+import { Deferred } from '../common/utils.js';
 
 
 export class Writer {

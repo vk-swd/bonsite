@@ -1,11 +1,11 @@
 
-import { getEnv, OverflowingCounter } from './common/utils.js';
-import { GenParameters, GenRequestError, GenRequestErrorType } from './common/generator_parameters.js';
-import { last, PriorityQ } from './common/utils.js'
-import { InKafkaMessage, Transaction, TransactionResult, TResult } from './common/event_types.js';
-import { Counters } from './common/generator_parameters.js';
-import { UserCounters } from './common/generator_parameters.js';
-import { PostTransactionParams } from './common/generator_parameters.js';
+import { getEnv, OverflowingCounter } from '../common/utils.js';
+import { GenParameters, GenRequestError, GenRequestErrorType } from '../common/generator_parameters.js';
+import { last, PriorityQ } from '../common/utils.js'
+import { InKafkaMessage, Transaction, TransactionResult, TResult } from '../common/event_types.js';
+import { Counters } from '../common/generator_parameters.js';
+import { UserCounters } from '../common/generator_parameters.js';
+import { PostTransactionParams } from '../common/generator_parameters.js';
 
 
 
@@ -222,11 +222,9 @@ export class Generator {
     }
 }
 
-export function testGeneratorContinuous() {
-    const cycles = 100;
+export async function testGeneratorContinuous(cycles: number = 100, eventCount: number = 100000) {
     for (let i = 0; i < cycles; i++) {
         const gen = new Generator();
-        const eventCount = 100000;
         const startTime = 100;
         const params: GenParameters = {
             userCount: 1000,
@@ -243,9 +241,6 @@ export function testGeneratorContinuous() {
             }
             lastEventTime = e.event.payload.dateTime;
         }
-        process.stdout.clearLine(0);   // clear current line
-        process.stdout.cursorTo(0);    // move cursor to beginning of line
-        process.stdout.write(`Progress: ${i * 100 / cycles}%`);
     }
     console.log("Generator test passed");
 }

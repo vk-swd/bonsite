@@ -2,7 +2,7 @@ import * as kf from 'kafkajs'
 import { getEnv } from './utils.js';
 import { logger } from './logger.js';
 
-const KAFKA_HOSTNAME = getEnv("KAFKA_HOSTNAME");
+const KAFKA_HOSTNAME = getEnv("KAFKA_HOST_NAME");
 
 export type KClientConfig = {
   name: string,

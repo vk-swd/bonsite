@@ -1,9 +1,9 @@
-import { getEnv } from "./common/utils.js";
-import { GenerationState, GenParameters, GenRequestError, GenRequestErrorType, ProgressReport } from "./common/generator_parameters.js";
-import { KClient } from "./common/kafka_client.js";
+import { getEnv } from "../common/utils.js";
+import { GenerationState, GenParameters, GenRequestError, GenRequestErrorType, ProgressReport } from "../common/generator_parameters.js";
+import { KClient } from "../common/kafka_client.js";
 import { Generator, TOPICS } from "./generator.js";
 import { KProducer } from "./kafka_producer.js";
-import { PostTransactionParams } from "./common/generator_parameters.js";
+import { PostTransactionParams } from "../common/generator_parameters.js";
 
 const MAX_IN_FLIGHT = 200;
 export class Sender {

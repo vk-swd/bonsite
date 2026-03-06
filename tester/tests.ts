@@ -1,30 +1,27 @@
 import util from 'util';
-import { getEnv } from './common/utils.js';
+import { getEnv } from '../common/utils.js';
 import { describe, it } from 'mocha'
 // addint as promised
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import { logger } from './common/logger.js';
-import { GenerationState, GenParameters, ProgressReportValidator, ProgressReport, UserCounters, Counters } from './common/generator_parameters.js';
+import { logger } from '../common/logger.js';
+import { GenerationState, GenParameters, ProgressReportValidator, ProgressReport, UserCounters, Counters } from '../common/generator_parameters.js';
 import z, { ZodType } from 'zod';
 import { gql } from 'graphql-request'
 import * as fsp from 'fs/promises';
-import { Deferred } from './common/utils.js';
+import { Deferred } from '../common/utils.js';
 
-import { InKafkaMessage, MetadataWrapperValidator, StatementParameters, StatementRequestResult, StatementType, Transaction, TransactionValidator } from './common/event_types.js';
-import { processLineByLine } from './common/files.js';
+import { InKafkaMessage, MetadataWrapperValidator, StatementParameters, StatementRequestResult, StatementType, Transaction, TransactionValidator } from '../common/event_types.js';
+import { processLineByLine } from '../common/files.js';
 import { getRandomValues } from 'crypto';
-import { ProgressPrinter } from './common/utils.js';
-import { getDatabaseStats, getGeneratorStats, getProgress, getStatement, postTransaction, startGen, stopGen } from './common/gqlDeclarations.js';
-import { generateRecords, GQL_URL, GRAPH_QL_HOSTNAME, makeTestParams, SHARED_DIR, testStatements, waitForTransactionsToBeDeliveredToDB } from './test_helpers.js';
-import { PostTransactionParams } from './common/generator_parameters.js';
+import { ProgressPrinter } from '../common/utils.js';
+import { getDatabaseStats, getGeneratorStats, getProgress, getStatement, postTransaction, startGen, stopGen } from '../common/gqlDeclarations.js';
+import { generateRecords, GQL_URL, makeTestParams, SHARED_DIR, testStatements, waitForTransactionsToBeDeliveredToDB } from './test_helpers.js';
+import { PostTransactionParams } from '../common/generator_parameters.js';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 
-
-const tp = getEnv('TESTER_PORT')
-logger.info(`Using tester port ${tp}`)
 
 describe('Kafka Consumer Tests', function () {
     this.timeout(1000000000); // set timeout for the tests

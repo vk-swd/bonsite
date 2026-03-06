@@ -1,17 +1,17 @@
-import { getEnv } from "./common/utils.js";
+import { getEnv } from "../common/utils.js";
 
 import * as util from "util";
 import * as kf from "kafkajs";
 
-import { Offsets, UserConnection } from "./common/db/db_defines.js";
-import { InKafkaMessage, MetadataWrapperValidator, Offset } from "./common/event_types.js";
-import { logger } from "./common/logger.js";
+import { Offsets, UserConnection } from "../common/db/db_defines.js";
+import { InKafkaMessage, MetadataWrapperValidator, Offset } from "../common/event_types.js";
+import { logger } from "../common/logger.js";
 import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
-import { HealthCheckSever } from "./common/healthcheck.js";
+import { HealthCheckSever } from "../common/healthcheck.js";
 import { connectToKafka, KafkaConnection, topic_transactions } from "./kafka_consumer.js";
-import { QueryRes, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "./common/db/procedures.js";
-import { rawDataTable, statTable, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from "./common/db/tables.js";
+import { QueryRes, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "../common/db/procedures.js";
+import { rawDataTable, statTable, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from "../common/db/tables.js";
 import { assert } from "console";
 import { off } from "process";
 

@@ -5,7 +5,7 @@ datasources:
     type: prometheus
     access: proxy
     # Access mode - proxy (server in the UI) or direct (browser in the UI).
-    url: http://$PROMETHEUS_HOST:$PROMETHEUS_PORT
+    url: $GRAPHANA_DATASOURCE_URL
     jsonData:
       httpMethod: POST
       manageAlerts: true

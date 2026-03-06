@@ -1,17 +1,17 @@
-import { UserConnection } from './common/db/db_defines.js';
-import { createSchema } from './common/db/init.js';
-import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, StatementType, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from './common/event_types.js';
-import { getEnv, last, OverflowingCounter, RangeSet, testRangeSet } from './common/utils.js';
+import { UserConnection } from '../common/db/db_defines.js';
+import { createSchema } from '../common/db/init.js';
+import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, StatementType, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from '../common/event_types.js';
+import { getEnv, last, OverflowingCounter, RangeSet, testRangeSet } from '../common/utils.js';
 import { DbSender, groupId, processConsumedBatch } from './sink.js';
 import { describe, it } from 'mocha'
 // addint as promised
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
-import { logger } from './common/logger.js';
-import { connectToDatabase } from './common/db/common.js';
-import { parseQueryRes, RawTables, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from './common/db/tables.js';
-import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from './common/db/procedures.js';
+import { logger } from '../common/logger.js';
+import { connectToDatabase } from '../common/db/common.js';
+import { parseQueryRes, RawTables, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from '../common/db/tables.js';
+import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from '../common/db/procedures.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000

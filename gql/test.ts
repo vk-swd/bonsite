@@ -5,14 +5,16 @@ import { z, ZodType } from 'zod';
 // addint as promised
 import chai, { expect, util } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import { logger } from './common/logger.js';
+import { logger } from '../common/logger.js';
 import { GqlServer } from './api.js';
-import { handleRequest, MetricStats } from './common/apiRequestHandler.js';
-import { postTransactionsUrl, reqStatementUrl, reqUsersUrl, StatementParameters, StatementParametersValidator, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, UserDataResultValidator } from './common/event_types.js';
-import { getGeneratorStats, getProgress, getStatement, postTransaction, startGen, stopGen, users } from './common/gqlDeclarations.js';
-import { GenParameters, GenParametersValidator, startUrl, stopUrl } from './common/generator_parameters.js';
-import { GenerationState, getStatUrl, PostTransactionParams, PostTransactionValidator, ProgressReport, progressUrl } from './common/generator_parameters.js';
+import { handleRequest, MetricStats } from '../common/apiRequestHandler.js';
+import { postTransactionsUrl, reqStatementUrl, reqUsersUrl, StatementParameters, StatementParametersValidator, UserDataRequestParameters, UserDataRequestValidator, UserDataResult, UserDataResultValidator } from '../common/event_types.js';
+import { getGeneratorStats, getProgress, getStatement, postTransaction, startGen, stopGen, users } from '../common/gqlDeclarations.js';
+import { GenParameters, GenParametersValidator, startUrl, stopUrl } from '../common/generator_parameters.js';
+import { GenerationState, getStatUrl, PostTransactionParams, PostTransactionValidator, ProgressReport, progressUrl } from '../common/generator_parameters.js';
 import { defaulResponse } from './schema.js';
+import { Transaction } from '../common/event_types.js';
+import { StatementRequestResult } from '../common/event_types.js';
 // import fetch from 'node-fetch';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -95,7 +97,13 @@ const statementParams: StatementParameters = {
     too: 2000,
     type: 1
 }
-const expectedStatementResult = "statementData.json"
+const expectedStatementResult: StatementRequestResult = {filePath: "", totalCount: 0,
+            offset: 0, transactions: [{ userIdFrom: postTransactionParams.userFrom, 
+    userIdTo: postTransactionParams.userTo, 
+    amount: postTransactionParams.amount, 
+    dateTime: postTransactionParams.date,
+id: 1 } as Transaction]};
+
 const handleStatementRequest = makeHandler(reqStatementUrl, expectedStatementResult,
     {v: StatementParametersValidator, val: statementParams});
 

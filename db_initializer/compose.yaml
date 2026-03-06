@@ -1,0 +1,14 @@
+services:
+  db_initializer:
+    extends:
+      file: ../base_services.yaml
+      service: node_app
+    volumes:
+      - ./:${WORKDIR}/${DB_INITIALIZER_NAME}
+    environment:
+      LOCALVAR: ${DB_INITIALIZER_NAME}
+    env_file:
+      - ../.env
+    restart: "no"
+    tty: false
+    stdin_open: false

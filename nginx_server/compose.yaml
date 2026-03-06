@@ -1,0 +1,16 @@
+volumes:
+  build_folder:
+    external: true
+
+services:
+  nginx_server:
+    image: nginx:mainline-alpine3.22
+    container_name: nginx_server
+    env_file:
+      - ../.env
+    volumes:
+    - build_folder:${NGINX_FOLDER}
+    - ./f.conf:${NGINX_ENVSUBST_TEMPLATE_DIR}/f.conf.template
+    - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
+    ports:
+    - "127.0.0.1:9000:${NGINX_PORT}"

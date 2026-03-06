@@ -1,11 +1,11 @@
 import * as fsp from 'fs/promises';
-import { InKafkaMessage, StatementParameters, StatementRequestResult, StatementType, Transaction } from "./common/event_types.js";
-import { Deferred, getEnv } from './common/utils.js';
-import { UserConnection } from "./common/db/db_defines.js";
+import { InKafkaMessage, StatementParameters, StatementRequestResult, StatementType, Transaction } from "../common/event_types.js";
+import { Deferred, getEnv } from '../common/utils.js';
+import { UserConnection } from "../common/db/db_defines.js";
 import { Writer } from './writer.js';
 import { metrics } from './monitoring_local.js';
-import { logger } from './common/logger.js';
-import { last } from './common/utils.js';
+import { logger } from '../common/logger.js';
+import { last } from '../common/utils.js';
 
 const SHARED_DIR = getEnv('SHARED_DIR');
 

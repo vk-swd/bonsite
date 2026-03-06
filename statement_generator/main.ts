@@ -10,12 +10,12 @@ After it is done all that's required is to split it and send to a bundle of writ
     The writing can be done straight to a mounted cdn location and unload the mssql service entirely
 So looking at all that, using a nodejs orchestrator does not look to be all that nonsensical.*/
 
-import { UserConnection } from "./common/db/db_defines.js";
+import { UserConnection } from "../common/db/db_defines.js";
 import { StatementGenApiServer } from "./api.js";
-import { HealthCheckSever } from "./common/healthcheck.js";
+import { HealthCheckSever } from "../common/healthcheck.js";
 import { Preparer } from "./preparer.js";
-import { StatementParameters, UserDataRequestParameters } from "./common/event_types.js";
-import { getEnv } from "./common/utils.js";
+import { StatementParameters, UserDataRequestParameters } from "../common/event_types.js";
+import { getEnv } from "../common/utils.js";
 import { startMonitoring } from "./monitoring_local.js";
 
 

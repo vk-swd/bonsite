@@ -2,8 +2,12 @@
     "name": "TestApp1",
     "version": "1.0.0",
     "scripts": {
-      "deploy": "bash deploy.sh"
+      "deploy": "bash deploy.sh",
+      "buildrun": "tsc && node build/${LOCALVAR}/main.js",
+      "test": "tsc && mocha build/${LOCALVAR}/test.js --exit && touch healthy.txt",
+      "buildwebpack": "webpack-cli --stats-error-details"
     },
+    "type": "module",
     "keywords": [],
     "author": "",
     "license": "ISC",

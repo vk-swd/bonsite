@@ -1,12 +1,12 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
-import { GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatUrl, stopUrl, PostTransactionParams, GenRequestError } from './common/generator_parameters.js';
-import { getEnv } from './common/utils.js';
+import { GenParametersValidator, ProgressReport, progressUrl, startUrl, getStatUrl, stopUrl, PostTransactionParams, GenRequestError } from '../common/generator_parameters.js';
+import { getEnv } from '../common/utils.js';
 import * as mt from './monitoring_local.js'
-import { handleRequest } from './common/apiRequestHandler.js';
-import { logger } from './common/logger.js';
-import * as et from './common/event_types.js';
-import { PostTransactionValidator } from './common/generator_parameters.js';
+import { handleRequest } from '../common/apiRequestHandler.js';
+import { logger } from '../common/logger.js';
+import * as et from '../common/event_types.js';
+import { PostTransactionValidator } from '../common/generator_parameters.js';
 
 const GENERATOR_PORT = getEnv("GENERATOR_PORT");
 

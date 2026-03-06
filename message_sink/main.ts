@@ -1,8 +1,8 @@
 
 import * as mtrx from "./monitoring_local.js";
-import { logger } from "./common/logger.js";
+import { logger } from "../common/logger.js";
 import { Sink } from "./sink.js";
-import { coreReg } from "./common/monitoring.js";
+import { coreReg } from "../common/monitoring.js";
 
 async function crash(error: any): Promise<Error>{
     mtrx.metrics?.crashCount?.inc(1)

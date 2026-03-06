@@ -1,0 +1,19 @@
+
+volumes:
+  shared_dir:
+    name: shared_dir
+    external: true
+
+services:
+  statement_generator:
+      extends:
+        file: ../base_services.yaml
+        service: node_app
+      volumes:
+        - ./:${WORKDIR}/${STATEMENT_GENERATOR_NAME}
+        - shared_dir:${SHARED_DIR}
+      env_file:
+        - ../.env
+      hostname: "${STATEMENT_GENERATOR_HOST_NAME}"
+      environment:
+        LOCALVAR: ${STATEMENT_GENERATOR_NAME}
