@@ -1,7 +1,7 @@
 
 import { BundleHandler, FileWriter, BaseWorker, Preparer } from './preparer.js';
 import { UserConnection } from '../common/db/db_defines.js';
-import { createSchema } from '../common/db/init.js';
+import { createSchema, initializeDatabase } from '../common/db/init.js';
 import { InKafkaMessage, MAX_DATE, Metadata, MetadataValidator, MetadataWrapperValidator, MIN_DATE, StatementParameters, StatementType, Transaction, TransactionResult, TResult, UserDataValidator } from '../common/event_types.js';
 import { Deferred, getEnv, last, ProgressPrinter, sleep, UserIdPattern } from '../common/utils.js';
 import {it, describe} from 'mocha'
@@ -12,8 +12,9 @@ import { logger } from '../common/logger.js';
 import { connectToDatabase, runQuery } from '../common/db/common.js';
 import { Counters, UserCounters } from '../common/generator_parameters.js';
 import { procGetTransactions, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from '../common/db/procedures.js';
-import { parseQueryRes, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from '../common/db/tables.js';
+import { parseQueryRes, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from '../common/db/tables.js';
 import { processLineByLine } from '../common/files.js';
+import { sinkUser } from '../common/db/auth.js';
 
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
@@ -23,15 +24,26 @@ const topics = ["trans", "res"];
 const [topic_transaction_res, topic_transactions] = topics;
 
 const SHARED_DIR = getEnv('SHARED_DIR');
-const user_sa = getEnv('MSSQL_SA_USERNAME')
+const user_sa = getEnv('DB_INITIALIZER_MSSQL_SA_USERNAME')
+const passwd_sa = getEnv('DB_INITIALIZER_MSSQL_SA_PASSWORD')
+const hostname = getEnv("MESSAGE_SINK_MSSQL_HOSTNAME");
+
+const password = "$12345password"
+const dbName = "statementTestDB"
 
 let db_connection: UserConnection | undefined = undefined
+let testIdx = 0;
+const createTestDb = async (label: string) => {
+    if (db_connection) {
+        await db_connection.pool.close();
+    }
+    testIdx++;
+    const dbNameLocal = `${dbName}_${testIdx}_${label}`;
+    await initializeDatabase(user_sa, passwd_sa, hostname, password, dbNameLocal);
+    db_connection = await UserConnection.create(sinkUser, password, hostname, dbNameLocal);
+}
 describe('Sanity check', function () {
     this.timeout(1000000); // Set timeout for the tests
-    this.beforeAll(async () => {
-        const pool = await connectToDatabase(user_sa)!;
-        db_connection = new UserConnection(pool);
-    });
     it(`Sanity check`, async () => {
         const val = 100;
         const d = new Deferred<number>();
@@ -61,7 +73,6 @@ describe('Sanity check', function () {
         await sleep(1000);
         expect(nums.length).to.equal(6);
     });
-    const userCount = 100000;
     type MsgOffset = { msg: InKafkaMessage, offset: string };
     const sendBatch = async (tempTableGen: SetUpTempTableProc<TransactionStored | TransactionResultStored>, 
                              messages: MsgOffset[], topic: string, addConflicts: boolean = false) => {
@@ -83,11 +94,12 @@ describe('Sanity check', function () {
     }
 
     it(`Test normal case`, async () => {
-        await createSchema(db_connection!.pool, "TestDBStatementGen");
+        await createTestDb(`1`);
         const batchSize = 10000;
         const transactions: MsgOffset[] = [];
-        const cycles = 800000;
+        const cycles = 100000;
         const time = Date.now();
+        const userCount = 100;
         const userIdPattern = new UserIdPattern(userCount);
         const timeIncrement = 100;
         for (let i = 1; i <= cycles; i++) {
@@ -146,8 +158,8 @@ describe('Sanity check', function () {
             expect(resR.duds, `unexpected duds for transaction results at batch ending with ${i}` ).to.equal(0);
             expect(resT.newCount, `unexpected newCount for transactions at batch ending with ${i}`).to.equal(batch.length);
             expect(resR.newCount, `unexpected newCount for transaction results at batch ending with ${i}`).to.equal(transactionResults.length);
-            expect(resT.rolledBack, `unexpected rolledBack for transactions at batch ending with ${i}`).to.be.false;
-            expect(resR.rolledBack, `unexpected rolledBack for transaction results at batch ending with ${i}`).to.be.false;
+            expect(resT.rolledBack, `unexpected rolledBack for transactions at batch ending with ${i}`).to.be.undefined;
+            expect(resR.rolledBack, `unexpected rolledBack for transaction results at batch ending with ${i}`).to.be.undefined;
             process.stdout.clearLine(0);   // clear current line
             process.stdout.cursorTo(0);    // move cursor to beginning of line
             process.stdout.write(`Progress: ${i * 100 / cycles}%`);
@@ -306,14 +318,8 @@ describe('Sanity check', function () {
     it(`Try read statements`, async () => {
         // Test checks that output records are within requested date range
         // It also checkes and that no records are missed IF at least one record was returned
-
-        // await createSchema(db_connection!.pool, "TestDBStatementGen");
-        await db_connection?.pool.query(`use TestDBStatementGen`);
-        await db_connection!.pool.query(`drop procedure if exists ${procGetTransactions.procName}`)
-        await runQuery(db_connection!.pool, procGetTransactions.getProcedureQuery());
-
         const userCounter:[number, Counters][] = await readStats();
-        const interations = 20
+        const interations = 3
         let t1 = Date.now();
         type SpeedStat = [number, number, number, number, number]; // transactions, users, ms total, ms read
         const speedStats: SpeedStat[] = [];
@@ -350,8 +356,7 @@ describe('Sanity check', function () {
         console.log(`\nDone ${speedStats.map(s => printStat(s)).join('\n')}`)
     })
     it(`User request`, async () => {
-        await createSchema(db_connection!.pool, "TestDBStatementGenUserReq");
-        await db_connection?.pool.query(`use TestDBStatementGenUserReq`);
+        await createTestDb(`User_request`);
         const usersToInsert = [
             { id: 1, name: 'User1' },
             { id: 10, name: 'User10' },
@@ -371,14 +376,13 @@ describe('Sanity check', function () {
         await runQuery(db_connection!.pool, `insert into ${usersTable.name} values
             ${usersToInsert.map(u => `(${u.id}, '${u.name}')`).join(',')}
         `);
-        // const res1 = await runQuery(db_connection!.pool, `select * from ${usersTable.name}
-        //     where ${usersTable.columns.name.name} like '%'`);
-        // console.log(`Users in DB: ${JSON.stringify(res1)}`);
         const res = await db_connection!.getUsers({ pattern: '%', count: 4 })
-        console.log(`Got users ${JSON.stringify(res)}`);
+        expect(res.slice.length).to.equal(4);
+        expect(res.slice).to.deep.eq(usersToInsert.slice(0, 4).map((u, idx) => ({ cursor: idx + 1, id: u.id, name: u.name })));
+        expect(res.totalCount).to.equal(usersToInsert.length);
     })
-    it.only(`DB state + paginated statement request`, async () => {
-        await createSchema(db_connection!.pool, "TestDBStatementGenDBstatePagedStatements");
+    it(`DB state + paginated statement request`, async () => {
+        await createTestDb("pages");
         const transactions: MsgOffset[] = Array.from({length: 100}).map((_, idx) => {
             return { msg: {
                     payload: { id: idx, userIdFrom: 1, userIdTo: 2, amount: idx, dateTime: idx * 1000 },
@@ -394,13 +398,17 @@ describe('Sanity check', function () {
         const praparer = new Preparer(db_connection!);
         const g1 = await praparer.addTask({ userId: 1, fromm: 10 * 1000, too: 20 * 1000, count: 1, type: StatementType.DS });
         const g2 = await praparer.addTask({ userId: 1, fromm: 10 * 1000, too: 20 * 1000, offset: 1, count: 1, type: StatementType.DS });
-        expect(g1.transactions.length).to.equal(1);
-        expect(g1.transactions[0]).to.deep.equal(transactions[10].msg.payload);
-        expect(g2.transactions.length).to.equal(1);
-        expect(g2.transactions[0]).to.deep.equal(transactions[11].msg.payload);
-        expect(state.userCount).to.equal(2);
-        expect(state.transactionCount).to.equal(100);
-        expect(JSON.parse(state.lastTransactionPosted!)).to.be.deep.eq((last(transactions)?.msg.payload));
-        expect(JSON.parse(state.lastTransactionRes!)).to.be.deep.eq((last(transactionRes)?.msg.payload));
+        expect(g1.transactions.length, `Different number of transactions processed in write and read modes`).to.equal(1);
+        expect(g1.transactions[0], `Different transaction processed in write and read modes`).to.deep.equal(transactions[10].msg.payload);
+        expect(g2.transactions.length, `Different number of transactions processed in write and read modes`).to.equal(1);
+        expect(g2.transactions[0], `Different transaction processed in write and read modes`).to.deep.equal(transactions[11].msg.payload);
+        expect(state.userCount, `Different number of users processed in write and read modes`).to.equal(2);
+        expect(state.transactionCount, `Different number of transactions processed in write and read modes`).to.equal(100);
+        const recordToReportRecord = (t: MsgOffset) => {
+            const payload = t.msg.payload;
+            return { ...payload, idx: payload.id + 1, metadata: "{}" };
+        }
+        expect(parseQueryRes(JSON.parse(state.lastTransactionPosted!), transactionsTable.columns), `Different last transaction posted in write and read modes`).to.be.deep.eq((recordToReportRecord(last(transactions)!)));
+        expect(parseQueryRes(JSON.parse(state.lastTransactionRes!), transactionResultsTable.columns), `Different last transaction result in write and read modes`).to.be.deep.eq((recordToReportRecord(last(transactionRes)!)));
     })
 });

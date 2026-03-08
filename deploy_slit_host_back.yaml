@@ -11,6 +11,11 @@ networks:
 volumes:
   build_folder:
   shared_dir:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1G
 
 services:
   tunnel_client:

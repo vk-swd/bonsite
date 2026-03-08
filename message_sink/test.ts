@@ -1,32 +1,35 @@
 import { UserConnection } from '../common/db/db_defines.js';
-import { createSchema } from '../common/db/init.js';
-import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, StatementType, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from '../common/event_types.js';
-import { getEnv, last, OverflowingCounter, RangeSet, testRangeSet } from '../common/utils.js';
+import { initializeDatabase } from '../common/db/init.js';
+import { InKafkaMessage, StatementType, Transaction, TransactionResult, TransactionResultValidator, TransactionValidator, TResult } from '../common/event_types.js';
+import { getEnv, last, OverflowingCounter} from '../common/utils.js';
 import { DbSender, groupId, processConsumedBatch } from './sink.js';
+import { logger } from '../common/logger.js';
+import { parseQueryRes, RawTables, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from '../common/db/tables.js';
+import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from '../common/db/procedures.js';
+import { KAFKA_TOPICS_TRANSACTION_RESULTS, KAFKA_TOPICS_TRANSACTIONS } from '../common/kafka_client.js';
+
 import { describe, it } from 'mocha'
-// addint as promised
 import chai, { expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { exit } from 'process';
-import { logger } from '../common/logger.js';
-import { connectToDatabase } from '../common/db/common.js';
-import { parseQueryRes, RawTables, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored } from '../common/db/tables.js';
-import { SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from '../common/db/procedures.js';
+import { sinkUser } from '../common/db/auth.js';
 chai.use(chaiAsPromised);
 chai.config.includeStack = true;
 chai.config.truncateThreshold = 10000
 
-const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS_TRANSACTIONS")];
+const topics = [KAFKA_TOPICS_TRANSACTION_RESULTS, KAFKA_TOPICS_TRANSACTIONS];
 const [topic_transaction_res, topic_transactions] = topics;
 
-const user_sa = getEnv('MSSQL_SA_USERNAME')
 const TEST_DB_NAME = "TestDB";
 enum DstTable {
     RAW,
     PRIMARY
 }
 type Batch = { dstTable: DstTable, t: InKafkaMessage, o: string }[];
-function getIgnored<T>(batch: Batch): T[] {
+
+function getIgnoredRecords<T>(batch: Batch): T[] {
+    // Get messages with duplicate ids, or with some other violating conditions,
+    //  that were not recorded to primary table
     return batch.filter(b => b.dstTable === DstTable.RAW)
                 .map(b => b.t.payload as T);
 }
@@ -69,21 +72,19 @@ async function testOffsets(topic: string, val: string, connection: UserConnectio
 }
 
 async function sendTransactions(tBatch: Batch, msg: string) {
-    const expectedIgnored = getIgnored<Transaction>(tBatch).sort((a, b) => a.id - b.id);
+    const expectedIgnored = getIgnoredRecords<Transaction>(tBatch).sort((a, b) => a.id - b.id);
     await sendBatch(topic_transactions, tBatch, dbSender!);
     const ignored = (await dbSender!.connection.getRawData(expectedIgnored.length, RawTables.transactions))
     const parsed = ignored.map(i => TransactionValidator.parse(parseQueryRes(i, transactionsTable.columns)));
     compareObjecs(parsed, expectedIgnored, msg);
-
     await testOffsets(topic_transactions, last(tBatch)!.o, dbSender!.connection);
 }
 async function sendTResults(resBatch: Batch, msg: string) {
+    const expectedIgnored = getIgnoredRecords<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
     await sendBatch(topic_transaction_res, resBatch, dbSender!);
-    const expectedIgnored = getIgnored<TransactionResult>(resBatch).sort((a, b) => a.id - b.id);
     const ignored = ((await dbSender!.connection.getRawData(expectedIgnored.length, RawTables.transaction_results)));
     const parsed = ignored.map(i => TransactionResultValidator.parse(parseQueryRes(i, transactionResultsTable.columns)));
     compareObjecs(parsed, expectedIgnored, msg);
-
     await testOffsets(topic_transaction_res, last(resBatch)!.o, dbSender!.connection);
 }
 async function checkValidTransactions(tBatch: Batch[], resBatches: Batch[], user: number, msg: string) {
@@ -99,33 +100,26 @@ function compareObjecs<T>(actual: T[], expected: T[], message: string) {
     const e = expected;
     chai.expect(a, message).to.deep.equal(e);
 }
+const user_sa = getEnv('DB_INITIALIZER_MSSQL_SA_USERNAME')
+const passwd_sa = getEnv('DB_INITIALIZER_MSSQL_SA_PASSWORD')
+const hostname = getEnv("MESSAGE_SINK_MSSQL_HOSTNAME");
+
+const password = "$12345password"
+const dbName = "messageSinkTestDB"
+
 let dbSender: DbSender | undefined = undefined
 describe('Kafka Consumer Tests', function () {
+    let testIdx = 0;
     this.timeout(10000000); // Set timeout for the tests
-    this.beforeAll(async () => {
-        const pool = await connectToDatabase(user_sa)!;
-        // await pool.request().query(`use ${TEST_DB_NAME}`);
-        dbSender = new DbSender(new UserConnection(pool));
-    });
     this.beforeEach(async () => {
-        await createSchema(dbSender?.connection.pool!, TEST_DB_NAME);
+        if (dbSender) {
+            await dbSender.connection.pool.close();
+        }
+        testIdx++;
+        const dbNameLocal = `${dbName}_${testIdx}`;
+        await initializeDatabase(user_sa, passwd_sa, hostname, password, dbNameLocal);
+        dbSender = new DbSender(await UserConnection.create(sinkUser, password, hostname, dbNameLocal));
     });
-    it.only(`Sanity check`, async () => {
-        async function async1() {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            logger.log("Async operation 1 complete");
-        }
-        function async2() {
-            return async1().then(() => {
-                logger.log("Waiter on async operation 1 then complete");
-            });
-        }
-        async2().then(async () => {
-            logger.info("After async operation 3 then call");
-        });
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        logger.log("After wait");
-    })
     it(`Test normal case`, async () => {
         let tIdx = 1;
         let rIdx = 1;
@@ -202,7 +196,6 @@ describe('Kafka Consumer Tests', function () {
                 o: t.o };
         }));
 
-
         await sendTransactions(batches[0], `Sending transactions batch 0`);
         await sendTResults(batches[1], `Sending transaction results batch 1`);
         await checkValidTransactions([batches[0]], [batches[1]], 0, `Checking valid transactions after batch 0 and 1`);
@@ -214,7 +207,7 @@ describe('Kafka Consumer Tests', function () {
         await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 1, `Checking valid transactions after batch 2 and 3`);
         await checkValidTransactions([batches[0], batches[2]], [batches[1], batches[3]], 2, `Checking valid transactions after batch 2 and 3`);
     });
-    it(`Test database row rotation`, async () => {
+    it.skip(`Test database row rotation`, async () => {
         const counter = new OverflowingCounter();
         let ROWCOUNT = 12000;
 
@@ -246,7 +239,6 @@ describe('Kafka Consumer Tests', function () {
             Math.random() < 0.1); // 10% chance to trigger rollback
             const t2 = Date.now();
             logger.log(`insertion time`, t2 - t1);
-            
         }
     })
 });

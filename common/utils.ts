@@ -107,6 +107,10 @@ export function testQ() {
 type Range = { start: number; end: number };
 
 export class RangeSet {
+    // Class to check number continuity. 
+    // Ranges don't overlap and they are ordered.
+    // Once there are no numbers between two ranges, they are merged into one. 
+    // Tested with testRangeSet function below.
     private ranges: Range[] = [];
 
     add(num: number) {

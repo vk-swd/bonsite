@@ -2,27 +2,25 @@ import { getEnv } from "../common/utils.js";
 
 import * as util from "util";
 import * as kf from "kafkajs";
+import { assert } from "console";
+import { off } from "process";
+import { ZodSchema } from "zod";
 
 import { Offsets, UserConnection } from "../common/db/db_defines.js";
 import { InKafkaMessage, MetadataWrapperValidator, Offset } from "../common/event_types.js";
 import { logger } from "../common/logger.js";
-import { ZodSchema } from "zod";
 import * as mtrx from "./monitoring_local.js";
 import { HealthCheckSever } from "../common/healthcheck.js";
-import { connectToKafka, KafkaConnection, topic_transactions } from "./kafka_consumer.js";
+import { connectToKafka, KafkaConnection } from "./kafka_consumer.js";
 import { QueryRes, SetUpTempTableProc, setUpTempTransactionResultsTable, setUpTempTransactionsTable } from "../common/db/procedures.js";
-import { rawDataTable, statTable, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from "../common/db/tables.js";
-import { assert } from "console";
-import { off } from "process";
+import { TransactionResultStored, TransactionStored } from "../common/db/tables.js";
+import { sinkUser, statementDbName } from "../common/db/auth.js";
+import { KAFKA_TOPICS_TRANSACTIONS } from "../common/kafka_client.js";
 
 
 
 
-
-// const topic_transaction_res = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
-// const topic_transactions = getEnv("KAFKA_TOPICS_TRANSACTIONS")
 export const groupId = getEnv("KAFKA_GROUP_ID");
-const DB_USER = getEnv("MSSQL_CONSUMER_USERNAME");
 
 /**
  * Parses messages from Kafka and validates them against the provided Zod schema.
@@ -110,7 +108,7 @@ export async function processConsumedBatch(offset: Offset, messages: string[], d
         await dbSender.sendRaw(messages, offset);
         return;
     }
-    const writer  = (offset.topic === topic_transactions ? setUpTempTransactionsTable
+    const writer  = (offset.topic === KAFKA_TOPICS_TRANSACTIONS ? setUpTempTransactionsTable
         : setUpTempTransactionResultsTable) as SetUpTempTableProc<TransactionStored|TransactionResultStored>;
     try {
         const res = await dbSender.sendMessagesTransactionally(
@@ -154,10 +152,12 @@ export async function processConsumedBatch(offset: Offset, messages: string[], d
     When processing critical information, like financial transactions, handling data inconsistencies
     automatically may cause data loss or corruption, hence raw data is saved for later inspection.
  */
+
 async function connectToDb(): Promise<UserConnection> {
     try {
-        return await UserConnection.create("sa")
-        // return await UserConnection.create(DB_USER)
+        const hostname = getEnv("MESSAGE_SINK_MSSQL_HOSTNAME");
+        const password = getEnv("MESSAGE_SINK_MSSQL_CONSUMER_PASSWORD");
+        return await UserConnection.create(sinkUser, password, hostname, statementDbName);
     } catch (e) {
         mtrx.metrics?.dbConnectionFailure?.inc(1);
         throw `Failed to connect to database: ${e}`

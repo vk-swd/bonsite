@@ -1,15 +1,15 @@
 
 import * as kf from "kafkajs";
-import { Deferred, getEnv, last, RangeSet, sleep } from "../common/utils.js";
+import { Deferred, getEnv, last, RangeSet } from "../common/utils.js";
 import { logger } from "../common/logger.js";
 import * as mtrx from "./monitoring_local.js";
-import { assert, log } from "console";
-import { InKafkaMessage, Offset } from "../common/event_types.js";
+import { assert } from "console";
+import { Offset } from "../common/event_types.js";
+import { KAFKA_TOPICS_TRANSACTION_RESULTS, KAFKA_TOPICS_TRANSACTIONS } from "../common/kafka_client.js";
 
 const groupId = getEnv("KAFKA_GROUP_ID");
 
-const topics = [getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), getEnv("KAFKA_TOPICS_TRANSACTIONS")];
-export const [topic_transaction_res, topic_transactions] = topics;
+const topics = [KAFKA_TOPICS_TRANSACTION_RESULTS, KAFKA_TOPICS_TRANSACTIONS];
 
 export async function connectToKafka(getOffset: (topic: string, partition: number) => string,
                                      processBatch: (offset: Offset, msgs: string[]) => Promise<void>): Promise<KafkaConnection> {
@@ -27,13 +27,8 @@ export async function connectToKafka(getOffset: (topic: string, partition: numbe
         maxBytes: 300000,
         maxWaitTimeInMs: 100
     };
-    // const admin: kf.Admin = kafka_client.admin({retry: {retries: 5}});
-    // await admin.connect();
-    // // ensure topics exist
-    // await admin.createTopics({ topics: topics.map(t => ({ topic: t, configEntries: [{ name: "retention.bytes", value: `${2 * 1024 * 1024 * 1024}`}] })) });
     const res = new Deferred<KafkaConnection>();
     const consumer = kafka_client.consumer(consumer_config);
-    const batchHistory = new Map<string, Array<number>>();
     consumer.on(`consumer.connect`, () => {
         // when the application is stopped normally,
         // this metric will not be saved or read, so don't
@@ -75,7 +70,6 @@ export async function connectToKafka(getOffset: (topic: string, partition: numbe
             + `${kafka_connect_conf}; gropuId: ${groupId};`
             + `error: ${e}`
     }
-    // const connection =  new KafkaConnection(consumer, admin)
     const connection =  new KafkaConnection(consumer)
     consumer.on('consumer.group_join', async (joinEvent: kf.ConsumerGroupJoinEvent) => {
         for (const topic of Object.keys(joinEvent.payload.memberAssignment)) {
@@ -86,16 +80,9 @@ export async function connectToKafka(getOffset: (topic: string, partition: numbe
                 assert(partition == i, `Expected partition ${partition} to be ${i}`);
                 const offset = getOffset(topic, partition);
                 if (offset && offset != "0") {
-                    // const meta = await admin.fetchTopicMetadata({topics})
-                    // logger.log(`Seeking topic`, topic, `partition`, partition, `to offset`, offset,
-                    //     `meta: `, meta);
-                    // KafkaJS requires offset to be a string representing a number
-                    // await admin.deleteTopicRecords({ topic, partitions: [{partition, offset: (Number.parseInt(offset) - 1).toFixed(0)}] });
-                    // await admin.deleteTopicRecords({ topic, partitions: [{partition, offset}] });
                     consumer.seek({ topic, partition, offset });
                 }
             }
-            connection.sotrageCounter.set(topic, partitions.map(_ => ({ count: 0, lastOffsets: [] })));
         }
         connection.joinedTopics = Object.keys(joinEvent.payload.memberAssignment).map(t => ({ topic: t, partitions: joinEvent.payload.memberAssignment[t] }));
         
@@ -112,11 +99,7 @@ export class KafkaConnection {
     rangeSet = new RangeSet();
     paused = false;
     pauseBuffer = Array<kf.EachBatchPayload>();
-    constructor(
-        public consumer: kf.Consumer, 
-        // public admin: kf.Admin, 
-        public sotrageCounter = new Map<string, Array<{count: number, lastOffsets: Array<number>}>>()) {
-    
+    constructor(public consumer: kf.Consumer) {  
     }
 
     private processWhilePaused(processBatch: (offset: Offset, msgs: string[]) => Promise<void>, isStart: boolean = true): Promise<void> {

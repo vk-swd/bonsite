@@ -3,6 +3,8 @@ import { getEnv } from './utils.js';
 import { logger } from './logger.js';
 
 const KAFKA_HOSTNAME = getEnv("KAFKA_HOST_NAME");
+export const KAFKA_TOPICS_TRANSACTION_RESULTS = getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS");
+export const KAFKA_TOPICS_TRANSACTIONS = getEnv("KAFKA_TOPICS_TRANSACTIONS");
 
 export type KClientConfig = {
   name: string,

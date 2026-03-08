@@ -8,7 +8,7 @@ services:
     image: redis:8.4-alpine
     tmpfs:
       - "/data"
-    
+
   auth:
     extends:
       file: ../base_services.yaml

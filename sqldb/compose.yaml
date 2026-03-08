@@ -8,6 +8,7 @@ services:
     tmpfs:
       - "/tmp"
     env_file:
+      - ./.env
       - ../.env
     hostname: "${MSSQL_HOSTNAME}"
     mem_limit: 10g

@@ -6,6 +6,7 @@ import { InKafkaMessage, Transaction, TransactionResult, TResult } from '../comm
 import { Counters } from '../common/generator_parameters.js';
 import { UserCounters } from '../common/generator_parameters.js';
 import { PostTransactionParams } from '../common/generator_parameters.js';
+import { KAFKA_TOPICS_TRANSACTION_RESULTS, KAFKA_TOPICS_TRANSACTIONS } from '../common/kafka_client.js';
 
 
 
@@ -30,8 +31,8 @@ export enum TopicIdx {
     TRANSACTIONS = 0,
     TRANSACTION_RESULTS = 1
 }
-export const TOPICS = [ { name: getEnv("KAFKA_TOPICS_TRANSACTIONS"), size: 64 }, 
-                        { name: getEnv("KAFKA_TOPICS_TRANSACTION_RESULTS"), size: 32 }];
+export const TOPICS = [ { name: KAFKA_TOPICS_TRANSACTIONS, size: 64 }, 
+                        { name: KAFKA_TOPICS_TRANSACTION_RESULTS, size: 32 }];
 const EVENT_SET_SIZE = TOPICS.reduce((a,b) => a + b.size, 0);
 export type TransactionEvent = {topic: TopicIdx, event: InKafkaMessage, isPosted: boolean};
 

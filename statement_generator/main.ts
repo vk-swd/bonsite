@@ -17,12 +17,14 @@ import { Preparer } from "./preparer.js";
 import { StatementParameters, UserDataRequestParameters } from "../common/event_types.js";
 import { getEnv } from "../common/utils.js";
 import { startMonitoring } from "./monitoring_local.js";
-
-
-const statementUser = getEnv('MSSQL_STATEMENT_CREATOR_USERNAME')
+import { statementDbName, statementUser } from "../common/db/auth.js";
 
 await startMonitoring()
-const db_conn = await UserConnection.create(statementUser);
+
+const hostname = getEnv("STATEMENT_GENERATOR_MSSQL_HOSTNAME");
+const password = getEnv("STATEMENT_GENERATOR_MSSQL_STATEMENT_CREATOR_PASSWORD");
+const db_conn =  await UserConnection.create(statementUser, password, hostname, statementDbName);
+
 const praparer = new Preparer(db_conn);
 const api = new StatementGenApiServer((p: StatementParameters) => praparer.addTask(p),
     (p: UserDataRequestParameters) => db_conn.getUsers(p),

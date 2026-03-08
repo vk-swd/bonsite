@@ -1,10 +1,18 @@
   
-  
+volumes:
+  build_folder:
+  shared_dir:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1G
+
 x-healthcheck-params: &healthcheck_params
   interval: 20s
   timeout: 10s
   retries: 3
-  start_period: 40s
+  start_period: 2m
   start_interval: 1s
 
 x-healthcheck-test: &test-healthcheck
@@ -13,32 +21,104 @@ x-healthcheck-test: &test-healthcheck
 
 
 
+x-one-shot: &one-shot
+    restart: "no"
+    tty: false
+    stdin_open: false
+
+networks:
+  backend_net:
+    driver: bridge
+    name: backend_net
+  edge_net:
+    driver: bridge
+    name: edge_net
+
 services:
+  sqldb:
+    extends:
+      file: ./sqldb/compose.yaml
+      service: sqldb
+    ports:
+      - "1433:1433"
+    networks:
+      - backend_net
+  
+  sql_monitor:
+    extends:
+      file: ./sqldb/compose.yaml
+      service: sql_monitor
+    networks:
+      - backend_net
+    depends_on:
+      sqldb:
+        condition: service_started
+
   generator_test:
     extends: 
       file: generator/compose.yaml
       service: generator
-    command: ["npm run test"]
+    command: ["npm run test; exec bash"]
     healthcheck:  *test-healthcheck
+    restart: "no"
+    tty: true
+    stdin_open: true
+
   gql_test:
     extends: 
       file: gql/compose.yaml
       service: gql
-    command: ["npm run test"]
-    healthcheck:  *test-healthchecks
+    command: ["npm run test; exec bash"]
+    healthcheck:  *test-healthcheck
+    restart: "no"
+    tty: true
+    stdin_open: true
+
   message_sink_test:
-    extends: 
+    extends:
       file: message_sink/compose.yaml
       service: message_sink
-    command: ["npm run test"]
+    command: ["npm run test; exec bash"]
+    networks:
+      - backend_net
     healthcheck:  *test-healthcheck
+    depends_on:
+      sql_monitor:
+        condition: service_healthy
+      statement_generator_test:
+        condition: service_healthy
+    restart: "no"
+    tty: true
+    stdin_open: true
+      
   statement_generator_test:
-    extends: 
+    extends:
       file: statement_generator/compose.yaml
       service: statement_generator
-    command: ["npm run test"]
-    healthcheck:  *test-healthcheck
-  
+    command: ["npm run test; exec bash"]
+    networks:
+      - backend_net
+    healthcheck:  
+      <<: [ *test-healthcheck ]
+      start_period: 2m
+    depends_on:
+      sql_monitor:
+        condition: service_healthy
+    restart: "no"
+    tty: true
+    stdin_open: true
+
+  tester:
+    image: busybox
+    depends_on:
+      statement_generator_test:
+        condition: service_healthy
+      message_sink_test:
+        condition: service_healthy
+      gql_test:
+        condition: service_healthy
+      generator_test:
+        condition: service_healthy
 
 
 

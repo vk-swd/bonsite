@@ -3,7 +3,7 @@ import { InKafkaMessage, Metadata, MetadataValidator, MetadataWrapperValidator, 
 import sql from 'mssql'
 import { logger } from '../logger.js'
 import { Column, IdentityColumn, kafkaOffsetTable, parseQueryRes, rawDataTable, rawTableNames, RawTables, TableDescription, transactionResultsTable, TransactionResultStored, transactionsTable, TransactionStored, usersTable } from './tables.js'
-import { connectToDatabase, database, runQuery } from './common.js'
+import { connectToDatabase, runQuery } from './common.js'
 import { addKafkaOffsetProcedure, CommitResultsC, DBStateC, getDBStatProc, getUserDateRangeProc, getUsersProc, getUsersTopProc, procGetTransactions, QueryRes, RotateTableArgs, RotateTableProc, RotateTableResultC, SetUpTempTableProc, StatmentParamTable, UserDateRangeC, UsersRequestC } from './procedures.js'
 import { Deferred } from '../utils.js'
 
@@ -50,8 +50,8 @@ export class ConnectionError extends Error {
     }
 }
 export class UserConnection {
-    static async create(login: string): Promise<UserConnection> {
-        const pool = await connectToDatabase(login, database);
+    static async create(login: string, passwd: string, hostname: string, database: string): Promise<UserConnection> {
+        const pool = await connectToDatabase(login, passwd, hostname, database);
         return new UserConnection(pool);
     }
     constructor(public pool: sql.ConnectionPool) {
@@ -309,7 +309,6 @@ export class UserConnection {
         const request = this.pool.request();
         try {
             const res = await request.execute(getDBStatProc.procName);
-            logger.log(`gettng db state `,res);
             return ServerStateValidator.parse(parseQueryRes(res.recordset[0], DBStateC));
         } catch (e) {
             throw new Error(`getDBState failed: ${e}`);

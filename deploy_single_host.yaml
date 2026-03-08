@@ -11,6 +11,11 @@ networks:
 volumes:
   build_folder:
   shared_dir:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1G
 
 services:
   frontend_builder:
@@ -97,6 +102,8 @@ services:
     extends:
       file: ./sqldb/compose.yaml
       service: sqldb
+    ports:
+      - "1433:1433"
     networks:
       - backend_net
   

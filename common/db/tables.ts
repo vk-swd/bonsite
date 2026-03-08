@@ -6,6 +6,7 @@ import { exit } from "process";
 
 export const schema = 'scm'
 type MetadataSerialized = {
+    // TODO: define data type and its parser
     metadata: string;
 }
 
