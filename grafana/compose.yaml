@@ -1,0 +1,16 @@
+services:
+  grafana:
+    image: grafana/grafana:11.6.3
+    hostname: "${GRAFANA_HOSTNAME}"
+    volumes:
+      -  /${GRAFANA_DASHBOARD_FOLDER}
+      - ./datasources.yaml:/etc/grafana/provisioning/datasources/datasource.yaml
+      - ./grafana.ini:/etc/grafana/grafana.ini
+      - ./dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./dash1.json:/${GRAFANA_DASHBOARD_FOLDER}/dash1.json
+    env_file:
+      - ../.env
+    tty: true
+    stdin_open: true
+    ports:
+      - "${GRAFANA_EXPOSED_PORT_ADDR}:${GRAFANA_PORT}"

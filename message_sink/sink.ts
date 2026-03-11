@@ -196,7 +196,7 @@ export class DbSender {
             throw e;
         }
     }
-} 
+}
 export class Sink {
     static async create(): Promise<Sink> {
         const healthServer = new HealthCheckSever(false);

@@ -1,12 +1,12 @@
 
 
 networks:
-  backend_net:
+  backend_net1:
     driver: bridge
-    name: backend_net
-  edge_net:
+    name: backend_net1
+  edge_net_backend:
     driver: bridge
-    name: edge_net
+    name: edge_net_backend
 
 volumes:
   build_folder:
@@ -18,53 +18,30 @@ volumes:
       o: size=1G
 
 services:
-  frontend_builder:
-      extends:
-        file: frontend_builder/compose.yaml
-        service: frontend_builder
-  nginx_server:
+  tunnel_client:
     extends:
-      file: ./nginx_server/compose.yaml
-      service: nginx_server
+      file: ./tunnel_client/compose.yaml
+      service: tunnel_client
+    networks:
+      - backend_net1
+      - edge_net_backend
     depends_on:
       gql:
         condition: service_healthy
-      frontend_builder:
-        condition: service_completed_successfully
-    networks:
-      - backend_net
-      - edge_net
-  auth:
-    extends:
-      file: ./auth/compose.yaml
-      service: auth
-    depends_on:
-      redis:
-        condition: service_started
-    networks:
-      - edge_net
-      - backend_net
-  
-  redis:
-    extends:
-      file: ./auth/compose.yaml
-      service: redis
-    networks:
-      - backend_net
 
   gql:
     extends:
       file: ./${GQL_APP_NAME}/compose.yaml
       service: ${GQL_APP_NAME}
     networks:
-      - backend_net
+      - backend_net1
 
   generator:
     extends:
       file: ./generator/compose.yaml
       service: generator
     networks:
-      - backend_net
+      - backend_net1
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -74,7 +51,7 @@ services:
       file: ./kafka/compose.yaml
       service: kafka
     networks:
-      - backend_net
+      - backend_net1
 
   kafka-init:
     extends:
@@ -84,14 +61,14 @@ services:
       kafka:
         condition: service_healthy
     networks:
-      - backend_net
+      - backend_net1
 
   message_sink:
     extends:
       file: ./${MESSAGE_SINK_NAME}/compose.yaml
       service: ${MESSAGE_SINK_NAME}
     networks:
-      - backend_net
+      - backend_net1
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -102,17 +79,15 @@ services:
     extends:
       file: ./sqldb/compose.yaml
       service: sqldb
-    ports:
-      - "1433:1433"
     networks:
-      - backend_net
+      - backend_net1
   
   sql_monitor:
     extends:
       file: ./sqldb/compose.yaml
       service: sql_monitor
     networks:
-      - backend_net
+      - backend_net1
     depends_on:
       sqldb:
         condition: service_started
@@ -122,7 +97,7 @@ services:
       file: ./${DB_INITIALIZER_NAME}/compose.yaml
       service: ${DB_INITIALIZER_NAME}
     networks:
-      - backend_net
+      - backend_net1
     depends_on:
       sql_monitor:
         condition: service_healthy
@@ -132,7 +107,7 @@ services:
       file: ./statement_generator/compose.yaml
       service: statement_generator
     networks:
-      - backend_net
+      - backend_net1
     depends_on:
       db_initializer:
         condition: service_completed_successfully
@@ -142,26 +117,20 @@ services:
       file: ./prometheus/compose.yaml
       service: prometheus
     networks:
-      - backend_net
+      - backend_net1
   
   grafana:
     extends:
       file: ./grafana/compose.yaml
       service: grafana
     networks:
-      - backend_net
-      - edge_net
+      - backend_net1
+      - edge_net_backend
   
   
-  deploy_single_host:
+  split_host_back:
     image: busybox
     depends_on:
-      nginx_server:
-        condition: service_started
-      auth:
-        condition: service_healthy
-      redis:
-        condition: service_started
       db_initializer:
         condition: service_completed_successfully
       kafka-init:
@@ -178,3 +147,5 @@ services:
         condition: service_healthy
       message_sink:
         condition: service_healthy
+      tunnel_client:
+        condition: service_started

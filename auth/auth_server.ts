@@ -11,6 +11,9 @@ import { log } from "console";
 import {RedisStore} from "connect-redis"
 import {createClient, RedisClientType} from "redis"
 
+import rateLimit from 'express-rate-limit';
+
+
 // const session = require("express-session")
 
 const COLUDFLARE_AUTH_SECRET = getEnv("CLOUDFLARE_SECRET")
@@ -28,6 +31,9 @@ const GOOGLE_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
 const GOOGLE_CLIENT_SECRET = getEnv("GOOGLE_CLIENT_SECRET");
 
 declare module 'express-session' {
+    /* Extending Session data sturcture with Declaration merging.
+        https://github.com/DefinitelyTyped/DefinitelyTyped/blob/c879e14427560c32a5dc0d462a860ad8cdb303a8/types/express-session/index.d.ts#L14
+     */
     interface Session {
         state: string,
         tokenInfo: Object,
@@ -35,50 +41,9 @@ declare module 'express-session' {
     }
 }
 
-class Token {
-    static LIFETIME_MS = 30 * 60 * 1000; // 10 mins
-    // static LIFETIME_MS = 10 * 1000; // 10 mins
-    value: string;
-    createdAt: number;
-    isExpired: boolean = false;
-    constructor(private lifeTimeMs: number = Token.LIFETIME_MS) {
-        this.value = Math.random().toString(36).substring(2) + (counter++);
-        this.createdAt = Date.now();
-    }
-    assignCookie(res: express.Response, clientId: string, info: string): void {
-        logger.debug("Assigning cookie", this.value, info);
-        res.cookie(SESSION_COOKIE, this.value, { httpOnly: true, secure: true });
-        res.cookie(customHeaderParamClientId, clientId, { httpOnly: true, secure: true });
-    }
-    checkExpiredAndReportIsValid(): boolean {
-        if (this.isExpired) {
-            return false;
-        }
-        const isExpired = (Date.now() - this.createdAt) >= this.lifeTimeMs;
-        if (isExpired) {
-            this.isExpired = true;
-            metrics?.usersExpired.inc();
-        }
-        return !isExpired; // 10 mins
-    }
-}
-
-class ClientState {
-    userId: string = "";
+class LoginState {
     createdAt: number = Date.now();
-    authorisedAt: number | undefined = undefined;
-    token: Token | undefined = undefined;
-    verifying: boolean = false;
-    lastRequestTime: number = 0;
-    assignToken(token: Token, res: express.Response, clientId: string, info: string) {
-        if (this.token && !this.token.isExpired) {
-            metrics?.usersExpired.inc();
-        }
-        this.token = token;
-        this.token.isExpired = false;
-        this.token.assignCookie(res, clientId, info);
-        metrics?.usersAuthorised.inc();
-    }
+    loggingIn: boolean = false;
 }
 
 
@@ -142,7 +107,7 @@ class LoggedIps {
     }
 }
 export class AuthServer {
-    clients = new Map<string, ClientState>();
+    clients = new Map<string, LoginState>();
     inFlightLoginAttempts = 0;
     // Store OAuth state to link back to clientId
     oauthStates = new Map<string, { clientId: string; createdAt: number }>();
@@ -160,19 +125,6 @@ export class AuthServer {
         this.wrongPasswordsIps.logAndClear()
         this.successLoginIps.logAndClear()
     }, 1000);
-    limitRate(client: ClientState) {
-        client.lastRequestTime = Date.now();
-    }
-    checkRateLimit(client: ClientState, res: express.Response): boolean {
-        const now = Date.now();
-        const elapsed = now - client.lastRequestTime
-        if (elapsed < 1000) {
-            res.status(400).json(new ApiError(`Try in ${1000 - elapsed} ms`, ApiErrorType.RATE_LIMITED));
-            res.end();
-            return true;
-        }
-        return false;
-    }
     failAuth(res: express.Response, info: string, reason: string) {
         logger.info(info, ":", reason);
         res.status(401).json(new ApiError(reason, ApiErrorType.NOT_AUTHENTICATED));
@@ -240,6 +192,7 @@ export class AuthServer {
         // res.cookie("mycooke", new Date().toISOString())
     }
     handleSession(req: express.Request, res: express.Response): void {
+        // TODO: remember why I used this to for redirection and not just return login.html from nginx config
         logger.info("resp cookies ", res.get("Set-Cookie"), "req cookies", req.headers.cookie);
         logger.info("handleSession", req.headers.cookie, req.sessionID);
         res.status(200);
@@ -253,8 +206,7 @@ export class AuthServer {
         const origUrl = req.headers[ORIGINAL_URI];
         const clientId: string | undefined = req.headers[customHeaderParamClientId] as string ??cookies[customHeaderParamClientId]
         const info = `${from}:${clientId}->${origUrl}`
-        logger.info(info + " auth");
-        logger.info(info, req.session, req.sessionID, req.session.tokenInfo, req.session.passInfo);
+        logger.info("Auth info", info, req.session, req.sessionID, req.session.tokenInfo, req.session.passInfo);
         if (!req.session || (!req.session.tokenInfo && !req.session.passInfo)) {
             this.failAuth(res, info, `Unauthenticated guys. recorded as no client id.`);
             metrics?.noClientIdCount.inc();
@@ -263,39 +215,6 @@ export class AuthServer {
             res.end();
             return
         }
-        // if ((!clientId || clientId.length == 0)) {
-        //     this.failAuth(res, info, `Missing client ID header`);
-        //     metrics?.noClientIdCount.inc();
-        //     this.noCLientIdIps.logIp(info);
-        //     return;
-        // }
-        // const client = this.clients.get(clientId!);
-        // if (!client) {
-        //     this.failAuth(res, info, `Unauthorised client ${clientId}`);
-        //     return;
-        // }
-        // if (this.checkRateLimit(client, res)) {
-        //     metrics?.rateLimitedCount.inc();
-        //     this.rateLimitedIps.logIp(info);
-        //     return;
-        // }
-        // const sessionId: string | undefined = cookies[SESSION_COOKIE]
-        // let dropReason = "";
-        // if (!sessionId || !client.token) {
-        //     dropReason = "Not authorized";
-        //     this.notAuthorisedIps.logIp(info);
-        // } else if (client.token.value !== sessionId) {
-        //     dropReason = "Wrong credentials";
-        //     this.wrongCredentialIps.logIp(info);
-        // } else if (client.token.checkExpiredAndReportIsValid() !== true) {
-        //     dropReason = "Session expired";
-        // }
-        // if (dropReason.length > 0) {
-        //     this.limitRate(client);
-        //     this.failAuth(res, info, dropReason);
-        //     logger.debug(info, ":", dropReason);
-        //     return;
-        // }
         metrics?.authorisedActions.inc();
         logger.debug(info, `success`);
         res.status(200);
@@ -327,27 +246,15 @@ export class AuthServer {
         }
         let client = this.clients.get(clientId!);
         if (!client) {
-            client = new ClientState();
+            client = new LoginState();
             this.clients.set(clientId!, client);
-        } else if (this.checkRateLimit(client, res)) {
-            metrics?.rateLimitedCount.inc();
-            this.rateLimitedIps.logIp(info);
-            this.inFlightLoginAttempts--;
-            return;
-        }
-        if (client.token && client.token.checkExpiredAndReportIsValid()) {
-            this.inFlightLoginAttempts--;
-            metrics?.authorisedActions.inc();
-            res.status(200);
-            res.end();
-            return 
-        }
-        if (client.verifying) {
+        } else if (client.loggingIn) {
             res.status(429).json(new ApiError(`Already verifying. Wait.`, ApiErrorType.RATE_LIMITED));
             res.end();
             this.inFlightLoginAttempts--;
             return;
         }
+        client.loggingIn = true;
         const params: LoginData = LoginDataValidator.parse(req.body);
         sleep(800 + Math.random() * 1000).then(() => {
             if ((params.user !== LOGIN && params.user !== LOGIN1) 
@@ -357,7 +264,6 @@ export class AuthServer {
                 this.wrongPasswordsIps.logIp(info);
                 res.status(401).json({ error: 'Invalid credentials' });
                 res.end();
-                this.limitRate(client!);
                 return;
             }
             return validateCFWithRetry(params.metadata, from, crypto.randomUUID(),0, 3).then(cfRes => {
@@ -369,7 +275,6 @@ export class AuthServer {
                 } else {
                     this.successLoginIps.logIp(info);
                     logger.info("sf results", cfRes);
-                    client.assignToken(new Token(), res, clientId!, info);
                     req.session.passInfo = "passed";
                     res.status(200);
                     res.end();
@@ -383,15 +288,13 @@ export class AuthServer {
             // TODO: Rate limit individual?
         })
         .finally(() => {
-            client.verifying = false;
+            client.loggingIn = false;
             this.inFlightLoginAttempts--;
         });
     }
-
     cleanupInterval = setInterval(() => {
         this.cleanupSessions();
     }, 60 * 1000); // 1 mins
-
     app: express.Express
     sessionMid: any
     redisClient: any
@@ -400,29 +303,48 @@ export class AuthServer {
         const redisClient = createClient({socket: { host: "redis", port: 6379 }})
         this.redisClient = redisClient;
         redisClient.connect()
-        .then(_=> {
+        .then(res => {
+            logger.info("Connected to Redis", res);
             this.app.set('trust proxy',1) //do i need it? it works without it.
             this.app.use((req: express.Request, res: express.Response, next: any) => {
-                logger.info("getting request", req.headers, req.url)
+                logger.debug("getting request", JSON.stringify(req.session), JSON.stringify(req.headers), req.url)
                 next();
             })
+             
+            const limiter = rateLimit({
+                windowMs: 10 * 1000, // 10 seconds
+                max: 20,
+                keyGenerator: req => req.headers[customHeaderParamClientId] as string ?? "unknown_client",
+                handler: (req, res) => {
+                    metrics?.rateLimitedCount.inc();
+                    this.rateLimitedIps.logIp(`${req.headers[CONNECTIONG_IP_C]}:${req.headers[customHeaderParamClientId]}->${req.url}`);
+                    res.status(429).json({ error: 'Too many requests' });
+                }
+            });
+            this.app.use(limiter);
+            const rs = new RedisStore({
+                client: this.redisClient,
+                prefix: "app:",
+            })
+            rs.client.set("testkey", "testvalue").then(() => {
+                logger.info("Redis store is working");
+            }).catch((e: any) => {
+                logger.error("Redis store error", e);
+            })
             this.sessionMid = session({
-                secret: "your environment variable could be here",
+                secret: "your environment variable could be here", // TODO: add ENV VAR
                 rolling: true,
                 cookie: {
-                    maxAge: 60 * 10000,
-                    secure: false,
+                    maxAge: 600000, // 10 mins
+                    secure: false, // TODO: add ENV VAR for to turn it on for https.
                     httpOnly: true
                 },
                 genid: req => {
                     const id =  crypto.randomUUID(); // must be unique & unpredictable
-                    logger.info("generating session id", id, "current store ", this.sessionMid.store)
+                    logger.info("generating session id", id, "for req session ", JSON.stringify(req.session), "current store ", this.sessionMid)
                     return id;
                 },
-                store: new RedisStore({
-                    client: this.redisClient,
-                    prefix: "myapp:",
-                }),
+                store: rs,
                 resave: false,
                 saveUninitialized: true
             })
@@ -436,14 +358,13 @@ export class AuthServer {
                 logger.info(`Auth server started at http://localhost:${port}`);
             });
         })
-        .catch(console.error)
+        .catch((err) => logger.error("Redis connection error", err));
     }
     cleanupSessions(): void {
         const now = Date.now();
         for (const [sessionId, client] of this.clients) {
             const toTime = 30 * 60 * 1000
-            const tokenExpired = client.token?.checkExpiredAndReportIsValid() ?? true;
-            if (((now - client.createdAt) > toTime) && tokenExpired) { // 30 mins
+            if ((now - client.createdAt) > toTime) { // 30 mins
                 this.clients.delete(sessionId);
             }
         }

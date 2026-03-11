@@ -17,7 +17,7 @@ end box
 box "Monitoring" #afbcf1
 participant Adapter as MA
 participant Prometheus as MP
-participant Graphana as MG
+participant Grafana as MG
 end box
 
 W -> C: start(generation parameters)

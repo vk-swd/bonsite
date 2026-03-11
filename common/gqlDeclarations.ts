@@ -78,7 +78,6 @@ export type GqlIfy<T> = T extends Object ? {
     [K in keyof T]: T[K] extends number | undefined ? string : GqlIfy<T[K]>
 } : T extends number ? string : T;
 export const customHeaderParamClientId = "x-client-id";
-export const sessionIdCookie = "sessionId";
 export enum ApiErrorType {
     NONE = 0,
     INVALID_LOGIN = 1,
