@@ -16,7 +16,6 @@ flowchart TD
     csh --> |-f| dshf[deploy_split_host_front.yaml]
     csh --> |-f| dshb[deploy_slit_host_back.yaml]
     csh --> |-f| rt[run_tests.yaml]
-
 ```
 </figure>
 
