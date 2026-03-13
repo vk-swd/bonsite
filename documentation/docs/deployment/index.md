@@ -54,6 +54,7 @@ GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set and chosen at https://console.
 
 CLOUDFLARE_SECRET is set at cloudflare dashboard and implementation instructions are described at https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/
 
+WILLDO: For local hosting the whole authentication should be turned off
 
 ## How to start this
 
