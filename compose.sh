@@ -2,5 +2,4 @@
 
 
 
-SPLIT_HOSTED=true docker compose --env-file gitignored/someenv --env-file .env $@
-# docker compose --env-file gitignored/someenv --env-file .env $@
+docker compose --env-file "$BONSITE_USER_ENV" --env-file .env $@

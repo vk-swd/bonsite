@@ -1,65 +1,39 @@
-Backend is deployed in rootless user with rootlss docker
+
+# BonSite
+A learning project to study different storage systems.
+
+This is an application made to explore GraphQL, Kafka and SQL Server.
+
+It consists of services described in  [Services](./services/index.md) and it's goal is to build a functional pipeline where events are posted  to a shared message queue and then stored persistently:
+🔗 Live Demo: https://bonsite.org
+📝 Login: user / genericPublicPassword (or feel free to use OpenID if you don't mind me seeing your email =))
+
+
+# Installation
+The application was meant to be run with docker, so you will need;
+1. A docker
+2. A file with environment variables. The file must be assigned to the "BONSITE_USER_ENV". This variable is mantioned in the [start up script](./compose.sh) and it must contain the variables described in [documentation](documentation/docs/deployment/index##user-variables-with-sample-values).
+3. At least 10G available RAM to run everything.
+
+
+Start up:
+
+```
+./compose.sh -f deploy_single_host.yaml up deploy 
+```
+There is also a [split hosted](./documentation/docs/deployment/SplitHost.md) deployment option. If by any change anyone is interested, please have a read about it.
+
+# Documentation
+Full documentation is in the "documentation" folder, which contains a docusaurus code.
+
+It sould be rendered by GitHub but you can also host it yourself with
+
+```
+./compose.sh -f documentation.yaml up 
+```
 
 
 
-Frontend is started automatically when its machine is run with the service file
-
-.config/systemd/user/myFrontEnd.service                                                     
-[Unit]
-Description=frontend docker containers
-After=docker.service
-Wants=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/home/duser/app
-Environment=DOCKER_HOST=unix:///run/user/1002/docker.sock
-ExecStart=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env up tunnel auth nginx_server -d
-ExecStop=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env  down -t 0
-
-RestartSec=5s
-
-
-sudo systemctl enable openvpn_client1.service  - to make it run on startup
-
-deploying the code to frontend:
-copy code to frontend code folder:
-rsync -av --progress --exclude='.git' ./ duser@10.8.0.2:apps
-systemctl --user restart myFrontEnd.service 
-journalctl --user -u myFrontEnd.service -e
 
 
 
-
-[Unit]
-Description=backend docker containers
-After=docker.service
-Wants=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/home/duser/appl
-Environment=DOCKER_HOST=unix:///run/user/$(id -u $USER)/docker.sock
-ExecStartPre=/usr/bin/docker compose build
-ExecStart=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env up backend -d
-ExecStop=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/app/.env  down -t 0
-RestartSec=5s
-
-
-[Unit]
-Description=backend docker containers
-After=docker.service
-Wants=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/home/duser/appl
-Environment=DOCKER_HOST="unix:///run/user/1007/docker.sock"
-ExecStartPre=/usr/bin/docker compose build
-ExecStart=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/appl/.env up backend -d
-ExecStop=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/appl/.env  down -t 0
-OnFailure=/usr/bin/docker compose --env-file /home/duser/someenv --env-file /home/duser/appl/.env  down -t 0
-RestartSec=5s

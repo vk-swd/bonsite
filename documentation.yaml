@@ -3,12 +3,23 @@
 
 services:
   docsite:
-    image: node:24-slim
+    build:
+      dockerfile_inline: |
+        FROM node:24-slim
+        VOLUME ${WORKDIR}
+        WORKDIR ${WORKDIR}
+        COPY ./documentation/package.json ${WORKDIR}/package.json
+        RUN npm install
     container_name: docsite
+    # image: node:24-slim
     volumes:
-      - ./documentation:/app
-      # - /tmpz/tmp/docsite/node_modules:/app/node_modules
-    working_dir: /app
+      # - ./documentation/docs:${WORKDIR}/docs
+      # - /tmpz/tmp/docsite/node_modules:${WORKDIR}/node_modules
+      - ./documentation:${WORKDIR}/docsite
+      - ${WORKDIR}/node_modules:${WORKDIR}/docsite/node_modules
+    working_dir: ${WORKDIR}/docsite
+    entrypoint: ["bash", "-c"]
+    command: ["npm run start -- --host 0.0.0.0; exec bash"]
     ports:
       - "3000:3000"
     tty: true
