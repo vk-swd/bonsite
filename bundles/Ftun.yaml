@@ -1,0 +1,16 @@
+# Frontend tunnel server: SSH server that accepts a reverse-tunnel connection
+# from the backend's tunnel_client, making backend services reachable on the
+# frontend network.
+#
+# Requires: Fnet.yaml
+#   - Connects to backend_net so nginx can reach the tunnelled backend services.
+#   - Connects to edge_net so the backend tunnel_client can connect from outside.
+
+services:
+  tunnel:
+    extends:
+      file: ../tunnel/compose.yaml
+      service: tunnel
+    networks:
+      - backend_net
+      - edge_net

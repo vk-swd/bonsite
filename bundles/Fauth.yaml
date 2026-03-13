@@ -1,0 +1,25 @@
+# Frontend auth services: session-aware auth server and its Redis backing store.
+#
+# Requires: Fnet.yaml
+#   - redis connects only to backend_net (internal).
+#   - auth connects to both edge_net (receives requests from nginx) and
+#     backend_net (reaches redis and other internal services).
+
+services:
+  redis:
+    extends:
+      file: ../auth/compose.yaml
+      service: redis
+    networks:
+      - backend_net
+
+  auth:
+    extends:
+      file: ../auth/compose.yaml
+      service: auth
+    networks:
+      - edge_net
+      - backend_net
+    depends_on:
+      redis:
+        condition: service_started

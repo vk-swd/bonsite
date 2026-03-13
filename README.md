@@ -11,17 +11,23 @@ It consists of services described in  [Services](./services/index.md) and it's g
 
 # Installation
 The application was meant to be run with docker, so you will need;
-1. A docker
-2. A file with environment variables. The file must be assigned to the "BONSITE_USER_ENV". This variable is mantioned in the [start up script](./compose.sh) and it must contain the variables described in [documentation](documentation/docs/deployment/index##user-variables-with-sample-values).
-3. At least 10G available RAM to run everything.
+1. Docker
+2. Python
+3. A file with environment variables. The file must be assigned to the "BONSITE_USER_ENV". This variable is mantioned in the [start up script](./deploy.py) and it must contain the variables described in [documentation](documentation/docs/deployment/index##user-variables-with-sample-values).
+4. At least 10G available RAM to run everything. Or disregard that if you want to [split host](./documentation/docs/deployment/SplitHost.md) frontend half with or without authentication.
 
 
-Start up:
-
+Start up everything without authentication:
 ```
-./compose.sh -f deploy_single_host.yaml up deploy 
+BONSITE_USER_ENV=your_env_file ./deploy.py --no-auth up -d
 ```
 There is also a [split hosted](./documentation/docs/deployment/SplitHost.md) deployment option. If by any change anyone is interested, please have a read about it.
+
+Also please run 
+```
+./deploy.py --help
+```
+for more information about deployment options
 
 # Documentation
 Full documentation is in the "documentation" folder, which contains a docusaurus code.
@@ -29,7 +35,7 @@ Full documentation is in the "documentation" folder, which contains a docusaurus
 It sould be rendered by GitHub but you can also host it yourself with
 
 ```
-./compose.sh -f documentation.yaml up 
+./spawn_docs.py
 ```
 
 

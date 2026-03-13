@@ -1,0 +1,24 @@
+# Frontend core services: static asset builder and nginx reverse proxy.
+#
+# Requires: Fnet.yaml
+#   - frontend_builder writes the compiled assets into the shared build_folder volume.
+#   - nginx_server serves those assets and proxies API traffic; it connects to
+#     backend_net (to reach gql directly in single-host mode, or the tunnel in
+#     split-host mode) and to edge_net (public-facing).
+
+services:
+  frontend_builder:
+    extends:
+      file: ../frontend_builder/compose.yaml
+      service: frontend_builder
+
+  nginx_server:
+    extends:
+      file: ../nginx_server/compose.yaml
+      service: nginx_server
+    networks:
+      - backend_net
+      - edge_net
+    depends_on:
+      frontend_builder:
+        condition: service_completed_successfully

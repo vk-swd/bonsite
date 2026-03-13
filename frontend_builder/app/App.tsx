@@ -344,7 +344,7 @@ export default function App() {
       "User count will define how many users will get involved.\n" +
       "Users from and to will be then selected randomly for each transaction. Can even make a transaction for the same user.\n\n"+
       "Min user Id is the value used for generator.\n" +
-      "It will generate the user ids from [Min user Id, Min user Id + User count] range.\n"+
+      "It will generate the user ids for [Min user Id, Min user Id + User count) range.\n"+
       "This could be useful if you want to separate a group of users for transaction generation.\n\n" +
       "Min Transaction Id defines the value from which transaction ids will be generated.\n" +
       "The Id value will increase by 1 for each transaction.\n" +
@@ -402,10 +402,10 @@ export default function App() {
           "When the user is selected, a minimum and maximum dates for transactions where he is a participant are inferred "+
           "and written into the date selectors to the right.",userSelectElement),
             makeDocumented("Date From", 
-              "The start date for the transaction statement. If a user is selected, this field will store minimum transaction date where he is a participant.", 
+              "The start date for the transaction statement. When a user is selected, this field will be automatically updated to a minimum transaction date where he is a participant.", 
               getStatementDateFromElement),
              makeDocumented("Date To", 
-              "The end date for the transaction statement. If a user is selected, this field will store maximum transaction date where he is a participant.", 
+              "The end date for the transaction statement. When a user is selected, this field will be automatically updated to a maximum transaction date where he is a participant.", 
             getStatementDateToElement)].map((el, idx) =>
               <Grid item xs={12} sm={4} key={idx}>{el}</Grid>)}
           <Grid item xs={12}  key={10}>

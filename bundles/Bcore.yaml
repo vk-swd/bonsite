@@ -1,0 +1,105 @@
+# Backend core services: gql, generator, kafka stack, database stack,
+# statement_generator, prometheus, grafana.
+#
+# Requires: Fnet.yaml
+#   - All services connect to backend_net (internal).
+#   - grafana additionally connects to edge_net (monitoring UI exposure).
+
+services:
+  gql:
+    extends:
+      file: ../${GQL_APP_NAME}/compose.yaml
+      service: ${GQL_APP_NAME}
+    networks:
+      - backend_net
+
+  generator:
+    extends:
+      file: ../generator/compose.yaml
+      service: generator
+    networks:
+      - backend_net
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  kafka:
+    extends:
+      file: ../kafka/compose.yaml
+      service: kafka
+    networks:
+      - backend_net
+
+  kafka-init:
+    extends:
+      file: ../kafka/compose.yaml
+      service: kafka-init
+    networks:
+      - backend_net
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  message_sink:
+    extends:
+      file: ../${MESSAGE_SINK_NAME}/compose.yaml
+      service: ${MESSAGE_SINK_NAME}
+    networks:
+      - backend_net
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      db_initializer:
+        condition: service_completed_successfully
+
+  sqldb:
+    extends:
+      file: ../sqldb/compose.yaml
+      service: sqldb
+    networks:
+      - backend_net
+
+  sql_monitor:
+    extends:
+      file: ../sqldb/compose.yaml
+      service: sql_monitor
+    networks:
+      - backend_net
+    depends_on:
+      sqldb:
+        condition: service_started
+
+  db_initializer:
+    extends:
+      file: ../${DB_INITIALIZER_NAME}/compose.yaml
+      service: ${DB_INITIALIZER_NAME}
+    networks:
+      - backend_net
+    depends_on:
+      sql_monitor:
+        condition: service_healthy
+
+  statement_generator:
+    extends:
+      file: ../statement_generator/compose.yaml
+      service: statement_generator
+    networks:
+      - backend_net
+    depends_on:
+      db_initializer:
+        condition: service_completed_successfully
+
+  prometheus:
+    extends:
+      file: ../prometheus/compose.yaml
+      service: prometheus
+    networks:
+      - backend_net
+
+  grafana:
+    extends:
+      file: ../grafana/compose.yaml
+      service: grafana
+    networks:
+      - backend_net
+      - edge_net

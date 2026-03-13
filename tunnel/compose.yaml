@@ -5,9 +5,10 @@
 services:
   tunnel:
     build:
+        context: .
         dockerfile_inline: |
           FROM lscr.io/linuxserver/openssh-server:latest
-          COPY ./tunnel/myconf /config/sshd/sshd_config
+          COPY ./myconf /config/sshd/sshd_config
     # image:
     #   lscr.io/linuxserver/openssh-server:latest
     hostname: ${TUNNEL_SERVER_HOST_NAME}

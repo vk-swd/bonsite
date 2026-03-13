@@ -1,0 +1,23 @@
+# Networks and volumes used across all service bundles.
+# Always load this file first alongside any bundle combination.
+#
+# Override default network names via environment variables to avoid
+# conflicts when running multiple stacks on the same host:
+#   BACKEND_NET=myproject_backend  EDGE_NET=myproject_edge  python deploy.py ...
+
+networks:
+  backend_net:
+    driver: bridge
+    name: ${BACKEND_NET:-backend_net}
+  edge_net:
+    driver: bridge
+    name: ${EDGE_NET:-edge_net}
+
+volumes:
+  frontend_build_folder:
+  shared_dir:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1G

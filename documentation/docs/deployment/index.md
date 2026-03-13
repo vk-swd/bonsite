@@ -7,19 +7,94 @@ Services are connected with a docker network and locate each other using defined
 
 ## Compose files and deployment scripts
 
-<figure>
-```mermaid
-flowchart TD
-    envMain[.env] --> |--env-file|csh[compose.sh]
-    uEnv[User Env File] --> |--env-file|csh[compose.sh]
-    csh --> |-f| dsh[deploy_single_host.yaml]
-    csh --> |-f| dshf[deploy_split_host_front.yaml]
-    csh --> |-f| dshb[deploy_slit_host_back.yaml]
-    csh --> |-f| rt[run_tests.yaml]
 
+
+Tpo deploy a project use the script deploy.py. It makes different modes of deployment using combinations of docker compose files:
+| Bundle | Contents |
+|--------|----------|
+| Fnet   | networks (backend_net, edge_net) and shared volumes |
+| Bcore  | backend core: gql, generator, kafka, db stack, monitoring |
+| Btun   | backend tunnel client (connects Bcore to a remote frontend) |
+| Fcore  | frontend core: builder + nginx |
+| Fauth  | frontend auth: auth server + redis |
+| Ftun   | frontend tunnel server (SSH reverse-tunnel entry point) |
+
+The modes of deployment are selected as shown below:
+<figure>
+
+```mermaid
+graph TB
+    subgraph SA["Single host + login: BONSITE_USER_ENV=*your file* python deploy.py up -d"]
+        direction LR
+        SA_FNET["Fnet.yaml"]
+        SA_BCORE["Bcore.yaml"]
+        SA_FCORE["Fcore.yaml"]
+        SA_FAUTH["Fauth.yaml"]
+        SA_LGQL["link_nginx_to_gql.yaml"]
+        SA_FNET ~~~ SA_BCORE ~~~ SA_FCORE ~~~ SA_FAUTH ~~~ SA_LGQL
+    end
+
+    subgraph SN["Single host, no login: BONSITE_USER_ENV=*your file* python deploy.py --no-auth up -d"]
+        direction LR
+        SN_FNET["Fnet.yaml"]
+        SN_BCORE["Bcore.yaml"]
+        SN_FCORE["Fcore.yaml"]
+        SN_LGQL["link_nginx_to_gql.yaml"]
+        SN_FNET ~~~ SN_BCORE ~~~ SN_FCORE ~~~ SN_LGQL
+    end
+
+    subgraph SFA["Split hosting, front, login: BONSITE_USER_ENV=*your file* python deploy.py --split-f up -d"]
+        direction LR
+        SFA_FNET["Fnet.yaml"]
+        SFA_FCORE["Fcore.yaml"]
+        SFA_FAUTH["Fauth.yaml"]
+        SFA_FTUN["Ftun.yaml"]
+        SFA_LTUN["link_nginx_to_tunnel.yaml"]
+        SFA_FNET ~~~ SFA_FCORE ~~~ SFA_FAUTH ~~~ SFA_FTUN ~~~ SFA_LTUN
+    end
+
+    subgraph SFN["Split hosting, front, no login: BONSITE_USER_ENV=*your file* python deploy.py --split-f --no-auth up -d"]
+        direction LR
+        SFN_FNET["Fnet.yaml"]
+        SFN_FCORE["Fcore.yaml"]
+        SFN_FTUN["Ftun.yaml"]
+        SFN_LTUN["link_nginx_to_tunnel.yaml"]
+        SFN_FNET ~~~ SFN_FCORE ~~~ SFN_FTUN ~~~ SFN_LTUN
+    end
+
+    subgraph SB["Split hosting, back: BONSITE_USER_ENV=*your file* python deploy.py --split-b up -d"]
+        direction LR
+        SB_FNET["Fnet.yaml"]
+        SB_BCORE["Bcore.yaml"]
+        SB_BTUN["Btun.yaml"]
+        SB_FNET ~~~ SB_BCORE ~~~ SB_BTUN
+    end
+
+    SA ~~~ SN
+    SN ~~~ SFA
+    SFA ~~~ SFN
+    SFN ~~~ SB
+    classDef fnet    fill:#4a235a,stroke:#c39bd3,color:#f5eef8
+    classDef bcore   fill:#1a3a5c,stroke:#5dade2,color:#eaf4fb
+    classDef btun    fill:#1a3a5c,stroke:#5dade2,color:#eaf4fb
+    classDef fcore   fill:#1d4e2a,stroke:#58d68d,color:#eafaf1
+    classDef fauth   fill:#4a3000,stroke:#f0b429,color:#fef9e7
+    classDef ftun    fill:#1d4e2a,stroke:#58d68d,color:#eafaf1
+    classDef overlay fill:#2d1b4e,stroke:#9b72cf,color:#f0e8ff
+
+    class SA_FNET,SN_FNET,SFA_FNET,SFN_FNET,SB_FNET fnet
+    class SA_BCORE,SN_BCORE,SB_BCORE bcore
+    class SB_BTUN btun
+    class SA_FCORE,SN_FCORE,SFA_FCORE,SFN_FCORE fcore
+    class SA_FAUTH,SFA_FAUTH fauth
+    class SFA_FTUN,SFN_FTUN ftun
+    class SA_LGQL,SN_LGQL,SFA_LTUN,SFN_LTUN overlay
 ```
+
+
 </figure>
 
+BONSITE_USER_ENV - this variable should define the file holding [variables necessary for the project](#user-variables-with-sample-values).
 
 ## Environment variables
 
@@ -51,6 +126,16 @@ GOOGLE_CLIENT_SECRET = "SOME_SECRET_GOOGLE_CLIENT_SECRET"
 GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set and chosen at https://console.cloud.google.com/auth/clients
 
 CLOUDFLARE_SECRET is set at cloudflare dashboard and implementation instructions are described at https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/
+
+## Other configurable variables
+
+Those could be defined by user. Or default values will be used.
+
+```
+NGINX_HOST_ADDR - addr:port or port - which host addr to expose nginx at.
+NGINX_CONF_FILE - Nginx has 2 configuration files. One with the authorization and on without. By default the ./f.conf file is loaded - it contains authorization. The alternative value would be set by the deployment script.
+GRAFANA_EXPOSED_PORT_ADDR - addr:port or port - which host addr to expose Grafana at.
+```
 
 
 ## How to start this

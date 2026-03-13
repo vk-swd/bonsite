@@ -1,5 +1,5 @@
 volumes:
-  build_folder:
+  frontend_build_folder:
     external: true
 
 
@@ -14,7 +14,7 @@ services:
       command: ["npx webpack-cli --stats-error-details"]
       volumes:
         - ./:${WORKDIR}/${FRONTEND_NAME}
-        - build_folder:${FRONTEND_DEPLOY_FOLDER}
+        - frontend_build_folder:${FRONTEND_DEPLOY_FOLDER}
       container_name: frontend_builder
       restart: "no"
       tty: false

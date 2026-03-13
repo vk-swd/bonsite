@@ -4,9 +4,7 @@ services:
         dockerfile_inline: |
           FROM alpine:latest
           RUN apk update; apk add autossh;
-          VOLUME ${WORKDIR}
           RUN adduser ${TUNNEL_CLIENT_USER_NAME} -D
-          RUN chown -R ${TUNNEL_CLIENT_USER_NAME}:${TUNNEL_CLIENT_USER_NAME} ${WORKDIR}
     tty: true
     stdin_open: true
     user: ${TUNNEL_CLIENT_USER_NAME}
@@ -19,5 +17,3 @@ services:
       - ${TUNNEL_CLIENT_PRIVATE_KEY_TO_MOUNT}:${TUNNEL_CLIENT_MOUNTED_PRIVATE_KEY_NAME}:ro
       - ${TUNNEL_CLIENT_PUBLIC_KEY_TO_MOUNT}:${TUNNEL_CLIENT_MOUNTED_PUBLIC_KEY_NAME}:ro
       - ./activate.sh:/activate.sh:ro
-
-

@@ -1,6 +1,6 @@
 
 volumes:
-  build_folder:
+  frontend_build_folder:
     external: true
 
 services:
@@ -9,7 +9,7 @@ services:
       volumes:
         - ./tsconfig.json:${WORKDIR}/tsconfig.json
         - ./healthcheck.js:${WORKDIR}/healthcheck.js
-        - build_folder:${WORKDIR}/build
+        - frontend_build_folder:${WORKDIR}/build
         - ./${COMMON_DIR_NAME}:${WORKDIR}/${COMMON_DIR_NAME}
         - ./package.json:${WORKDIR}/package.json
         - ${LOG_MOUNT_HOST}:${LOG_MOUNT}

@@ -1,0 +1,18 @@
+# Backend tunnel client: exposes backend services through an SSH reverse-tunnel
+# to a remote frontend host.
+#
+# Requires: Fnet.yaml + Bcore.yaml  (depends_on gql)
+#   - Connects to backend_net to reach internal services.
+#   - Connects to edge_net to reach the remote tunnel server.
+
+services:
+  tunnel_client:
+    extends:
+      file: ../tunnel_client/compose.yaml
+      service: tunnel_client
+    networks:
+      - backend_net
+      - edge_net
+    depends_on:
+      gql:
+        condition: service_healthy

@@ -1,0 +1,9 @@
+# Overlay: wires nginx_server to wait for gql.
+# Loaded after Fcore.yaml + Bcore.yaml in single-host scenarios so that nginx
+# does not start before the API layer is healthy.
+
+services:
+  nginx_server:
+    depends_on:
+      gql:
+        condition: service_healthy

@@ -1,7 +1,6 @@
 #!/bin/sh
 
 AUTOSSH_GATETIME=0 \
-    AUTOSSH_LOGFILE="${WORKDIR}/autossh_logs.log" \
     autossh -M 0 \
     -o StrictHostKeyChecking=no \
     -o ExitOnForwardFailure=yes \

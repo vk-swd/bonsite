@@ -1,0 +1,9 @@
+# Overlay: wires nginx_server to wait for the tunnel server.
+# Loaded after Fcore.yaml + Ftun.yaml in split-host frontend scenarios so that
+# nginx does not start before the SSH tunnel is accepting connections.
+
+services:
+  nginx_server:
+    depends_on:
+      tunnel:
+        condition: service_started

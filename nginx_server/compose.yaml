@@ -1,5 +1,5 @@
 volumes:
-  build_folder:
+  frontend_build_folder:
     external: true
 
 services:
@@ -9,8 +9,8 @@ services:
     env_file:
       - ../.env
     volumes:
-    - build_folder:${NGINX_FOLDER}
-    - ./f.conf:${NGINX_ENVSUBST_TEMPLATE_DIR}/f.conf.template
+    - frontend_build_folder:${NGINX_FOLDER}
+    - ${NGINX_CONF_FILE}:${NGINX_ENVSUBST_TEMPLATE_DIR}/f.conf.template
     - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
     ports:
-    - "127.0.0.1:9000:${NGINX_PORT}"
+    - "${NGINX_HOST_ADDR}:${NGINX_PORT}"

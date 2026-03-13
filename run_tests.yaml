@@ -1,6 +1,6 @@
   
 volumes:
-  build_folder:
+  frontend_build_folder:
   shared_dir:
     driver: local
     driver_opts:
