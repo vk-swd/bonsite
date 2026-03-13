@@ -36,6 +36,7 @@ The following kinds of variables are used:
 Nothing will work unless those are provided.
 
 <figure>
+    
 ```
 CLOUDFLARE_SECRET="0xSOME_SECRET_CLOUDFLARE_SECRET"
 FRONTEND_DEPLOY_FOLDER_HOST="/FULL PATH TO A FOLDER/.../nginxfiles"
@@ -72,6 +73,7 @@ docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_single
 
 ## Compose files structure
 <figure>
+    
 ```mermaid
 flowchart LR
     subgraph Services
@@ -107,6 +109,7 @@ flowchart LR
 ## Service Startup Order (within each deploy file)
 
 <figure>
+
 ```mermaid
 flowchart TD
     subgraph back ["Back / Single host"]
@@ -133,6 +136,7 @@ flowchart TD
 ## Network topolory
 <div id="net-top" style={{scrollMarginTop: '80px'}}></div>
 <figure>
+    
 ```mermaid
 flowchart TD
     subgraph h1[Host]
