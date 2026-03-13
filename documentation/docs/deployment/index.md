@@ -8,6 +8,7 @@ Services are connected with a docker network and locate each other using defined
 ## Compose files and deployment scripts
 
 <figure>
+    
 ```mermaid
 flowchart TD
     envMain[.env] --> |--env-file|csh[compose.sh]
