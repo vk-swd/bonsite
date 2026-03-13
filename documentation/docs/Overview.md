@@ -30,6 +30,10 @@ sequenceDiagram
 
 To make things interactive and leverage GraphQL, it was designed as a web application.
 
+The behavior of UI elements is described in a documentation overlay rendered in the application page. It is a page with input fields which is a simple grid with text elements. To find comments to UI elements in code search for "makeDocumented" in the frontend_builder/app/App.tsx
+
+
+
 
 
 

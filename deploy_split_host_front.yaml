@@ -53,7 +53,7 @@ services:
       - split_hosting_isolated_net
       - edge_net
   
-  split_host_front:
+  deploy:
     image: busybox
     depends_on:
       nginx_server:

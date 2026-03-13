@@ -128,7 +128,7 @@ services:
       - edge_net_backend
   
   
-  split_host_back:
+  deploy:
     image: busybox
     depends_on:
       db_initializer:

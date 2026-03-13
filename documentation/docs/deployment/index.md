@@ -57,16 +57,16 @@ CLOUDFLARE_SECRET is set at cloudflare dashboard and implementation instructions
 
 1. For split hosted bundles
 ``` 
-SPLIT_HOSTED=true docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_split_host_back.yaml up split_host_back
+SPLIT_HOSTED=true docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_split_host_back.yaml up deploy
 
-SPLIT_HOSTED=true docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_split_host_front.yaml up split_host_front
+SPLIT_HOSTED=true docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_split_host_front.yaml up deploy
 
 ```
 
 2. For single hosted bundle
 
 ```
-docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_single_host.yaml up deploy_single_host
+docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_single_host.yaml up deploy
 ```
 
 ## Compose files structure

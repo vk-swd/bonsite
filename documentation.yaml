@@ -1,0 +1,15 @@
+
+
+
+services:
+  docsite:
+    image: node:24-slim
+    container_name: docsite
+    volumes:
+      - ./documentation:/app
+      # - /tmpz/tmp/docsite/node_modules:/app/node_modules
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    tty: true
+    stdin_open: true

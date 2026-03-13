@@ -16,11 +16,10 @@ It is not a recursive call.
 
 It gradually empties all the buffered messages that were consumed from Kafka.
 
-As messages are consumed they are forwarded to the database with a "processBatch" callback given to the consumer when the subscription was being established (connectToKafka).
+As messages are consumed they are forwarded to the database with a "processBatch" callback.
+"processConsumedBatch" is provided as "processBatch" when the consumer subscribes to Kafka in "connectToKafka".
 
-The callback is the "processConsumedBatch" function, which makes database transaction writes of consumed batches and the Kafka offset.
-
-
+The "processConsumedBatch" function writes consumed batches and their Kafka offset to the database. The order of offsets within consumed partition is guaranteed by Kafka.
 
 
 ```mermaid

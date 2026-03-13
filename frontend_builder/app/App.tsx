@@ -1,10 +1,16 @@
 import React, { useRef, useState, Dispatch, SetStateAction } from "react";
-import Container from '@mui/material/Container';
-import Typography from '@mui/material/Typography';
-import TextField from '@mui/material/TextField';
+import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Container from '@mui/material/Container';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import Fab from '@mui/material/Fab';
 import Grid from '@mui/material/Grid';
 import Paper from '@mui/material/Paper';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 
 import { GenerationState, GenParametersValidator, ProgressReport } from "../../common/generator_parameters.js";
 import * as gqlp from "../../common/gqlDeclarations.js"
@@ -15,6 +21,43 @@ import { StatementChild, StatementContainer } from "./StatementList.js";
 import { fetchHandleAuth } from "../fetchHandleAuth.js";
 import { textInput } from "../elements.js";
 import { cacheBuster } from "../utils.js";
+
+// ---- Documentation Overlay ----
+function DocModal({ id, description, onClose }: { id: string; description: string; onClose: () => void }) {
+  const title = id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent>
+        <Typography sx={{ whiteSpace: "pre-wrap" }}>{description}</Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function Documented({ id, description, active, onDocClick, children }: {
+  id: string;
+  description: string;
+  active: boolean;
+  onDocClick: (id: string, description: string) => void;
+  children: React.ReactNode;
+}) {
+  if (!active) return <>{children}</>;
+  return (
+    <Box sx={{ position: "relative", outline: "2px solid", outlineColor: "primary.main" }}>
+      <Box
+        sx={{ position: "absolute", inset: 0, zIndex: 1, cursor: "pointer" }}
+        onClick={(e) => { e.stopPropagation(); onDocClick(id, description); }}
+      />
+      {children}
+    </Box>
+  );
+}
+// ---- End Documentation Overlay ----
+
 type UserOption = {
   value: string;
   label: string;
@@ -209,6 +252,10 @@ export default function App() {
     56 /* to match TextField height*/, initLoad.current);
   initLoad.current = false;
 
+  const [docModeActive, setDocModeActive] = useState(false);
+  const [docModal, setDocModal] = useState<{ id: string; description: string } | null>(null);
+  const handleDocClick = (id: string, description: string) => { setDocModal({ id, description }); setDocModeActive(false); };
+
   //------- Render statement ----------------
   const offset = useRef(0)
   const totalTransactionCount = useRef(0)
@@ -246,12 +293,32 @@ export default function App() {
     offset.current = Math.min(totalTransactionCount.current - statementMaxLines, offset.current + statementMaxLines);
     handleStatementFetch();
   }, offset.current > 0, transactions.length + offset.current < totalTransactionCount.current, userIdRef.current);
+  function makeDocumented(id: string, description: string, element: React.ReactNode) {
+    return <Documented id={id} description={description} active={docModeActive} onDocClick={handleDocClick}>
+        {element}
+    </Documented>
+  }
+  
   return (
+    <>
+      <Fab
+        size="small"
+        color={docModeActive ? "primary" : "default"}
+        onClick={() => setDocModeActive(v => !v)}
+        title={docModeActive ? "Exit documentation mode" : "Enter documentation mode"}
+        sx={{ position: "fixed", top: 16, right: 16, zIndex: 10000, whiteSpace: "pre-wrap" }}
+      >?</Fab>
+      {docModal !== null && (
+        <DocModal id={docModal.id} description={docModal.description} onClose={() => setDocModal(null)} />
+      )}
     <Container maxWidth="md" sx={{ py: 4 }}>
       {/* Create Transaction */}
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>
-          <a href="#" onClick={() => window.location.href = "/doc.html=" + cacheBuster()}>Back To Title Page</a>
+      {makeDocumented(
+        "create-transaction",
+        "Use this form to manually post a single financial transaction between two users. Transactions posted this way will be scheduled in between chunks produced during bulk generation.",
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Typography variant="h6" gutterBottom>
+            <a href="#" onClick={() => window.location.href = "/doc.html=" + cacheBuster()}>Back To Title Page</a>
         </Typography>
         <Typography variant="h6" gutterBottom>
           Create Transaction
@@ -268,7 +335,21 @@ export default function App() {
           </Grid>
         </Grid>
       </Paper>
+      )}
       {/* Generate Transactions */}
+      {makeDocumented("generate-transactions", 
+      "Use this panel to bulk-generate synthetic transactions for load testing.\n\n"+
+      "Date range would set the min and max transaction date that would be produced.\n"+
+      "The database would have a non-clustered index for the dates so them being out of order is (should be) fine.\n\n" +
+      "User count will define how many users will get involved.\n" +
+      "Users from and to will be then selected randomly for each transaction. Can even make a transaction for the same user.\n\n"+
+      "Min user Id is the value used for generator.\n" +
+      "It will generate the user ids from [Min user Id, Min user Id + User count] range.\n"+
+      "This could be useful if you want to separate a group of users for transaction generation.\n\n" +
+      "Min Transaction Id defines the value from which transaction ids will be generated.\n" +
+      "The Id value will increase by 1 for each transaction.\n" +
+      "This could be useful to test duplicate transaction handling, " +
+      "but also it was made configurable to make things more transparent.",
       <Paper sx={{ p: 3, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
           Generate Transactions
@@ -303,21 +384,38 @@ export default function App() {
           </Grid>
         </Grid>
       </Paper>
+      )}
 
       {/* Get Statement */}
+      {makeDocumented("get-statement",
+      "Use this panel to retrieve a paginated transaction statement for a specific user.",
       <Paper sx={{ p: 3, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
           Get Statement
         </Typography>
         <Grid container spacing={2}>
-          {[userSelectElement,
-            getStatementDateFromElement,
-            getStatementDateToElement].map((el, idx) =>
+          {[makeDocumented("User Selector",
+          "If nothing is in the list, try typing \"u\" and waiting a bit - list should be loaded.\n\n" + 
+          "Options are loaded when text changes and during page reload.\n\n" + 
+          "User selection does not close the drop down do allow selecting some other " + 
+          "option and to search other elements while having one selected.\n\n" +           
+          "When the user is selected, a minimum and maximum dates for transactions where he is a participant are inferred "+
+          "and written into the date selectors to the right.",userSelectElement),
+            makeDocumented("Date From", 
+              "The start date for the transaction statement. If a user is selected, this field will store minimum transaction date where he is a participant.", 
+              getStatementDateFromElement),
+             makeDocumented("Date To", 
+              "The end date for the transaction statement. If a user is selected, this field will store maximum transaction date where he is a participant.", 
+            getStatementDateToElement)].map((el, idx) =>
               <Grid item xs={12} sm={4} key={idx}>{el}</Grid>)}
           <Grid item xs={12}  key={10}>
-            <Button variant="contained" onClick={handleStatementFetch}>
-              Fetch Statement
-            </Button>
+            <Documented id="fetch-statement-button"
+              description="Triggers a fetch of the transaction statement for the currently selected user and date range. Results appear in the Output panel below. Use the prev/next controls to page through large result sets."
+              active={docModeActive} onDocClick={handleDocClick}>
+              <Button variant="contained" onClick={handleStatementFetch}>
+                Fetch Statement
+              </Button>
+            </Documented>
           </Grid>
           {/* <Grid item xs={12} key={11}>
             <Button variant="contained" onClick={handleStatementFetch}>
@@ -326,10 +424,16 @@ export default function App() {
           </Grid> */}
         </Grid>
       </Paper>
+      )}
       {/* Output */}
+      {makeDocumented("Transaction statement output", 
+      "Here a paginated list of transactions for the selected user and date range is displayed.\n\n" +
+      " If there are more then 100 transaction, two buttons will appear at the top and the bottom of the transaction list. Pressing them will request older or newer records.",
       <Paper sx={{ p: 3, mb: 4 }}>
         {transactionList}
       </Paper>
+      )}
     </Container>
+    </>
   );
 }
