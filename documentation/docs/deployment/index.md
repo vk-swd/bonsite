@@ -7,8 +7,6 @@ Services are connected with a docker network and locate each other using defined
 
 ## Compose files and deployment scripts
 
-
-
 Tpo deploy a project use the script deploy.py. It makes different modes of deployment using combinations of docker compose files:
 | Bundle | Contents |
 |--------|----------|
@@ -110,6 +108,7 @@ The following kinds of variables are used:
 Nothing will work unless those are provided.
 
 <figure>
+    
 ```
 CLOUDFLARE_SECRET="0xSOME_SECRET_CLOUDFLARE_SECRET"
 FRONTEND_DEPLOY_FOLDER_HOST="/FULL PATH TO A FOLDER/.../nginxfiles"
@@ -127,6 +126,7 @@ GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set and chosen at https://console.
 
 CLOUDFLARE_SECRET is set at cloudflare dashboard and implementation instructions are described at https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/
 
+
 ## Other configurable variables
 
 Those could be defined by user. Or default values will be used.
@@ -136,7 +136,6 @@ NGINX_HOST_ADDR - addr:port or port - which host addr to expose nginx at.
 NGINX_CONF_FILE - Nginx has 2 configuration files. One with the authorization and on without. By default the ./f.conf file is loaded - it contains authorization. The alternative value would be set by the deployment script.
 GRAFANA_EXPOSED_PORT_ADDR - addr:port or port - which host addr to expose Grafana at.
 ```
-
 
 ## How to start this
 
@@ -156,6 +155,7 @@ docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_single
 
 ## Compose files structure
 <figure>
+    
 ```mermaid
 flowchart LR
     subgraph Services
@@ -191,6 +191,7 @@ flowchart LR
 ## Service Startup Order (within each deploy file)
 
 <figure>
+
 ```mermaid
 flowchart TD
     subgraph back ["Back / Single host"]
@@ -217,6 +218,7 @@ flowchart TD
 ## Network topolory
 <div id="net-top" style={{scrollMarginTop: '80px'}}></div>
 <figure>
+    
 ```mermaid
 flowchart TD
     subgraph h1[Host]
