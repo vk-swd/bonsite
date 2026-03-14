@@ -1,10 +1,9 @@
 
 # BonSite
-A learning project to study different storage systems.
 
 This is an application made to explore GraphQL, Kafka and SQL Server.
 
-It consists of services described in  [Services](./services/index.md) and it's goal is to build a functional pipeline where events are posted  to a shared message queue and then stored persistently
+It consists of services described in  [Services](./services/index.md) and its goal is to build a functional pipeline where events are posted  to a shared message queue and then stored persistently
 
 
 🔗 Live Demo: https://bonsite.org

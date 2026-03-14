@@ -18,6 +18,7 @@ Tpo deploy a project use the script deploy.py. It makes different modes of deplo
 | Ftun   | frontend tunnel server (SSH reverse-tunnel entry point) |
 
 The modes of deployment are selected as shown below:
+
 <figure>
 
 ```mermaid
@@ -120,6 +121,7 @@ TUNNEL_CLIENT_SERVER_ADDR="192.168.1.10"
 GOOGLE_CLIENT_ID = "SOME_GOOGLE_CLIENT_ID"
 GOOGLE_CLIENT_SECRET = "SOME_SECRET_GOOGLE_CLIENT_SECRET"
 ```
+
 </figure>
 
 GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set and chosen at https://console.cloud.google.com/auth/clients
@@ -154,6 +156,7 @@ docker compose --env-file .env --env-file *file_of_your_choice* -f deploy_single
 ```
 
 ## Compose files structure
+
 <figure>
     
 ```mermaid
