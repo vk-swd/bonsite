@@ -15,6 +15,7 @@ networks:
 
 volumes:
   frontend_build_folder:
+    name: ${FRONTEND_BUILD_FOLDER_VOLUME_NAME:-frontend_build_folder}
   shared_dir:
     driver: local
     driver_opts:

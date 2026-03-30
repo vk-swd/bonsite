@@ -1,5 +1,5 @@
 volumes:
-  frontend_build_folder:
+  ${FRONTEND_BUILD_FOLDER_VOLUME_NAME}:
     external: true
 
 services:
@@ -9,7 +9,7 @@ services:
     env_file:
       - ../.env
     volumes:
-    - frontend_build_folder:${NGINX_FOLDER}
+    - ${FRONTEND_DEPLOY_FOLDER_HOST}:${NGINX_FOLDER}
     - ${NGINX_CONF_FILE}:${NGINX_ENVSUBST_TEMPLATE_DIR}/f.conf.template
     - ${LOG_MOUNT_HOST}:${LOG_MOUNT}
     ports:
