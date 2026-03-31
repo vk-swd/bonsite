@@ -9,7 +9,7 @@ services:
         file: ../base_services.yaml
         service: node_app
       env_file:
-        - ../.env
+        - ../${ALL_VARS_FILE_NAME}
       working_dir: ${WORKDIR}/${FRONTEND_NAME}
       command: ["npx webpack-cli --stats-error-details"]
       volumes:

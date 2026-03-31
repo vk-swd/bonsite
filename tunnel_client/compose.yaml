@@ -12,7 +12,7 @@ services:
     entrypoint: ["sh", "-c"]
     command: ["sh /activate.sh; exec sh"]
     env_file:
-      - ../.env
+      - ../${ALL_VARS_FILE_NAME}
     volumes:
       - ${TUNNEL_CLIENT_PRIVATE_KEY_TO_MOUNT}:${TUNNEL_CLIENT_MOUNTED_PRIVATE_KEY_NAME}:ro
       - ${TUNNEL_CLIENT_PUBLIC_KEY_TO_MOUNT}:${TUNNEL_CLIENT_MOUNTED_PUBLIC_KEY_NAME}:ro

@@ -228,7 +228,7 @@ def _assemble_command(
 
     ENV_FILES = [
         get_user_env_file(),
-        os.path.join(SCRIPT_DIR, "env"),
+        os.path.join(SCRIPT_DIR, os.environ.get("ALL_VARS_FILE_NAME", "env")),
     ]
     for env_file in ENV_FILES:
         if os.path.exists(env_file):

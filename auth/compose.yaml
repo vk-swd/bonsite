@@ -17,6 +17,6 @@ services:
     volumes:
     - ./:${WORKDIR}/${AUTH_APP_NAME}
     env_file:
-      - ../.env
+      - ../${ALL_VARS_FILE_NAME}
     environment:
       LOCALVAR: ${AUTH_APP_NAME}

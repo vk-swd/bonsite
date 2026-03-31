@@ -7,7 +7,7 @@ services:
     image: nginx:mainline-alpine3.22
     container_name: nginx_server
     env_file:
-      - ../.env
+      - ../${ALL_VARS_FILE_NAME}
     volumes:
     - ${FRONTEND_DEPLOY_FOLDER_HOST}:${NGINX_FOLDER}
     - ${NGINX_CONF_FILE}:${NGINX_ENVSUBST_TEMPLATE_DIR}/f.conf.template

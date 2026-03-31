@@ -13,7 +13,7 @@ services:
         - ./:${WORKDIR}/${STATEMENT_GENERATOR_NAME}
         - shared_dir:${SHARED_DIR}
       env_file:
-        - ../.env
+        - ../${ALL_VARS_FILE_NAME}
       hostname: "${STATEMENT_GENERATOR_HOST_NAME}"
       environment:
         LOCALVAR: ${STATEMENT_GENERATOR_NAME}

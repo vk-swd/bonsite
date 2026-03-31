@@ -9,7 +9,7 @@ services:
       - ./dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
       - ./dash1.json:/${GRAFANA_DASHBOARD_FOLDER}/dash1.json
     env_file:
-      - ../.env
+      - ../${ALL_VARS_FILE_NAME}
     tty: true
     stdin_open: true
     ports:

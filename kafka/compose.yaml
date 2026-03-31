@@ -11,7 +11,7 @@ services:
     working_dir: ${WORKDIR}
     tty: true
     env_file:
-      - ../.env
+      - ../${ALL_VARS_FILE_NAME}
     hostname: "${KAFKA_HOST_NAME}"
     healthcheck:
       test: ["CMD-SHELL", "/bin/bash", "-c nc -v -z ${KAFKA_HOST_NAME} ${KAFKA_PORT} &>> ~/kafka_healthcheck.log"]
