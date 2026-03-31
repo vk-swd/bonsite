@@ -8,6 +8,7 @@ It consists of services described in  [Services](./services/index.md) and it's g
 
 <div id="fig-over-1" style={{scrollMarginTop: '80px'}}></div>
 <figure>
+    
 ```mermaid
 sequenceDiagram
     participant user as User (Web)
