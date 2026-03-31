@@ -2,9 +2,6 @@
 services:
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    volumes:
-      - "${WORKDIR}"
-    working_dir: ${WORKDIR}
     tmpfs:
       - "/tmp"
     env_file:

@@ -1,7 +1,3 @@
-volumes:
-  ${FRONTEND_BUILD_FOLDER_VOLUME_NAME}:
-    external: true
-
 services:
   nginx_server:
     image: nginx:mainline-alpine3.22
